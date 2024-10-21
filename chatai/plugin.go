@@ -1,6 +1,7 @@
 package chatai
 
 import (
+	"chatai/chatai/model"
 	"github.com/kohmebot/plugin"
 	"github.com/kohmebot/plugin/pkg/command"
 	"github.com/kohmebot/plugin/pkg/version"
@@ -8,6 +9,9 @@ import (
 )
 
 type chatPlugin struct {
+	conf  Config
+	env   plugin.Env
+	batch *model.Batch
 }
 
 func NewPlugin() plugin.Plugin {
@@ -15,13 +19,20 @@ func NewPlugin() plugin.Plugin {
 }
 
 func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
-	//TODO implement me
-	panic("implement me")
+	c.env = env
+	err := env.GetConf(&c.conf)
+	if err != nil {
+		return err
+	}
+
+	c.SetOnAt(engine)
+
+	return nil
+
 }
 
 func (c *chatPlugin) Name() string {
-	//TODO implement me
-	panic("implement me")
+	return "chatai"
 }
 
 func (c *chatPlugin) Description() string {
