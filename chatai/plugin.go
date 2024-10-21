@@ -5,6 +5,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/model/tongyi"
 	"github.com/kohmebot/plugin"
 	"github.com/kohmebot/plugin/pkg/command"
+	"github.com/kohmebot/plugin/pkg/gopool"
 	"github.com/kohmebot/plugin/pkg/version"
 	"github.com/wdvxdr1123/ZeroBot"
 )
@@ -16,6 +17,7 @@ type chatPlugin struct {
 	gTicker        *GroupTicker
 	warmUpModel    model.LargeModel
 	joinGroupModel model.LargeModel
+	onBootModel    model.LargeModel
 }
 
 func NewPlugin() plugin.Plugin {
@@ -41,12 +43,19 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	c.batch = model.NewBatch(m, c.onResponse)
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
+	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens)
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnWarmup(engine)
 
 	return nil
 
+}
+
+func (c *chatPlugin) OnBoot() {
+	gopool.Go(func() {
+		c.onBoot()
+	})
 }
 
 func (c *chatPlugin) Name() string {
@@ -62,5 +71,5 @@ func (c *chatPlugin) Commands() command.Commands {
 }
 
 func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 14)
+	return version.NewVersion(0, 0, 15)
 }

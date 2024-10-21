@@ -5,6 +5,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/plugin/pkg/chain"
 	"github.com/kohmebot/plugin/pkg/gopool"
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
@@ -46,6 +47,7 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 		}
 
 		var texts []string
+		// TODO 对引用的消息历史组成记忆对话
 		for _, segment := range ctx.Event.Message {
 			if segment.Type != "text" {
 				continue
@@ -117,6 +119,10 @@ func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 			if err != nil {
 				return
 			}
+			if len(res.ErrorMsg) > 0 {
+				logrus.Warn(res.ErrorMsg)
+				return
+			}
 
 			var msgChain chain.MessageChain
 			msgChain.Join(message.At(ctx.Event.UserID))
@@ -125,6 +131,32 @@ func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 			ctx.Send(msgChain)
 		})
 
+	})
+}
+
+func (c *chatPlugin) onBoot() {
+	req := &model.Request{
+		Question: c.conf.OnBootConfig.Trigger,
+	}
+	res := &model.Response{}
+	err := c.warmUpModel.Request(req, res)
+	if err != nil {
+		c.env.RangeBot(func(ctx *zero.Ctx) bool {
+			c.env.Error(ctx, err)
+			return true
+		})
+		return
+	}
+	if len(res.ErrorMsg) > 0 {
+		logrus.Warn(res.ErrorMsg)
+		return
+	}
+	c.env.RangeBot(func(ctx *zero.Ctx) bool {
+		c.env.Groups().RangeGroup(func(group int64) bool {
+			ctx.SendGroupMessage(group, message.Text(res.Answer))
+			return true
+		})
+		return true
 	})
 }
 
@@ -192,6 +224,10 @@ func (c *chatPlugin) onWarmup(groupId int64) {
 			c.env.Error(ctx, err)
 			return true
 		})
+		return
+	}
+	if len(res.ErrorMsg) > 0 {
+		logrus.Warn(res.ErrorMsg)
 		return
 	}
 	c.env.RangeBot(func(ctx *zero.Ctx) bool {

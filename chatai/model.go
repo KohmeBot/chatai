@@ -40,5 +40,5 @@ func (r *UsageRecord) Allow(db *gorm.DB, limitInput int64, limitOutput int64) (b
 			return false, err
 		}
 	}
-	return r.UseInputToken < limitInput || r.UseOutputToken < limitOutput, nil
+	return r.UseInputToken < limitInput && r.UseOutputToken < limitOutput, nil
 }

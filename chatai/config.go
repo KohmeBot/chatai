@@ -21,8 +21,9 @@ type Config struct {
 	// 控制模型是否联网，如果对应模型支持的话
 	Online bool `mapstructure:"online"`
 
-	WarmGroupConfig `mapstructure:"warm_group_config"`
-	JoinGroupConfig `mapstructure:"join_group_config"`
+	WarmGroupConfig `mapstructure:"warm_group"`
+	JoinGroupConfig `mapstructure:"join_group"`
+	OnBootConfig    `mapstructure:"on_boot"`
 }
 
 // WarmGroupConfig 暖群配置
@@ -48,5 +49,15 @@ type JoinGroupConfig struct {
 	// 预输入提示词
 	Prompt string `mapstructure:"prompt"`
 	// 触发语句,用%s来代替新人的NickName
+	Trigger string `mapstructure:"trigger"`
+}
+
+// OnBootConfig 启动配置
+type OnBootConfig struct {
+	// 是否开启
+	Enable bool `mapstructure:"enable"`
+	// 预输入提示词
+	Prompt string `mapstructure:"prompt"`
+	// 触发语句
 	Trigger string `mapstructure:"trigger"`
 }
