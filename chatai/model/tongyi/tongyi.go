@@ -3,7 +3,6 @@ package tongyi
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
 	"io"
 	"net/http"
@@ -41,11 +40,15 @@ func NewTongYiModel(name string, apikey string, system string, online bool) mode
 	}
 }
 
-func (m *tongYiModel) Request(Request *model.Request, response *model.Response) error {
+func (m *tongYiModel) Request(request *model.Request, response *model.Response) error {
 
-	msg := make([]model.Message, len(Request.History)+1)
-	copy(msg[1:], Request.History)
+	msg := make([]model.Message, len(request.History)+2)
+	copy(msg[2:], request.History)
 	msg[0] = m.systemMsg
+	msg[1] = model.Message{
+		Role:    "user",
+		Content: request.Question,
+	}
 	requestBody := reqBody{
 		Model:        m.tongYiModelName,
 		Message:      msg,
@@ -75,11 +78,11 @@ func (m *tongYiModel) Request(Request *model.Request, response *model.Response) 
 	if err != nil {
 		return err
 	}
-	if responseBody.FinishReason != "stop" {
-		response.ErrorMsg = fmt.Sprintf("model unexpoect finish: %s", responseBody.FinishReason)
+	if responseBody.Error.Code != "" {
+		response.ErrorMsg = responseBody.Error.Message
 		return nil
 	}
-	response.Answer = responseBody.Choices[0].Message[0].Content
+	response.Answer = responseBody.Choices[0].Message.Content
 	response.InputToken = responseBody.PromptTokens
 	response.OutToken = responseBody.CompletionTokens
 

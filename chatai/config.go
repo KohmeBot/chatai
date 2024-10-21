@@ -14,6 +14,8 @@ type Config struct {
 	OutputToken int64 `mapstructure:"output_token"`
 	// 达到上限后的提示词
 	LimitTips string `mapstructure:"limit_tips"`
+	// 触发模型违规后的提示词
+	ErrorTips string `mapstructure:"error_tips"`
 
 	// 控制模型是否联网，如果对应模型支持的话
 	Online bool `mapstructure:"online"`

@@ -128,6 +128,15 @@ func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 	if err != nil {
 		return
 	}
+
+	if len(response.ErrorMsg) > 0 {
+		var msgChain chain.MessageChain
+		msgChain.Join(message.Reply(ctx.Event.MessageID))
+		msgChain.Split(message.At(ctx.Event.Sender.ID), message.Text(c.conf.ErrorTips))
+		ctx.Send(msgChain)
+		return
+	}
+
 	db, err := c.env.GetDB()
 	if err != nil {
 		return
