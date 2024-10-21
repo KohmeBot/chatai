@@ -2,11 +2,13 @@ package chatai
 
 import (
 	"chatai/chatai/model"
+	"fmt"
 	"github.com/kohmebot/plugin/pkg/chain"
 	"github.com/kohmebot/plugin/pkg/gopool"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
+	"strings"
 )
 
 func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
@@ -48,7 +50,12 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 			if segment.Type != "text" {
 				continue
 			}
-			texts = append(texts, segment.Data["text"])
+			val := segment.Data["text"]
+			val = strings.TrimSpace(val)
+			if len(val) <= 0 {
+				continue
+			}
+			texts = append(texts, val)
 		}
 		if len(texts) <= 0 {
 			return
@@ -57,6 +64,59 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 			GroupId: ctx.Event.GroupID,
 			UserId:  ctx.Event.Sender.ID,
 		}, texts)
+	})
+}
+
+func (c *chatPlugin) SetOnWarmup(engine *zero.Engine) {
+	if !c.conf.WarmGroupConfig.Enable {
+		return
+	}
+	engine.OnMessage().Handle(func(ctx *zero.Ctx) {
+		group := ctx.Event.GroupID
+		if group >= 0 {
+			c.gTicker.Update(group)
+		}
+	})
+}
+
+func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
+	if !c.conf.JoinGroupConfig.Enable {
+		return
+	}
+	engine.OnNotice(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
+		if ctx.Event.NoticeType != "group_increase" {
+			return
+		}
+		gopool.Go(func() {
+			var err error
+			defer func() {
+				if err != nil {
+					c.env.Error(ctx, err)
+				}
+			}()
+			info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
+
+			nickName, ok := info.Map()["nickname"]
+			if !ok {
+				err = fmt.Errorf("error fetch member info")
+				return
+			}
+			req := &model.Request{
+				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName),
+			}
+			res := &model.Response{}
+			err = c.warmUpModel.Request(req, res)
+			if err != nil {
+				return
+			}
+
+			var msgChain chain.MessageChain
+			msgChain.Line(message.At(ctx.Event.UserID))
+			msgChain.Join(message.Text(res.Answer))
+
+			ctx.Send(msgChain)
+		})
+
 	})
 }
 
@@ -92,4 +152,24 @@ func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 	msgChain.Join(message.Reply(ctx.Event.MessageID))
 	msgChain.Split(message.At(ctx.Event.Sender.ID), message.Text(response.Answer))
 	ctx.Send(msgChain)
+}
+
+func (c *chatPlugin) onWarmup(groupId int64) {
+	req := &model.Request{
+		Question: fmt.Sprintf(c.conf.WarmGroupConfig.Trigger, c.conf.WarmGroupConfig.Duration),
+	}
+	res := &model.Response{}
+	err := c.warmUpModel.Request(req, res)
+	if err != nil {
+		c.env.RangeBot(func(ctx *zero.Ctx) bool {
+			c.env.Error(ctx, err)
+			return true
+		})
+		return
+	}
+	c.env.RangeBot(func(ctx *zero.Ctx) bool {
+		ctx.SendGroupMessage(groupId, message.Text(res.Answer))
+		return true
+	})
+
 }

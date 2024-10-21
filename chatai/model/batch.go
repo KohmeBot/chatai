@@ -35,3 +35,7 @@ func (b *Batch) doRequest(ctx *zero.Ctx, questions []string) {
 	err := b.m.Request(req, resp)
 	b.on(ctx, req, resp, err)
 }
+
+func (b *Batch) GetModel() LargeModel {
+	return b.m
+}

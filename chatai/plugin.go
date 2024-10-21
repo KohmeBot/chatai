@@ -2,16 +2,21 @@ package chatai
 
 import (
 	"chatai/chatai/model"
+	"chatai/chatai/model/tongyi"
 	"github.com/kohmebot/plugin"
 	"github.com/kohmebot/plugin/pkg/command"
 	"github.com/kohmebot/plugin/pkg/version"
 	"github.com/wdvxdr1123/ZeroBot"
+	"time"
 )
 
 type chatPlugin struct {
-	conf  Config
-	env   plugin.Env
-	batch *model.Batch
+	conf           Config
+	env            plugin.Env
+	batch          *model.Batch
+	gTicker        *GroupTicker
+	warmUpModel    model.LargeModel
+	joinGroupModel model.LargeModel
 }
 
 func NewPlugin() plugin.Plugin {
@@ -24,9 +29,22 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
-
+	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online)
+	c.batch = model.NewBatch(m, c.onResponse)
+	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false)
+	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false)
 	c.SetOnAt(engine)
+	c.SetOnJoinGroup(engine)
+	c.SetOnWarmup(engine)
 
+	groups := c.conf.WarmGroupConfig.Groups
+	if len(groups) <= 0 {
+		c.env.Groups().RangeGroup(func(group int64) bool {
+			groups = append(groups, group)
+			return true
+		})
+	}
+	c.gTicker = NewGroupTicker(groups, time.Duration(c.conf.WarmGroupConfig.Duration)*time.Minute, c.onWarmup)
 	return nil
 
 }

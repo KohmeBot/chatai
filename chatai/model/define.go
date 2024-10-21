@@ -24,6 +24,8 @@ type Response struct {
 	InputToken int64
 	// 本次调用的输出token数量
 	OutToken int64
+	// 错误信息
+	ErrorMsg string
 }
 
 type LargeModel interface {

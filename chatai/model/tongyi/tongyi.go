@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type tongYiModel struct {
@@ -25,6 +26,7 @@ type tongYiModel struct {
 }
 
 func NewTongYiModel(name string, apikey string, system string, online bool) model.LargeModel {
+	name = strings.TrimPrefix(name, "tongyi:")
 	return &tongYiModel{
 		tongYiModelName: name,
 		apikey:          apikey,
@@ -45,8 +47,9 @@ func (m *tongYiModel) Request(Request *model.Request, response *model.Response) 
 	copy(msg[1:], Request.History)
 	msg[0] = m.systemMsg
 	requestBody := reqBody{
-		Model:   m.tongYiModelName,
-		Message: msg,
+		Model:        m.tongYiModelName,
+		Message:      msg,
+		EnableSearch: m.online,
 	}
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
@@ -73,7 +76,8 @@ func (m *tongYiModel) Request(Request *model.Request, response *model.Response) 
 		return err
 	}
 	if responseBody.FinishReason != "stop" {
-		return fmt.Errorf("model unexpoect finish: %s", responseBody.FinishReason)
+		response.ErrorMsg = fmt.Sprintf("model unexpoect finish: %s", responseBody.FinishReason)
+		return nil
 	}
 	response.Answer = responseBody.Choices[0].Message[0].Content
 	response.InputToken = responseBody.PromptTokens
