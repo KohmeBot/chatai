@@ -44,6 +44,7 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 				msgChain.Join(message.Text(" " + c.conf.LimitTips))
 				ctx.Send(msgChain)
 			})
+			return
 		}
 
 		var texts []string
