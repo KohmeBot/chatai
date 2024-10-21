@@ -71,5 +71,5 @@ func (c *chatPlugin) Commands() command.Commands {
 }
 
 func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 10)
+	return version.NewVersion(0, 0, 11)
 }
