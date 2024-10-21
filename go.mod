@@ -1,4 +1,4 @@
-module chatai
+module github.com/kohmebot/chatai
 
 go 1.23.1
 
