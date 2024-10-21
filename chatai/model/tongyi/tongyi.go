@@ -16,21 +16,23 @@ type tongYiModel struct {
 	apikey string
 	// 预输入设定
 	system string
-
-	online bool
+	// 最大token
+	maxTokens int
+	online    bool
 
 	apiKeyHeader string
 	systemMsg    model.Message
 	client       *http.Client
 }
 
-func NewTongYiModel(name string, apikey string, system string, online bool) model.LargeModel {
+func NewTongYiModel(name string, apikey string, system string, online bool, maxTokens int64) model.LargeModel {
 	name = strings.TrimPrefix(name, "tongyi:")
 	return &tongYiModel{
 		tongYiModelName: name,
 		apikey:          apikey,
 		system:          system,
 		online:          online,
+		maxTokens:       int(maxTokens),
 		apiKeyHeader:    "Bearer " + apikey,
 		systemMsg: model.Message{
 			Role:    "system",
@@ -53,6 +55,7 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 		Model:        m.tongYiModelName,
 		Message:      msg,
 		EnableSearch: m.online,
+		MaxTokens:    m.maxTokens,
 	}
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {

@@ -6,6 +6,7 @@ type reqBody struct {
 	Model        string          `json:"model"`
 	Message      []model.Message `json:"messages"`
 	EnableSearch bool            `json:"enable_search"`
+	MaxTokens    int             `json:"max_tokens"`
 }
 
 type respBody struct {

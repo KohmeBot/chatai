@@ -9,6 +9,7 @@ import (
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
 	"strings"
+	"time"
 )
 
 func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
@@ -39,7 +40,7 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 				var msgChain chain.MessageChain
 				msgChain.Join(message.Reply(ctx.Event.MessageID))
 				msgChain.Join(message.At(ctx.Event.Sender.ID))
-				msgChain.Join(message.Text(c.conf.LimitTips))
+				msgChain.Join(message.Text(" " + c.conf.LimitTips))
 				ctx.Send(msgChain)
 			})
 		}
@@ -110,8 +111,8 @@ func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 			}
 
 			var msgChain chain.MessageChain
-			msgChain.Line(message.At(ctx.Event.UserID))
-			msgChain.Join(message.Text(res.Answer))
+			msgChain.Join(message.At(ctx.Event.UserID))
+			msgChain.Join(message.Text(" " + res.Answer))
 
 			ctx.Send(msgChain)
 		})
@@ -132,7 +133,8 @@ func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 	if len(response.ErrorMsg) > 0 {
 		var msgChain chain.MessageChain
 		msgChain.Join(message.Reply(ctx.Event.MessageID))
-		msgChain.Split(message.At(ctx.Event.Sender.ID), message.Text(c.conf.ErrorTips))
+		msgChain.Join(message.At(ctx.Event.Sender.ID))
+		msgChain.Join(message.Text(" " + c.conf.ErrorTips))
 		ctx.Send(msgChain)
 		return
 	}
@@ -157,11 +159,21 @@ func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 
 	var msgChain chain.MessageChain
 	msgChain.Join(message.Reply(ctx.Event.MessageID))
-	msgChain.Split(message.At(ctx.Event.Sender.ID), message.Text(response.Answer))
+	msgChain.Join(message.At(ctx.Event.Sender.ID))
+	msgChain.Join(message.Text(" " + response.Answer))
 	ctx.Send(msgChain)
 }
 
 func (c *chatPlugin) onWarmup(groupId int64) {
+	if len(c.conf.DisableTimes) == 2 {
+		startTime := c.conf.DisableTimes[0]
+		endTime := c.conf.DisableTimes[1]
+		nowH := time.Now().Hour()
+		if nowH >= startTime && nowH <= endTime {
+			return
+		}
+	}
+
 	req := &model.Request{
 		Question: fmt.Sprintf(c.conf.WarmGroupConfig.Trigger, c.conf.WarmGroupConfig.Duration),
 	}

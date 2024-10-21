@@ -7,7 +7,8 @@ type Config struct {
 	ModelName string `mapstructure:"model_name"`
 	// apikey
 	ApiKey string `mapstructure:"api_key"`
-
+	// 最大输出Tokens限制
+	MaxTokens int64 `mapstructure:"max_tokens"`
 	// 每个人每天的output token上限
 	InputToken int64 `mapstructure:"input_token"`
 	// 每人每天的output token上限
@@ -36,6 +37,8 @@ type WarmGroupConfig struct {
 	Duration int64 `mapstructure:"duration"`
 	// 开启的群,若为空,则默认为所有群(插件定义内)启用
 	Groups []int64 `mapstructure:"groups"`
+	// 禁用时间段(几点到几点)
+	DisableTimes []int `mapstructure:"disable_times"`
 }
 
 // JoinGroupConfig 加群配置

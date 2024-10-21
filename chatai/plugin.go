@@ -38,10 +38,10 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
-	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online)
+	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens)
 	c.batch = model.NewBatch(m, c.onResponse)
-	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false)
-	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false)
+	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
+	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnWarmup(engine)
@@ -71,5 +71,5 @@ func (c *chatPlugin) Commands() command.Commands {
 }
 
 func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 12)
+	return version.NewVersion(0, 0, 13)
 }
