@@ -7,7 +7,6 @@ import (
 
 type UsageRecord struct {
 	UserId         int64 `gorm:"primaryKey"`
-	GroupId        int64 `gorm:"primaryKey"`
 	UseInputToken  int64
 	UseOutputToken int64
 	// 只有在刷新的时候更新

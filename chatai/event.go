@@ -28,8 +28,7 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 			return
 		}
 		record := UsageRecord{
-			GroupId: ctx.Event.GroupID,
-			UserId:  ctx.Event.Sender.ID,
+			UserId: ctx.Event.Sender.ID,
 		}
 		allow, err := record.Allow(db, c.conf.InputToken, c.conf.OutputToken)
 		if err != nil {
@@ -136,8 +135,7 @@ func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 
 	// 更新使用量
 	usage := &UsageRecord{
-		GroupId: ctx.Event.GroupID,
-		UserId:  ctx.Event.Sender.ID,
+		UserId: ctx.Event.Sender.ID,
 	}
 	// 批量更新不触发钩子
 	err = db.Model(&usage).UpdateColumns(map[string]interface{}{
