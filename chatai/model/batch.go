@@ -6,6 +6,25 @@ import (
 	"strings"
 )
 
+type BatchMap map[int64]Batch
+
+func NewBatchMap() BatchMap {
+	return BatchMap{}
+}
+func (b BatchMap) SetBatch(user int64, batch Batch) {
+	b[user] = batch
+}
+
+func (b BatchMap) GetBatch(user int64) (bmp Batch, ok bool) {
+	bmp, ok = b[user]
+	return
+}
+
+func (b BatchMap) Has(user int64) bool {
+	_, ok := b[user]
+	return ok
+}
+
 // Batch 异步批量提交大模型调用
 type Batch struct {
 	m  LargeModel
@@ -14,8 +33,8 @@ type Batch struct {
 
 type OnResponse func(ctx *zero.Ctx, request *Request, response *Response, err error)
 
-func NewBatch(m LargeModel, on OnResponse) *Batch {
-	return &Batch{
+func NewBatch(m LargeModel, on OnResponse) Batch {
+	return Batch{
 		m:  m,
 		on: on,
 	}

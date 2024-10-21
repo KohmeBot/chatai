@@ -29,14 +29,16 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 		if err != nil {
 			return
 		}
+		id := ctx.Event.Sender.ID
 		record := UsageRecord{
-			UserId: ctx.Event.Sender.ID,
+			UserId: id,
 		}
 		allow, err := record.Allow(db, c.conf.InputToken, c.conf.OutputToken)
 		if err != nil {
 			return
 		}
-		if !allow {
+		targetBatch, hasTarget := c.batchMp.GetBatch(id)
+		if !allow && !hasTarget {
 			gopool.Go(func() {
 				var msgChain chain.MessageChain
 				msgChain.Join(message.Reply(ctx.Event.MessageID))
@@ -63,10 +65,16 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 		if len(texts) <= 0 {
 			return
 		}
-		c.batch.Submit(ctx, model.Key{
+		key := model.Key{
 			GroupId: ctx.Event.GroupID,
-			UserId:  ctx.Event.Sender.ID,
-		}, texts)
+			UserId:  id,
+		}
+		if hasTarget {
+			targetBatch.Submit(ctx, key, texts)
+		} else {
+			c.batch.Submit(ctx, key, texts)
+		}
+
 	})
 }
 

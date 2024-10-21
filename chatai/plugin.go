@@ -13,7 +13,8 @@ import (
 type chatPlugin struct {
 	conf           Config
 	env            plugin.Env
-	batch          *model.Batch
+	batch          model.Batch
+	batchMp        model.BatchMap
 	gTicker        *GroupTicker
 	warmUpModel    model.LargeModel
 	joinGroupModel model.LargeModel
@@ -21,7 +22,9 @@ type chatPlugin struct {
 }
 
 func NewPlugin() plugin.Plugin {
-	return &chatPlugin{}
+	return &chatPlugin{
+		batchMp: model.NewBatchMap(),
+	}
 }
 
 func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
@@ -41,6 +44,11 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	}
 	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens)
 	c.batch = model.NewBatch(m, c.onResponse)
+	for user, prompt := range c.conf.PromptTarget {
+		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens)
+		b := model.NewBatch(tm, c.onResponse)
+		c.batchMp.SetBatch(user, b)
+	}
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens)
@@ -71,5 +79,5 @@ func (c *chatPlugin) Commands() command.Commands {
 }
 
 func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 16)
+	return version.NewVersion(0, 0, 20)
 }

@@ -40,6 +40,8 @@ type WarmGroupConfig struct {
 	Groups []int64 `mapstructure:"groups"`
 	// 禁用时间段(几点到几点)
 	DisableTimes []int `mapstructure:"disable_times"`
+	// 为qq号指定提示词
+	PromptTarget map[int64]string `mapstructure:"prompt_target"`
 }
 
 // JoinGroupConfig 加群配置
