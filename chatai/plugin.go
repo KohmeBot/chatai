@@ -63,16 +63,13 @@ func (c *chatPlugin) Name() string {
 }
 
 func (c *chatPlugin) Description() string {
-	//TODO implement me
-	panic("implement me")
+	return "@我和我聊天吧!"
 }
 
 func (c *chatPlugin) Commands() command.Commands {
-	//TODO implement me
-	panic("implement me")
+	return command.NewCommands()
 }
 
 func (c *chatPlugin) Version() version.Version {
-	//TODO implement me
-	panic("implement me")
+	return version.NewVersion(0, 0, 10)
 }
