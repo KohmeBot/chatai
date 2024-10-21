@@ -135,6 +135,10 @@ func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 }
 
 func (c *chatPlugin) onBoot() {
+	if !c.conf.OnBootConfig.Enable {
+		return
+	}
+
 	req := &model.Request{
 		Question: c.conf.OnBootConfig.Trigger,
 	}
