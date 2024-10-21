@@ -2,9 +2,9 @@ package tongyi
 
 import (
 	"bytes"
-	"chatai/chatai/model"
 	"encoding/json"
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/model"
 	"io"
 	"net/http"
 	"strings"

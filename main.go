@@ -1,7 +1,7 @@
 package main
 
 import (
-	"chatai/chatai"
+	"github.com/kohmebot/chatai/chatai"
 	"github.com/kohmebot/plugin"
 )
 

@@ -1,8 +1,8 @@
 package chatai
 
 import (
-	"chatai/chatai/model"
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/plugin/pkg/chain"
 	"github.com/kohmebot/plugin/pkg/gopool"
 	zero "github.com/wdvxdr1123/ZeroBot"

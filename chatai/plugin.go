@@ -1,8 +1,8 @@
 package chatai
 
 import (
-	"chatai/chatai/model"
-	"chatai/chatai/model/tongyi"
+	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/kohmebot/chatai/chatai/model/tongyi"
 	"github.com/kohmebot/plugin"
 	"github.com/kohmebot/plugin/pkg/command"
 	"github.com/kohmebot/plugin/pkg/version"

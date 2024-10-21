@@ -1,6 +1,6 @@
 package tongyi
 
-import "chatai/chatai/model"
+import "github.com/kohmebot/chatai/chatai/model"
 
 type reqBody struct {
 	Model        string          `json:"model"`
