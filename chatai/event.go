@@ -71,6 +71,14 @@ func (c *chatPlugin) SetOnWarmup(engine *zero.Engine) {
 	if !c.conf.WarmGroupConfig.Enable {
 		return
 	}
+	groups := c.conf.WarmGroupConfig.Groups
+	if len(groups) <= 0 {
+		c.env.Groups().RangeGroup(func(group int64) bool {
+			groups = append(groups, group)
+			return true
+		})
+	}
+	c.gTicker = NewGroupTicker(groups, time.Duration(c.conf.WarmGroupConfig.Duration)*time.Minute, c.onWarmup)
 	engine.OnMessage().Handle(func(ctx *zero.Ctx) {
 		group := ctx.Event.GroupID
 		if group >= 0 {

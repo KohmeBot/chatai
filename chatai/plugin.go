@@ -7,7 +7,6 @@ import (
 	"github.com/kohmebot/plugin/pkg/command"
 	"github.com/kohmebot/plugin/pkg/version"
 	"github.com/wdvxdr1123/ZeroBot"
-	"time"
 )
 
 type chatPlugin struct {
@@ -46,14 +45,6 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	c.SetOnJoinGroup(engine)
 	c.SetOnWarmup(engine)
 
-	groups := c.conf.WarmGroupConfig.Groups
-	if len(groups) <= 0 {
-		c.env.Groups().RangeGroup(func(group int64) bool {
-			groups = append(groups, group)
-			return true
-		})
-	}
-	c.gTicker = NewGroupTicker(groups, time.Duration(c.conf.WarmGroupConfig.Duration)*time.Minute, c.onWarmup)
 	return nil
 
 }
@@ -71,5 +62,5 @@ func (c *chatPlugin) Commands() command.Commands {
 }
 
 func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 13)
+	return version.NewVersion(0, 0, 14)
 }
