@@ -29,6 +29,15 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
+
+	db, err := env.GetDB()
+	if err != nil {
+		return err
+	}
+	err = db.AutoMigrate(&UsageRecord{})
+	if err != nil {
+		return err
+	}
 	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online)
 	c.batch = model.NewBatch(m, c.onResponse)
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false)
