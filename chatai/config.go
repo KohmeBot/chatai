@@ -17,6 +17,8 @@ type Config struct {
 	LimitTips string `mapstructure:"limit_tips"`
 	// 触发模型违规后的提示词
 	ErrorTips string `mapstructure:"error_tips"`
+	// 为qq号指定提示词
+	PromptTarget map[int64]string `mapstructure:"prompt_target"`
 
 	// 控制模型是否联网，如果对应模型支持的话
 	Online bool `mapstructure:"online"`
@@ -40,8 +42,6 @@ type WarmGroupConfig struct {
 	Groups []int64 `mapstructure:"groups"`
 	// 禁用时间段(几点到几点)
 	DisableTimes []int `mapstructure:"disable_times"`
-	// 为qq号指定提示词
-	PromptTarget map[int64]string `mapstructure:"prompt_target"`
 }
 
 // JoinGroupConfig 加群配置

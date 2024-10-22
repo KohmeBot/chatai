@@ -7,6 +7,7 @@ import (
 	"github.com/kohmebot/plugin/pkg/command"
 	"github.com/kohmebot/plugin/pkg/gopool"
 	"github.com/kohmebot/plugin/pkg/version"
+	"github.com/sirupsen/logrus"
 	"github.com/wdvxdr1123/ZeroBot"
 )
 
@@ -48,6 +49,7 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens)
 		b := model.NewBatch(tm, c.onResponse)
 		c.batchMp.SetBatch(user, b)
+		logrus.Infof("init prompt %s for %d", prompt, user)
 	}
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
@@ -79,5 +81,5 @@ func (c *chatPlugin) Commands() command.Commands {
 }
 
 func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 20)
+	return version.NewVersion(0, 0, 21)
 }
