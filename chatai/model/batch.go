@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/kohmebot/plugin/pkg/gopool"
+	"github.com/kohmebot/pkg/gopool"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"strings"
 )

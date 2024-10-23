@@ -3,8 +3,8 @@ package chatai
 import (
 	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
-	"github.com/kohmebot/plugin/pkg/chain"
-	"github.com/kohmebot/plugin/pkg/gopool"
+	"github.com/kohmebot/pkg/chain"
+	"github.com/kohmebot/pkg/gopool"
 	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"

@@ -3,7 +3,8 @@ module github.com/kohmebot/chatai
 go 1.23.1
 
 require (
-	github.com/kohmebot/plugin v1.2.3
+	github.com/kohmebot/pkg v1.0.0
+	github.com/kohmebot/plugin v1.2.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/wdvxdr1123/ZeroBot v1.7.5
 	gorm.io/gorm v1.25.12

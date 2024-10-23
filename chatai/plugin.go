@@ -1,12 +1,13 @@
 package chatai
 
 import (
+	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/tongyi"
+	"github.com/kohmebot/pkg/command"
+	"github.com/kohmebot/pkg/gopool"
+	"github.com/kohmebot/pkg/version"
 	"github.com/kohmebot/plugin"
-	"github.com/kohmebot/plugin/pkg/command"
-	"github.com/kohmebot/plugin/pkg/gopool"
-	"github.com/kohmebot/plugin/pkg/version"
 	"github.com/sirupsen/logrus"
 	"github.com/wdvxdr1123/ZeroBot"
 )
@@ -76,10 +77,10 @@ func (c *chatPlugin) Description() string {
 	return "@我和我聊天吧!"
 }
 
-func (c *chatPlugin) Commands() command.Commands {
+func (c *chatPlugin) Commands() fmt.Stringer {
 	return command.NewCommands()
 }
 
-func (c *chatPlugin) Version() version.Version {
-	return version.NewVersion(0, 0, 21)
+func (c *chatPlugin) Version() uint64 {
+	return uint64(version.NewVersion(0, 0, 30))
 }

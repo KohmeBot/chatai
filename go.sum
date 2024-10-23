@@ -7,8 +7,10 @@ github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=
 github.com/jinzhu/now v1.1.5 h1:/o9tlHleP7gOFmsnYNz3RGnqzefHA47wQpKrrdTIwXQ=
 github.com/jinzhu/now v1.1.5/go.mod h1:d3SSVoowX0Lcu0IBviAWJpolVfI5UJVZZ7cO71lE/z8=
-github.com/kohmebot/plugin v1.2.3 h1:lqXuBygMRVLS/pcfJ7tPSLBaPJkKes/Z9whD7chHvWI=
-github.com/kohmebot/plugin v1.2.3/go.mod h1:GIjgGaJ19/mhyPwdgtqNrDc1vS1/oIo8m37R3SJrR0U=
+github.com/kohmebot/pkg v1.0.0 h1:1w7WxUReB3T+1Z+uOjpraBNCsaM+Y5i1tpVRVFTy5RU=
+github.com/kohmebot/pkg v1.0.0/go.mod h1:c5XINE8a+assWN4qWM0NlFhZ05E/fYbL+SFq3gfibvk=
+github.com/kohmebot/plugin v1.2.5 h1:pBIGipMT8c1ivYdvGWoG1mMVXnoPFw40VkOGKANeya0=
+github.com/kohmebot/plugin v1.2.5/go.mod h1:MtJnzIjJEKM5zYdDQlbxNUaCIUMv7RRhfGcfaQhYd/Q=
 github.com/panjf2000/ants/v2 v2.10.0 h1:zhRg1pQUtkyRiOFo2Sbqwjp0GfBNo9cUY2/Grpx1p+8=
 github.com/panjf2000/ants/v2 v2.10.0/go.mod h1:7ZxyxsqE4vvW0M7LSD8aI3cKwgFhBHbxnlN8mDqHa1I=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
