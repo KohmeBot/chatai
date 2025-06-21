@@ -12,7 +12,7 @@ import (
 	"github.com/wdvxdr1123/ZeroBot"
 )
 
-type chatPlugin struct {
+type ChatPlugin struct {
 	conf           Config
 	env            plugin.Env
 	batch          model.Batch
@@ -24,12 +24,17 @@ type chatPlugin struct {
 }
 
 func NewPlugin() plugin.Plugin {
-	return &chatPlugin{
+	return &ChatPlugin{
 		batchMp: model.NewBatchMap(),
 	}
 }
 
-func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
+func (c *ChatPlugin) NewBatch(on model.OnResponse) model.Batch {
+	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens)
+	return model.NewBatch(m, on)
+}
+
+func (c *ChatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	c.env = env
 	err := env.GetConf(&c.conf)
 	if err != nil {
@@ -55,6 +60,7 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens)
+
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnWarmup(engine)
@@ -63,24 +69,24 @@ func (c *chatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 
 }
 
-func (c *chatPlugin) OnBoot() {
+func (c *ChatPlugin) OnBoot() {
 	gopool.Go(func() {
 		c.onBoot()
 	})
 }
 
-func (c *chatPlugin) Name() string {
+func (c *ChatPlugin) Name() string {
 	return "chatai"
 }
 
-func (c *chatPlugin) Description() string {
+func (c *ChatPlugin) Description() string {
 	return "@我和我聊天吧!"
 }
 
-func (c *chatPlugin) Commands() fmt.Stringer {
+func (c *ChatPlugin) Commands() fmt.Stringer {
 	return command.NewCommands()
 }
 
-func (c *chatPlugin) Version() uint64 {
-	return uint64(version.NewVersion(0, 0, 30))
+func (c *ChatPlugin) Version() uint64 {
+	return uint64(version.NewVersion(0, 0, 35))
 }

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnAt(engine *zero.Engine) {
 	engine.OnMessage(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
 		// 只处理at消息
 		if !ctx.Event.IsToMe {
@@ -78,7 +78,7 @@ func (c *chatPlugin) SetOnAt(engine *zero.Engine) {
 	})
 }
 
-func (c *chatPlugin) SetOnWarmup(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnWarmup(engine *zero.Engine) {
 	if !c.conf.WarmGroupConfig.Enable {
 		return
 	}
@@ -98,7 +98,7 @@ func (c *chatPlugin) SetOnWarmup(engine *zero.Engine) {
 	})
 }
 
-func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 	if !c.conf.JoinGroupConfig.Enable {
 		return
 	}
@@ -143,7 +143,7 @@ func (c *chatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 	})
 }
 
-func (c *chatPlugin) onBoot() {
+func (c *ChatPlugin) onBoot() {
 	if !c.conf.OnBootConfig.Enable {
 		return
 	}
@@ -173,7 +173,7 @@ func (c *chatPlugin) onBoot() {
 	})
 }
 
-func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response *model.Response, err error) {
+func (c *ChatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response *model.Response, err error) {
 	defer func() {
 		if err != nil {
 			c.env.Error(ctx, err)
@@ -217,7 +217,7 @@ func (c *chatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 	ctx.Send(msgChain)
 }
 
-func (c *chatPlugin) onWarmup(groupId int64) {
+func (c *ChatPlugin) onWarmup(groupId int64) {
 	if len(c.conf.DisableTimes) == 2 {
 		startTime := c.conf.DisableTimes[0]
 		endTime := c.conf.DisableTimes[1]
