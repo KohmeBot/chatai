@@ -91,5 +91,5 @@ func (c *ChatPlugin) Commands() fmt.Stringer {
 }
 
 func (c *ChatPlugin) Version() uint64 {
-	return uint64(version.NewVersion(0, 0, 40))
+	return uint64(version.NewVersion(0, 0, 41))
 }

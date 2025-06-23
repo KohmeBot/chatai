@@ -187,7 +187,9 @@ func (c *ChatPlugin) SetOnPoke(engine *zero.Engine) {
 
 			ctx.Send(msgChain)
 			time.Sleep(time.Second)
-			ctx.Send(message.Poke(ctx.Event.UserID))
+			msgChain = chain.MessageChain{}
+			msgChain.Join(message.Poke(ctx.Event.UserID))
+			ctx.Send(msgChain)
 
 		})
 
