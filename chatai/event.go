@@ -9,7 +9,6 @@ import (
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -188,14 +187,9 @@ func (c *ChatPlugin) SetOnPoke(engine *zero.Engine) {
 
 			ctx.Send(msgChain)
 			time.Sleep(time.Second)
-			segment := message.MessageSegment{
-				Type: "poke",
-				Data: map[string]string{
-					"type": strconv.FormatInt(1, 10),
-					"id":   strconv.FormatInt(ctx.Event.UserID, 10),
-				},
-			}
-			ctx.SendChain(segment)
+
+			// send_poke为napcat的私有接口，并不遵循onebot11标准，在非napcat上可能会报错
+			ctx.CallAction("send_poke", zero.Params{"group_id": ctx.Event.GroupID, "user_id": ctx.Event.UserID})
 
 		})
 
