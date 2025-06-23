@@ -124,7 +124,7 @@ func (c *ChatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName),
 			}
 			res := &model.Response{}
-			err = c.warmUpModel.Request(req, res)
+			err = c.joinGroupModel.Request(req, res)
 			if err != nil {
 				return
 			}
@@ -138,6 +138,57 @@ func (c *ChatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 			msgChain.Join(message.Text(" " + res.Answer))
 
 			ctx.Send(msgChain)
+		})
+
+	})
+}
+
+func (c *ChatPlugin) SetOnPoke(engine *zero.Engine) {
+	if !c.conf.PokeGroupConfig.Enable {
+		return
+	}
+	engine.OnNotice(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
+		if ctx.Event.SubType != "poke" {
+			return
+		}
+		if !ctx.Event.IsToMe {
+			return
+		}
+		gopool.Go(func() {
+			var err error
+			defer func() {
+				if err != nil {
+					c.env.Error(ctx, err)
+				}
+			}()
+			info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
+
+			nickName, ok := info.Map()["nickname"]
+			if !ok {
+				err = fmt.Errorf("error fetch member info")
+				return
+			}
+			req := &model.Request{
+				Question: fmt.Sprintf(c.conf.PokeGroupConfig.Trigger, nickName),
+			}
+			res := &model.Response{}
+			err = c.pokeModel.Request(req, res)
+			if err != nil {
+				return
+			}
+			if len(res.ErrorMsg) > 0 {
+				logrus.Warn(res.ErrorMsg)
+				return
+			}
+
+			var msgChain chain.MessageChain
+			msgChain.Join(message.At(ctx.Event.UserID))
+			msgChain.Join(message.Text(" " + res.Answer))
+
+			ctx.Send(msgChain)
+			time.Sleep(time.Second)
+			ctx.Send(message.Poke(ctx.Event.UserID))
+
 		})
 
 	})

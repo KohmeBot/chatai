@@ -25,6 +25,7 @@ type Config struct {
 
 	WarmGroupConfig `mapstructure:"warm_group"`
 	JoinGroupConfig `mapstructure:"join_group"`
+	PokeGroupConfig `mapstructure:"poke_group"`
 	OnBootConfig    `mapstructure:"on_boot"`
 }
 
@@ -51,6 +52,15 @@ type JoinGroupConfig struct {
 	// 预输入提示词
 	Prompt string `mapstructure:"prompt"`
 	// 触发语句,用%s来代替新人的NickName
+	Trigger string `mapstructure:"trigger"`
+}
+
+type PokeGroupConfig struct {
+	// 是否开启
+	Enable bool `mapstructure:"enable"`
+	// 预输入提示词
+	Prompt string `mapstructure:"prompt"`
+	// 触发语句,用%s来代替NickName
 	Trigger string `mapstructure:"trigger"`
 }
 

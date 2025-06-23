@@ -20,6 +20,7 @@ type ChatPlugin struct {
 	gTicker        *GroupTicker
 	warmUpModel    model.LargeModel
 	joinGroupModel model.LargeModel
+	pokeModel      model.LargeModel
 	onBootModel    model.LargeModel
 }
 
@@ -59,10 +60,12 @@ func (c *ChatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	}
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
+	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens)
 
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
+	c.SetOnPoke(engine)
 	c.SetOnWarmup(engine)
 
 	return nil
@@ -88,5 +91,5 @@ func (c *ChatPlugin) Commands() fmt.Stringer {
 }
 
 func (c *ChatPlugin) Version() uint64 {
-	return uint64(version.NewVersion(0, 0, 35))
+	return uint64(version.NewVersion(0, 0, 40))
 }
