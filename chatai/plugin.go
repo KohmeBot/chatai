@@ -1,6 +1,7 @@
 package chatai
 
 import (
+	"errors"
 	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/tongyi"
@@ -22,6 +23,8 @@ type ChatPlugin struct {
 	joinGroupModel model.LargeModel
 	pokeModel      model.LargeModel
 	onBootModel    model.LargeModel
+
+	otherModel model.LargeModel
 }
 
 func NewPlugin() plugin.Plugin {
@@ -30,9 +33,20 @@ func NewPlugin() plugin.Plugin {
 	}
 }
 
-func (c *ChatPlugin) NewBatch(on model.OnResponse) model.Batch {
-	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens)
-	return model.NewBatch(m, on)
+func (c *ChatPlugin) DoRequest(req string) (string, error) {
+	request := &model.Request{
+		Question: req,
+	}
+	resp := &model.Response{}
+	err := c.otherModel.Request(request, resp)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.ErrorMsg) > 0 {
+		return "", errors.New(resp.ErrorMsg)
+	}
+	return resp.Answer, nil
+
 }
 
 func (c *ChatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
@@ -63,6 +77,8 @@ func (c *ChatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
 	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens)
 	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens)
 
+	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens)
+
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnPoke(engine)
@@ -91,5 +107,5 @@ func (c *ChatPlugin) Commands() fmt.Stringer {
 }
 
 func (c *ChatPlugin) Version() uint64 {
-	return uint64(version.NewVersion(0, 0, 45))
+	return uint64(version.NewVersion(0, 0, 55))
 }

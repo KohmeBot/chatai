@@ -2,17 +2,28 @@ package chataisdk
 
 import (
 	"fmt"
-	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/plugin"
 	"reflect"
 )
 
-func NewBatch(env plugin.Env, on model.OnResponse) (model.Batch, error) {
+type ChatAIInvoker struct {
+	v reflect.Value
+}
+
+func NewChatAIInvoker(env plugin.Env) (*ChatAIInvoker, error) {
 	p, ok := env.GetPlugin("chatai")
 	if !ok {
-		return model.Batch{}, fmt.Errorf("chatai plugin not found")
+		return nil, fmt.Errorf("chatai plugin not found")
 	}
-	val := reflect.ValueOf(p)
-	b := val.MethodByName("NewBatch").Call([]reflect.Value{reflect.ValueOf(on)})[0].Interface().(model.Batch)
-	return b, nil
+	return &ChatAIInvoker{
+		v: reflect.ValueOf(p),
+	}, nil
+}
+
+func (c *ChatAIInvoker) DoRequest(req string) (string, error) {
+	res := c.v.MethodByName("DoRequest").Call([]reflect.Value{reflect.ValueOf(req)})
+	if len(res) != 2 {
+		return "", fmt.Errorf("DoRequest method not found")
+	}
+	return res[0].Interface().(string), res[1].Interface().(error)
 }
