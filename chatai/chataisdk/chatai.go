@@ -25,5 +25,9 @@ func (c *ChatAIInvoker) DoRequest(req string) (string, error) {
 	if len(res) != 2 {
 		return "", fmt.Errorf("DoRequest method not found")
 	}
-	return res[0].Interface().(string), res[1].Interface().(error)
+	resp := res[0].Interface().(string)
+	if res[1].IsNil() {
+		return resp, nil
+	}
+	return resp, res[1].Interface().(error)
 }
