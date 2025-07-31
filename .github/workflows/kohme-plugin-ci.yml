@@ -1,0 +1,100 @@
+name: KohmeBot Plugin CI
+
+on:
+  push:
+    branches: [ "dev" ]
+  pull_request:
+    branches: [ "dev" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install semver
+        run: npm install semver
+
+      - name: Get Plugin Version
+        id: version
+        shell: bash
+        run: |
+          MODULE=$(grep '^module ' go.mod | awk '{print $2}')
+          PKGNAME=${MODULE##*/}
+          FULL_IMPORT="$MODULE/$PKGNAME"
+
+          cat <<EOF > version.go
+          package main
+
+          import (
+              "fmt"
+              "$FULL_IMPORT"
+              "github.com/kohmebot/pkg/version"
+          )
+
+          func main() {
+              p := $PKGNAME.NewPlugin()
+              fmt.Println(version.Version(p.Version()).String())
+          }
+          EOF
+
+          go mod tidy
+          go build -o get-version version.go
+          VERSION=$(./get-version)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"
+          git checkout .
+
+      - name: Check version increment
+        uses: actions/github-script@v6
+        id: check_version
+        with:
+          script: |
+            const semver = require('semver');
+            const newVersion = '${{ steps.version.outputs.version }}';
+
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 1,
+            });
+
+            if (releases.data.length === 0) {
+              console.log('No previous release found, allow.');
+              return;
+            }
+
+            const latestVersion = releases.data[0].tag_name;
+
+            console.log(`Latest release: ${latestVersion}`);
+            console.log(`New version: ${newVersion}`);
+
+            if (!semver.valid(newVersion)) {
+              core.setFailed(`New version (${newVersion}) is not a valid semver.`);
+              return;
+            }
+
+            if (!semver.valid(latestVersion)) {
+              console.log(`Latest release version (${latestVersion}) is invalid semver, skipping check.`);
+              return;
+            }
+
+            if (semver.lte(newVersion, latestVersion)) {
+              core.setFailed(`New version (${newVersion}) is not greater than latest release version (${latestVersion})`);
+            }
+
+      - name: Release
+        if: success()  # 只有校验成功才执行
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: ${{ github.event.head_commit.message }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
