@@ -11,6 +11,7 @@ github.com/kohmebot/pkg v1.0.2 h1:w+wzrdfM4uZfruos4kjkBE127nWB9n96I9J3TU6zKMs=
 github.com/kohmebot/pkg v1.0.2/go.mod h1:lBzLMdnCgnJjiEzgBRn2brSDLju0V4gvjx4AFVIJii4=
 github.com/kohmebot/plugin v1.2.5 h1:pBIGipMT8c1ivYdvGWoG1mMVXnoPFw40VkOGKANeya0=
 github.com/kohmebot/plugin v1.2.5/go.mod h1:MtJnzIjJEKM5zYdDQlbxNUaCIUMv7RRhfGcfaQhYd/Q=
+github.com/kohmebot/plugin/v2 v2.0.1/go.mod h1:clrLaDbymWohiWuZUGZypPvFm5w4qXmPPvX1aGPGU98=
 github.com/panjf2000/ants/v2 v2.10.0 h1:zhRg1pQUtkyRiOFo2Sbqwjp0GfBNo9cUY2/Grpx1p+8=
 github.com/panjf2000/ants/v2 v2.10.0/go.mod h1:7ZxyxsqE4vvW0M7LSD8aI3cKwgFhBHbxnlN8mDqHa1I=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

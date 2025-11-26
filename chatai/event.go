@@ -5,6 +5,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/pkg/chain"
 	"github.com/kohmebot/pkg/gopool"
+	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-func (c *ChatPlugin) SetOnAt(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 	engine.OnMessage(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
 		// 只处理at消息
 		if !ctx.Event.IsToMe {
@@ -78,13 +79,13 @@ func (c *ChatPlugin) SetOnAt(engine *zero.Engine) {
 	})
 }
 
-func (c *ChatPlugin) SetOnWarmup(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnWarmup(engine plugin.Engine) {
 	if !c.conf.WarmGroupConfig.Enable {
 		return
 	}
 	groups := c.conf.WarmGroupConfig.Groups
 	if len(groups) <= 0 {
-		c.env.Groups().RangeGroup(func(group int64) bool {
+		c.env.Groups().RangeGroup()(func(group int64) bool {
 			groups = append(groups, group)
 			return true
 		})
@@ -98,7 +99,7 @@ func (c *ChatPlugin) SetOnWarmup(engine *zero.Engine) {
 	})
 }
 
-func (c *ChatPlugin) SetOnJoinGroup(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnJoinGroup(engine plugin.Engine) {
 	if !c.conf.JoinGroupConfig.Enable {
 		return
 	}
@@ -143,7 +144,7 @@ func (c *ChatPlugin) SetOnJoinGroup(engine *zero.Engine) {
 	})
 }
 
-func (c *ChatPlugin) SetOnPoke(engine *zero.Engine) {
+func (c *ChatPlugin) SetOnPoke(engine plugin.Engine) {
 	if !c.conf.PokeGroupConfig.Enable {
 		return
 	}
@@ -207,9 +208,8 @@ func (c *ChatPlugin) onBoot() {
 	res := &model.Response{}
 	err := c.warmUpModel.Request(req, res)
 	if err != nil {
-		c.env.RangeBot(func(ctx *zero.Ctx) bool {
+		c.env.UseBot(func(ctx *zero.Ctx) {
 			c.env.Error(ctx, err)
-			return true
 		})
 		return
 	}
@@ -217,12 +217,12 @@ func (c *ChatPlugin) onBoot() {
 		logrus.Warn(res.ErrorMsg)
 		return
 	}
-	c.env.RangeBot(func(ctx *zero.Ctx) bool {
-		c.env.Groups().RangeGroup(func(group int64) bool {
+	c.env.UseBot(func(ctx *zero.Ctx) {
+		c.env.Groups().RangeGroup()(func(group int64) bool {
 			ctx.SendGroupMessage(group, message.Text(res.Answer))
 			return true
 		})
-		return true
+
 	})
 }
 
@@ -286,9 +286,9 @@ func (c *ChatPlugin) onWarmup(groupId int64) {
 	res := &model.Response{}
 	err := c.warmUpModel.Request(req, res)
 	if err != nil {
-		c.env.RangeBot(func(ctx *zero.Ctx) bool {
+		c.env.UseBot(func(ctx *zero.Ctx) {
 			c.env.Error(ctx, err)
-			return true
+
 		})
 		return
 	}
@@ -296,9 +296,9 @@ func (c *ChatPlugin) onWarmup(groupId int64) {
 		logrus.Warn(res.ErrorMsg)
 		return
 	}
-	c.env.RangeBot(func(ctx *zero.Ctx) bool {
+	c.env.UseBot(func(ctx *zero.Ctx) {
 		ctx.SendGroupMessage(groupId, message.Text(res.Answer))
-		return true
+
 	})
 
 }

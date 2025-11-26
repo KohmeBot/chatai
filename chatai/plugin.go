@@ -2,13 +2,10 @@ package chatai
 
 import (
 	"errors"
-	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/tongyi"
-	"github.com/kohmebot/pkg/command"
 	"github.com/kohmebot/pkg/gopool"
-	"github.com/kohmebot/pkg/version"
-	"github.com/kohmebot/plugin"
+	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/wdvxdr1123/ZeroBot"
 )
@@ -49,7 +46,7 @@ func (c *ChatPlugin) DoRequest(req string) (string, error) {
 
 }
 
-func (c *ChatPlugin) Init(engine *zero.Engine, env plugin.Env) error {
+func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
 	err := env.GetConf(&c.conf)
 	if err != nil {
@@ -94,18 +91,14 @@ func (c *ChatPlugin) OnBoot() {
 	})
 }
 
+func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {
+
+}
+
 func (c *ChatPlugin) Name() string {
 	return "chatai"
 }
 
-func (c *ChatPlugin) Description() string {
-	return "@我和我聊天吧!"
-}
-
-func (c *ChatPlugin) Commands() fmt.Stringer {
-	return command.NewCommands()
-}
-
-func (c *ChatPlugin) Version() uint64 {
-	return uint64(version.NewVersion(0, 0, 57))
+func (c *ChatPlugin) Version() string {
+	return "v0.1.0"
 }

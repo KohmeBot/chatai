@@ -2,7 +2,7 @@ package chataisdk
 
 import (
 	"github.com/kohmebot/chatai/chatai"
-	"github.com/kohmebot/plugin"
+	"github.com/kohmebot/plugin/v2"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
