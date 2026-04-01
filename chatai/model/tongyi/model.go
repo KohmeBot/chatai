@@ -3,10 +3,11 @@ package tongyi
 import "github.com/kohmebot/chatai/chatai/model"
 
 type reqBody struct {
-	Model        string          `json:"model"`
-	Message      []model.Message `json:"messages"`
-	EnableSearch bool            `json:"enable_search"`
-	MaxTokens    int             `json:"max_tokens"`
+	Model          string          `json:"model"`
+	Message        []model.Message `json:"messages"`
+	EnableSearch   bool            `json:"enable_search"`
+	EnableThinking bool            `json:"enable_thinking"`
+	MaxTokens      int             `json:"max_tokens"`
 }
 
 type respBody struct {

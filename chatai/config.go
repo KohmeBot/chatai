@@ -22,6 +22,8 @@ type Config struct {
 
 	// 控制模型是否联网，如果对应模型支持的话
 	Online bool `yaml:"online"`
+	// 深度思考，如果对应模型支持的话
+	Thinking bool `yaml:"thinking"`
 
 	WarmGroupConfig `yaml:"warm_group"`
 	JoinGroupConfig `yaml:"join_group"`

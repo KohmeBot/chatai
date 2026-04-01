@@ -61,20 +61,20 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
-	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens)
+	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking)
 	c.batch = model.NewBatch(m, c.onResponse)
 	for user, prompt := range c.conf.PromptTarget {
-		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens)
+		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking)
 		b := model.NewBatch(tm, c.onResponse)
 		c.batchMp.SetBatch(user, b)
 		logrus.Infof("init prompt %s for %d", prompt, user)
 	}
-	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens)
-	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens)
-	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens)
-	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens)
+	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
+	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
+	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
+	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
 
-	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens)
+	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
 
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
@@ -100,5 +100,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.1.0"
+	return "v0.1.1"
 }
