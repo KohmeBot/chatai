@@ -66,6 +66,13 @@ func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 		if len(texts) <= 0 {
 			return
 		}
+		info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
+
+		nickName, ok := info.Map()["nickname"]
+		if ok {
+			texts = append([]string{fmt.Sprintf("%s对你说:", nickName)}, texts...)
+		}
+
 		key := model.Key{
 			GroupId: ctx.Event.GroupID,
 			UserId:  id,
