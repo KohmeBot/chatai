@@ -66,7 +66,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
-	m := tongyi.NewTongYiModel(favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.ModelName), c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.Prompt), c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 	c.batch = model.NewBatch(m, c.onResponse)
 	for user, prompt := range c.conf.PromptTarget {
 		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
