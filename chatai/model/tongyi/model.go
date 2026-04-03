@@ -8,6 +8,11 @@ type reqBody struct {
 	EnableSearch   bool            `json:"enable_search"`
 	EnableThinking bool            `json:"enable_thinking"`
 	MaxTokens      int             `json:"max_tokens"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+}
+
+type ResponseFormat struct {
+	Type string `json:"type"`
 }
 
 type respBody struct {

@@ -1,7 +1,9 @@
 package chatai
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/pkg/chain"
 	"github.com/kohmebot/pkg/gopool"
@@ -69,8 +71,25 @@ func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 		info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
 
 		nickName, ok := info.Map()["nickname"]
+
+		format := "%s对你说:"
+
+		if c.conf.Favor {
+			f := favor.FavorRecord{UserId: ctx.Event.UserID}
+			var v int64
+			v, err = f.Get(db)
+			if err != nil {
+				return
+			}
+			level := favor.GetFavorLevelInfo(v)
+
+			format = "%s对你说," + fmt.Sprintf("你对他的好感度是%d(%s):", v, level.Name)
+		}
+
 		if ok {
-			texts = append([]string{fmt.Sprintf("%s对你说:", nickName)}, texts...)
+			texts = append([]string{fmt.Sprintf(format, nickName.String())}, texts...)
+		} else {
+			texts = append([]string{fmt.Sprintf(format, "群友")}, texts...)
 		}
 
 		key := model.Key{
@@ -129,7 +148,7 @@ func (c *ChatPlugin) SetOnJoinGroup(engine plugin.Engine) {
 				return
 			}
 			req := &model.Request{
-				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName),
+				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName.String()),
 			}
 			res := &model.Response{}
 			err = c.joinGroupModel.Request(req, res)
@@ -177,7 +196,7 @@ func (c *ChatPlugin) SetOnPoke(engine plugin.Engine) {
 				return
 			}
 			req := &model.Request{
-				Question: fmt.Sprintf(c.conf.PokeGroupConfig.Trigger, nickName),
+				Question: fmt.Sprintf(c.conf.PokeGroupConfig.Trigger, nickName.String()),
 			}
 			res := &model.Response{}
 			err = c.pokeModel.Request(req, res)
@@ -255,6 +274,23 @@ func (c *ChatPlugin) onResponse(ctx *zero.Ctx, request *model.Request, response 
 	db, err := c.env.GetDB()
 	if err != nil {
 		return
+	}
+
+	if c.conf.Favor {
+		// 启用了好感度系统
+		var f favor.FavorResponse
+		err = json.Unmarshal([]byte(response.Answer), &f)
+		if err != nil {
+			c.env.Error(ctx, err)
+			return
+		}
+		response.Answer = f.Answer
+		r := favor.FavorRecord{UserId: ctx.Event.UserID}
+		err = r.Add(db, f.Favor)
+		if err != nil {
+			c.env.Error(ctx, err)
+			return
+		}
 	}
 
 	// 更新使用量

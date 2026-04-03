@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"strings"
@@ -24,9 +25,11 @@ type tongYiModel struct {
 	apiKeyHeader string
 	systemMsg    model.Message
 	client       *http.Client
+
+	responseJson bool
 }
 
-func NewTongYiModel(name string, apikey string, system string, online bool, maxTokens int64, thinking bool) model.LargeModel {
+func NewTongYiModel(name string, apikey string, system string, online bool, maxTokens int64, thinking bool, responseJson bool) model.LargeModel {
 	name = strings.TrimPrefix(name, "tongyi:")
 	return &tongYiModel{
 		tongYiModelName: name,
@@ -40,7 +43,8 @@ func NewTongYiModel(name string, apikey string, system string, online bool, maxT
 			Role:    "system",
 			Content: system,
 		},
-		client: &http.Client{},
+		responseJson: responseJson,
+		client:       &http.Client{},
 	}
 }
 
@@ -60,10 +64,17 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 		EnableThinking: m.thinking,
 		MaxTokens:      m.maxTokens,
 	}
+	if m.responseJson {
+		requestBody.ResponseFormat = &ResponseFormat{Type: "json_object"}
+	}
+
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		return err
 	}
+
+	logrus.Infof("do request: %s", string(jsonData))
+
 	req, err := http.NewRequest("POST", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err

@@ -25,6 +25,9 @@ type Config struct {
 	// 深度思考，如果对应模型支持的话
 	Thinking bool `yaml:"thinking"`
 
+	// 是否开启好感度系统,需要模型支持Json回复
+	Favor bool `yaml:"favor"`
+
 	WarmGroupConfig `yaml:"warm_group"`
 	JoinGroupConfig `yaml:"join_group"`
 	PokeGroupConfig `yaml:"poke_group"`

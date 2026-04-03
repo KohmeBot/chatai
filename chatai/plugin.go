@@ -2,6 +2,7 @@ package chatai
 
 import (
 	"errors"
+	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/tongyi"
 	"github.com/kohmebot/pkg/gopool"
@@ -61,20 +62,24 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
-	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking)
+	err = db.AutoMigrate(&favor.FavorRecord{})
+	if err != nil {
+		return err
+	}
+	m := tongyi.NewTongYiModel(favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.ModelName), c.conf.ApiKey, c.conf.Prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 	c.batch = model.NewBatch(m, c.onResponse)
 	for user, prompt := range c.conf.PromptTarget {
-		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking)
+		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 		b := model.NewBatch(tm, c.onResponse)
 		c.batchMp.SetBatch(user, b)
 		logrus.Infof("init prompt %s for %d", prompt, user)
 	}
-	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
-	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
-	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
-	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
+	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 
-	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens, c.conf.Thinking)
+	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
@@ -100,5 +105,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.1.2"
+	return "v0.2.0-alpha"
 }
