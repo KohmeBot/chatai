@@ -67,9 +67,13 @@ func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 		if len(texts) <= 0 {
 			return
 		}
-		info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
 
-		nickName, ok := info.Map()["nickname"]
+		if c.conf.Favor && strings.TrimSpace(texts[0]) == "查询好感度" {
+			err = c.onSearchFavor(ctx, db)
+			return
+		}
+
+		nickName := ctx.CardOrNickName(ctx.Event.UserID)
 
 		format := "%s对你说:"
 
@@ -84,11 +88,7 @@ func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 			format = "%s对你说," + fmt.Sprintf("你对他的好感度是%d(%s):", v, level.Name)
 		}
 
-		if ok {
-			texts = append([]string{fmt.Sprintf(format, nickName.String())}, texts...)
-		} else {
-			texts = append([]string{fmt.Sprintf(format, "群友")}, texts...)
-		}
+		texts = append([]string{fmt.Sprintf(format, nickName)}, texts...)
 
 		key := model.Key{
 			GroupId: ctx.Event.GroupID,
@@ -101,6 +101,24 @@ func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 		}
 
 	})
+}
+
+func (c *ChatPlugin) onSearchFavor(ctx *zero.Ctx, db *gorm.DB) error {
+	v, level, err := favor.GetFavor(db, ctx.Event.UserID)
+	if err != nil {
+		return err
+	}
+
+	text := fmt.Sprintf("对你的好感度是%s(%d)", level.Name, v)
+
+	var msgChain chain.MessageChain
+	msgChain.Join(message.Reply(ctx.Event.MessageID))
+	msgChain.Join(message.At(ctx.Event.Sender.ID))
+	msgChain.Join(message.Text(" " + text))
+	ctx.Send(msgChain)
+
+	return nil
+
 }
 
 func (c *ChatPlugin) SetOnWarmup(engine plugin.Engine) {
@@ -138,15 +156,11 @@ func (c *ChatPlugin) SetOnJoinGroup(engine plugin.Engine) {
 					c.env.Error(ctx, err)
 				}
 			}()
-			info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
 
-			nickName, ok := info.Map()["nickname"]
-			if !ok {
-				err = fmt.Errorf("error fetch member info")
-				return
-			}
+			nickName := ctx.CardOrNickName(ctx.Event.UserID)
+
 			req := &model.Request{
-				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName.String()),
+				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName),
 			}
 			res := &model.Response{}
 			err = c.joinGroupModel.Request(req, res)
@@ -186,15 +200,10 @@ func (c *ChatPlugin) SetOnPoke(engine plugin.Engine) {
 					c.env.Error(ctx, err)
 				}
 			}()
-			info := ctx.GetThisGroupMemberInfo(ctx.Event.UserID, false)
 
-			nickName, ok := info.Map()["nickname"]
-			if !ok {
-				err = fmt.Errorf("error fetch member info")
-				return
-			}
+			nickName := ctx.CardOrNickName(ctx.Event.UserID)
 
-			question := fmt.Sprintf(c.conf.PokeGroupConfig.Trigger, nickName.String())
+			question := fmt.Sprintf(c.conf.PokeGroupConfig.Trigger, nickName)
 			var db *gorm.DB
 
 			if c.conf.Favor {

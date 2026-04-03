@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	FavorMax = 1000
-	FavorMin = -100
+	FavorDefault = 150
+	FavorMax     = 1000
+	FavorMin     = -100
 )
 
 const (
@@ -19,7 +20,7 @@ const (
 	SubMax = 100
 )
 
-const favorFormat = "你的回复要以json的格式给我,字段有两个,第一个是answer(string)这是你回答的内容,第二个是favor(int)这是你根据提问给用户增加或者减少的好感度,每次最多增加%d点,减少%d点,接下来我会让你扮演角色和群友对话,我会告诉你当前你对他的好感度(%d-%d),根据好感度的多少来回答问题\n%s"
+const favorFormat = "你的回复要以json的格式给我,字段有两个,第一个是answer(string)这是你回答的内容,第二个是favor(int)这是你根据提问给用户增加或者减少的好感度,每次最多增加%d点,减少%d点,接下来我会让你扮演角色和群友对话,我会告诉你当前你对他的好感度(%d到%d),请根据好感度来回答问题\n%s"
 
 type Favor struct {
 	Enable bool
@@ -75,7 +76,7 @@ func (f *FavorRecord) Add(db *gorm.DB, delta int64) error {
 				// 不存在就初始化
 				record = FavorRecord{
 					UserId: f.UserId,
-					Favor:  clampFavor(delta),
+					Favor:  clampFavor(FavorDefault + delta),
 				}
 				return tx.Create(&record).Error
 			}
@@ -101,7 +102,7 @@ func (f *FavorRecord) Get(db *gorm.DB) (int64, error) {
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return 0, nil
+			return FavorDefault, nil
 		}
 		return 0, err
 	}
