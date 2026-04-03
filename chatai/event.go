@@ -85,7 +85,7 @@ func (c *ChatPlugin) SetOnAt(engine plugin.Engine) {
 				return
 			}
 
-			format = "%s对你说," + fmt.Sprintf("你对他的好感度是%d(%s):", v, level.Name)
+			format = "%s对你说," + fmt.Sprintf("你对他的好感度是%d(%s:%s):", v, level.Name, level.Desc)
 		}
 
 		texts = append([]string{fmt.Sprintf(format, nickName)}, texts...)
@@ -220,7 +220,7 @@ func (c *ChatPlugin) SetOnPoke(engine plugin.Engine) {
 				if err != nil {
 					return
 				}
-				question += fmt.Sprintf("你对他的好感度是%d(%s)", v, level.Name)
+				question += fmt.Sprintf("你对他的好感度是%d(%s:%s)", v, level.Name, level.Desc)
 			}
 
 			req := &model.Request{

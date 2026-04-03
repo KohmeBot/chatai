@@ -7,10 +7,11 @@ import (
 	"github.com/kohmebot/chatai/chatai/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"math/rand/v2"
 )
 
 const (
-	FavorDefault = 150
+	FavorDefault = 65
 	FavorMax     = 1000
 	FavorMin     = -100
 )
@@ -42,6 +43,10 @@ type FavorResponse struct {
 type FavorRecord struct {
 	UserId int64 `gorm:"primaryKey"`
 	Favor  int64
+}
+
+func getDefaultFavor() int64 {
+	return FavorDefault + rand.Int64N(51) - 25
 }
 
 func clampFavor(v int64) int64 {
@@ -76,7 +81,7 @@ func (f *FavorRecord) Add(db *gorm.DB, delta int64) error {
 				// 不存在就初始化
 				record = FavorRecord{
 					UserId: f.UserId,
-					Favor:  clampFavor(FavorDefault + delta),
+					Favor:  clampFavor(getDefaultFavor() + delta),
 				}
 				return tx.Create(&record).Error
 			}
@@ -97,13 +102,13 @@ func (f *FavorRecord) Get(db *gorm.DB) (int64, error) {
 
 	err := db.
 		Where("user_id = ?", f.UserId).
-		First(&record).
+		Attrs(FavorRecord{
+			Favor: getDefaultFavor(),
+		}).
+		FirstOrCreate(&record).
 		Error
 
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return FavorDefault, nil
-		}
 		return 0, err
 	}
 
