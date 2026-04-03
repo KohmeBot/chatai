@@ -76,7 +76,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
-	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.PokeGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.PokeGroupConfig.Prompt), false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 
 	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
@@ -105,5 +105,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.2.0-alpha.3"
+	return "v0.2.0-alpha.4"
 }

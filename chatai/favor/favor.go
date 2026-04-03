@@ -1,8 +1,10 @@
 package favor
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -105,4 +107,26 @@ func (f *FavorRecord) Get(db *gorm.DB) (int64, error) {
 	}
 
 	return record.Favor, nil
+}
+
+func GetFavor(db *gorm.DB, uid int64) (value int64, info LevelInfo, err error) {
+	f := FavorRecord{UserId: uid}
+
+	value, err = f.Get(db)
+	if err != nil {
+		return
+	}
+	info = GetFavorLevelInfo(value)
+	return
+}
+
+func ProcessFavorResponse(db *gorm.DB, uid int64, response *model.Response) error {
+	var f FavorResponse
+	err := json.Unmarshal([]byte(response.Answer), &f)
+	if err != nil {
+		return err
+	}
+	response.Answer = f.Answer
+	r := FavorRecord{UserId: uid}
+	return r.Add(db, f.Favor)
 }
