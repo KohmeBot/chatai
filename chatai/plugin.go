@@ -47,6 +47,25 @@ func (c *ChatPlugin) DoRequest(req string) (string, error) {
 
 }
 
+func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string, error) {
+	request := &model.Request{
+		Question: req,
+	}
+	resp := &model.Response{}
+	err := m.Request(request, resp)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.ErrorMsg) > 0 {
+		return "", errors.New(resp.ErrorMsg)
+	}
+	return resp.Answer, nil
+}
+
+func (c *ChatPlugin) NewModel(system string, online bool, thinking bool) model.LargeModel {
+	return tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, system, online, c.conf.MaxTokens, thinking, false)
+}
+
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
 	err := env.GetConf(&c.conf)
@@ -105,5 +124,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.2.0-alpha.6"
+	return "v0.2.1"
 }
