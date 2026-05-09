@@ -33,8 +33,8 @@ func (c *ChatAIInvoker) DoRequest(req string) (string, error) {
 	return resp, res[1].Interface().(error)
 }
 
-func (c *ChatAIInvoker) NewModel(system string, online bool, thinking bool) (model.LargeModel, error) {
-	res := c.v.MethodByName("NewModel").Call([]reflect.Value{reflect.ValueOf(system), reflect.ValueOf(online), reflect.ValueOf(thinking)})
+func (c *ChatAIInvoker) NewModel(system string, online bool, thinking bool, responseJson bool) (model.LargeModel, error) {
+	res := c.v.MethodByName("NewModel").Call([]reflect.Value{reflect.ValueOf(system), reflect.ValueOf(online), reflect.ValueOf(thinking), reflect.ValueOf(responseJson)})
 	if len(res) != 1 {
 		return nil, fmt.Errorf("NewModel method not found")
 	}

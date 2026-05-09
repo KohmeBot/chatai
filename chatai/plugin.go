@@ -62,8 +62,8 @@ func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string,
 	return resp.Answer, nil
 }
 
-func (c *ChatPlugin) NewModel(system string, online bool, thinking bool) model.LargeModel {
-	return tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, system, online, c.conf.MaxTokens, thinking, false)
+func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, responseJson bool) model.LargeModel {
+	return tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, system, online, c.conf.MaxTokens, thinking, responseJson)
 }
 
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
@@ -124,5 +124,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.2.1"
+	return "v0.2.2"
 }
