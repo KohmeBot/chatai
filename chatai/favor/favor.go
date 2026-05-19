@@ -2,7 +2,6 @@ package favor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
 	"gorm.io/gorm"
@@ -69,31 +68,18 @@ func (f *FavorRecord) Add(db *gorm.DB, delta int64) error {
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		var record FavorRecord
-
 		err := tx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ?", f.UserId).
-			First(&record).
-			Error
-
+			Where(FavorRecord{UserId: f.UserId}).
+			Attrs(FavorRecord{Favor: getDefaultFavor()}).
+			FirstOrCreate(&record).Error
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// 不存在就初始化
-				record = FavorRecord{
-					UserId: f.UserId,
-					Favor:  clampFavor(getDefaultFavor() + delta),
-				}
-				return tx.Create(&record).Error
-			}
 			return err
 		}
-
-		// 计算 + clamp
 		newFavor := clampFavor(record.Favor + delta)
-
 		return tx.Model(&record).
-			Update("favor", newFavor).
-			Error
+			Where("user_id = ?", f.UserId). // 显式指定，不依赖 record 的主键
+			Update("favor", newFavor).Error
 	})
 }
 
