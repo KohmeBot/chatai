@@ -57,12 +57,23 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 		Role:    "user",
 		Content: request.Question,
 	}
+
+	var tools []Tool
+	if m.online {
+		tools = append(tools,
+			Tool{Type: "web_search"},
+			Tool{Type: "web_extractor"},
+			Tool{Type: "code_interpreter"},
+		)
+	}
+
 	requestBody := reqBody{
 		Model:          m.tongYiModelName,
 		Message:        msg,
 		EnableSearch:   m.online,
 		EnableThinking: m.thinking,
 		MaxTokens:      m.maxTokens,
+		Tools:          tools,
 	}
 	if m.responseJson {
 		requestBody.ResponseFormat = &ResponseFormat{Type: "json_object"}

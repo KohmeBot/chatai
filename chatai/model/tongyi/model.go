@@ -9,9 +9,14 @@ type reqBody struct {
 	EnableThinking bool            `json:"enable_thinking"`
 	MaxTokens      int             `json:"max_tokens"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	Tools          []Tool          `json:"tools,omitempty"`
 }
 
 type ResponseFormat struct {
+	Type string `json:"type"`
+}
+
+type Tool struct {
 	Type string `json:"type"`
 }
 
