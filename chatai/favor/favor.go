@@ -87,10 +87,8 @@ func (f *FavorRecord) Get(db *gorm.DB) (int64, error) {
 	var record FavorRecord
 
 	err := db.
-		Where("user_id = ?", f.UserId).
-		Attrs(FavorRecord{
-			Favor: getDefaultFavor(),
-		}).
+		Where(FavorRecord{UserId: f.UserId}).
+		Attrs(FavorRecord{Favor: getDefaultFavor()}).
 		FirstOrCreate(&record).
 		Error
 
