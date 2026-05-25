@@ -31,3 +31,13 @@ type Response struct {
 type LargeModel interface {
 	Request(Request *Request, response *Response) error
 }
+
+type Config struct {
+	Name         string
+	ApiKey       string
+	System       string
+	Online       bool
+	MaxTokens    int64
+	Thinking     bool
+	ResponseJson bool
+}

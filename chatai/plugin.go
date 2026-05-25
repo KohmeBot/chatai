@@ -4,7 +4,6 @@ import (
 	"errors"
 	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
-	"github.com/kohmebot/chatai/chatai/model/tongyi"
 	"github.com/kohmebot/pkg/gopool"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
@@ -63,7 +62,15 @@ func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string,
 }
 
 func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, responseJson bool) model.LargeModel {
-	return tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, system, online, c.conf.MaxTokens, thinking, responseJson)
+	return model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       system,
+		Online:       online,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     thinking,
+		ResponseJson: responseJson,
+	})
 }
 
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
@@ -85,20 +92,83 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
-	m := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.Prompt), c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+
+	m := model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.Prompt),
+		Online:       c.conf.Online,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     c.conf.Thinking,
+		ResponseJson: c.conf.Favor,
+	})
+
 	c.batch = model.NewBatch(m, c.onResponse)
 	for user, prompt := range c.conf.PromptTarget {
-		tm := tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, prompt, c.conf.Online, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+		tm := model.NewLargeModel(model.Config{
+			Name:         c.conf.ModelName,
+			ApiKey:       c.conf.ApiKey,
+			System:       prompt,
+			Online:       c.conf.Online,
+			MaxTokens:    c.conf.MaxTokens,
+			Thinking:     c.conf.Thinking,
+			ResponseJson: c.conf.Favor,
+		})
+
 		b := model.NewBatch(tm, c.onResponse)
 		c.batchMp.SetBatch(user, b)
 		logrus.Infof("init prompt %s for %d", prompt, user)
 	}
-	c.warmUpModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.WarmGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
-	c.joinGroupModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.JoinGroupConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
-	c.pokeModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.PokeGroupConfig.Prompt), false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
-	c.onBootModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.OnBootConfig.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
 
-	c.otherModel = tongyi.NewTongYiModel(c.conf.ModelName, c.conf.ApiKey, c.conf.Prompt, false, c.conf.MaxTokens, c.conf.Thinking, c.conf.Favor)
+	c.warmUpModel = model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       c.conf.WarmGroupConfig.Prompt,
+		Online:       false,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     c.conf.Thinking,
+		ResponseJson: c.conf.Favor,
+	})
+
+	c.joinGroupModel = model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       c.conf.JoinGroupConfig.Prompt,
+		Online:       false,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     c.conf.Thinking,
+		ResponseJson: c.conf.Favor,
+	})
+
+	c.pokeModel = model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.PokeGroupConfig.Prompt),
+		Online:       false,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     c.conf.Thinking,
+		ResponseJson: c.conf.Favor,
+	})
+
+	c.onBootModel = model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       c.conf.OnBootConfig.Prompt,
+		Online:       false,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     c.conf.Thinking,
+		ResponseJson: c.conf.Favor,
+	})
+
+	c.otherModel = model.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       c.conf.Prompt,
+		Online:       false,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     c.conf.Thinking,
+		ResponseJson: c.conf.Favor,
+	})
 
 	c.SetOnAt(engine)
 	c.SetOnJoinGroup(engine)
@@ -124,5 +194,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.2.5"
+	return "v0.2.6"
 }

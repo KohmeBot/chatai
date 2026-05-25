@@ -1,4 +1,4 @@
-package tongyi
+package deepseek
 
 import (
 	"bytes"
@@ -9,27 +9,30 @@ import (
 	"net/http"
 )
 
-type tongYiModel struct {
+type deepSeekModel struct {
 	model.Config
 
 	apiKeyHeader string
 	systemMsg    model.Message
 	client       *http.Client
+
+	responseJson bool
 }
 
-func NewTongYiModel(conf model.Config) model.LargeModel {
-	return &tongYiModel{
+func NewDeepSeekModel(conf model.Config) model.LargeModel {
+	return &deepSeekModel{
 		Config:       conf,
 		apiKeyHeader: "Bearer " + conf.ApiKey,
 		systemMsg: model.Message{
 			Role:    "system",
 			Content: conf.System,
 		},
-		client: &http.Client{},
+		responseJson: conf.ResponseJson,
+		client:       &http.Client{},
 	}
 }
 
-func (m *tongYiModel) Request(request *model.Request, response *model.Response) error {
+func (m *deepSeekModel) Request(request *model.Request, response *model.Response) error {
 
 	msg := make([]model.Message, len(request.History)+2)
 	copy(msg[2:], request.History)
@@ -39,25 +42,18 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 		Content: request.Question,
 	}
 
-	var tools []Tool
-	if m.Online {
-		tools = append(tools,
-			Tool{Type: "web_search"},
-			Tool{Type: "web_extractor"},
-			Tool{Type: "code_interpreter"},
-		)
+	requestBody := reqBody{
+		Model:     m.Name,
+		Message:   msg,
+		MaxTokens: int(m.MaxTokens),
 	}
 
-	requestBody := reqBody{
-		Model:          m.Name,
-		Message:        msg,
-		EnableSearch:   m.Online,
-		EnableThinking: m.Thinking,
-		MaxTokens:      int(m.MaxTokens),
-		Tools:          tools,
+	if m.Thinking {
+		requestBody.Thinking = &Option{Type: "enabled"}
 	}
-	if m.ResponseJson {
-		requestBody.ResponseFormat = &ResponseFormat{Type: "json_object"}
+
+	if m.responseJson {
+		requestBody.ResponseFormat = &Option{Type: "json_object"}
 	}
 
 	jsonData, err := json.Marshal(requestBody)
@@ -67,7 +63,7 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 
 	logrus.Infof("do request: %s", string(jsonData))
 
-	req, err := http.NewRequest("POST", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.deepseek.com", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}

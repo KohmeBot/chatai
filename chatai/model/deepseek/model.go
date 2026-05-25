@@ -1,28 +1,22 @@
-package tongyi
+package deepseek
 
 import "github.com/kohmebot/chatai/chatai/model"
 
-const prefix = "tongyi"
+const prefix = "deepseek"
 
 func init() {
-	model.RegisterModel(prefix, NewTongYiModel)
+	model.RegisterModel(prefix, NewDeepSeekModel)
 }
 
 type reqBody struct {
 	Model          string          `json:"model"`
 	Message        []model.Message `json:"messages"`
-	EnableSearch   bool            `json:"enable_search"`
-	EnableThinking bool            `json:"enable_thinking"`
+	Thinking       *Option         `json:"thinking,omitempty"`
 	MaxTokens      int             `json:"max_tokens"`
-	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
-	Tools          []Tool          `json:"tools,omitempty"`
+	ResponseFormat *Option         `json:"response_format,omitempty"`
 }
 
-type ResponseFormat struct {
-	Type string `json:"type"`
-}
-
-type Tool struct {
+type Option struct {
 	Type string `json:"type"`
 }
 
