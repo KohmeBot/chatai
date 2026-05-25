@@ -195,5 +195,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.2.6"
+	return "v0.2.7"
 }
