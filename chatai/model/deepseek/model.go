@@ -5,7 +5,7 @@ import "github.com/kohmebot/chatai/chatai/model"
 type reqBody struct {
 	Model          string          `json:"model"`
 	Message        []model.Message `json:"messages"`
-	Thinking       *Option         `json:"thinking,omitempty"`
+	Thinking       Option          `json:"thinking,omitempty"`
 	MaxTokens      int             `json:"max_tokens"`
 	ResponseFormat *Option         `json:"response_format,omitempty"`
 }

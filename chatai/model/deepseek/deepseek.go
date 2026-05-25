@@ -46,10 +46,11 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 		Model:     m.Name,
 		Message:   msg,
 		MaxTokens: int(m.MaxTokens),
+		Thinking:  Option{Type: "disabled"},
 	}
 
 	if m.Thinking {
-		requestBody.Thinking = &Option{Type: "enabled"}
+		requestBody.Thinking = Option{Type: "enabled"}
 	}
 
 	if m.responseJson {
