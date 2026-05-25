@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/kohmebot/chatai/chatai/model/factory"
 	"github.com/kohmebot/pkg/gopool"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
@@ -62,7 +63,7 @@ func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string,
 }
 
 func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, responseJson bool) model.LargeModel {
-	return model.NewLargeModel(model.Config{
+	return factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       system,
@@ -93,7 +94,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		return err
 	}
 
-	m := model.NewLargeModel(model.Config{
+	m := factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.Prompt),
@@ -105,7 +106,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 
 	c.batch = model.NewBatch(m, c.onResponse)
 	for user, prompt := range c.conf.PromptTarget {
-		tm := model.NewLargeModel(model.Config{
+		tm := factory.NewLargeModel(model.Config{
 			Name:         c.conf.ModelName,
 			ApiKey:       c.conf.ApiKey,
 			System:       prompt,
@@ -120,7 +121,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		logrus.Infof("init prompt %s for %d", prompt, user)
 	}
 
-	c.warmUpModel = model.NewLargeModel(model.Config{
+	c.warmUpModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       c.conf.WarmGroupConfig.Prompt,
@@ -130,7 +131,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		ResponseJson: c.conf.Favor,
 	})
 
-	c.joinGroupModel = model.NewLargeModel(model.Config{
+	c.joinGroupModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       c.conf.JoinGroupConfig.Prompt,
@@ -140,7 +141,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		ResponseJson: c.conf.Favor,
 	})
 
-	c.pokeModel = model.NewLargeModel(model.Config{
+	c.pokeModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.PokeGroupConfig.Prompt),
@@ -150,7 +151,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		ResponseJson: c.conf.Favor,
 	})
 
-	c.onBootModel = model.NewLargeModel(model.Config{
+	c.onBootModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       c.conf.OnBootConfig.Prompt,
@@ -160,7 +161,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		ResponseJson: c.conf.Favor,
 	})
 
-	c.otherModel = model.NewLargeModel(model.Config{
+	c.otherModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
 		System:       c.conf.Prompt,

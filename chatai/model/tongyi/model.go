@@ -2,12 +2,6 @@ package tongyi
 
 import "github.com/kohmebot/chatai/chatai/model"
 
-const prefix = "tongyi"
-
-func init() {
-	model.RegisterModel(prefix, NewTongYiModel)
-}
-
 type reqBody struct {
 	Model          string          `json:"model"`
 	Message        []model.Message `json:"messages"`

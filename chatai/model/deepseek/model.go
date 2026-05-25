@@ -2,12 +2,6 @@ package deepseek
 
 import "github.com/kohmebot/chatai/chatai/model"
 
-const prefix = "deepseek"
-
-func init() {
-	model.RegisterModel(prefix, NewDeepSeekModel)
-}
-
 type reqBody struct {
 	Model          string          `json:"model"`
 	Message        []model.Message `json:"messages"`
