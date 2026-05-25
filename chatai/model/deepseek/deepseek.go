@@ -63,7 +63,7 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 
 	logrus.Infof("do request: %s", string(jsonData))
 
-	req, err := http.NewRequest("POST", "https://api.deepseek.com", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
