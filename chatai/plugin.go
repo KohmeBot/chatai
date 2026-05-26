@@ -104,7 +104,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		ResponseJson: c.conf.Favor,
 	})
 
-	c.batch = model.NewBatch(m, c.onResponse)
+	c.batch = model.NewBatch(m, c.onResponse, c.conf.History)
 	for user, prompt := range c.conf.PromptTarget {
 		tm := factory.NewLargeModel(model.Config{
 			Name:         c.conf.ModelName,
@@ -116,7 +116,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			ResponseJson: c.conf.Favor,
 		})
 
-		b := model.NewBatch(tm, c.onResponse)
+		b := model.NewBatch(tm, c.onResponse, c.conf.History)
 		c.batchMp.SetBatch(user, b)
 		logrus.Infof("init prompt %s for %d", prompt, user)
 	}
@@ -195,5 +195,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.2.9"
+	return "v0.3.0"
 }

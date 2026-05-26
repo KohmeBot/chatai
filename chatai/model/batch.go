@@ -1,7 +1,6 @@
 package model
 
 import (
-	"github.com/kohmebot/pkg/gopool"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"strings"
 )
@@ -27,31 +26,37 @@ func (b BatchMap) Has(user int64) bool {
 
 // Batch 异步批量提交大模型调用
 type Batch struct {
-	m  LargeModel
-	on OnResponse
+	m           LargeModel
+	on          OnResponse
+	keepHistory bool
 }
 
 type OnResponse func(ctx *zero.Ctx, request *Request, response *Response, err error)
 
-func NewBatch(m LargeModel, on OnResponse) Batch {
+func NewBatch(m LargeModel, on OnResponse, keepHistory bool) Batch {
 	return Batch{
-		m:  m,
-		on: on,
+		m:           m,
+		on:          on,
+		keepHistory: keepHistory,
 	}
 }
 
 func (b *Batch) Submit(ctx *zero.Ctx, key Key, questions []string) {
-	// TODO 在短时间内实现批量提交
-	gopool.Go(func() {
-		b.doRequest(ctx, questions)
-	})
+
+	b.doRequest(ctx, key, questions)
+
 }
 
-func (b *Batch) doRequest(ctx *zero.Ctx, questions []string) {
+func (b *Batch) doRequest(ctx *zero.Ctx, key Key, questions []string) {
 	question := strings.Join(questions, "\n")
-	req := &Request{Question: question}
+	req := &Request{Question: question, History: session.GetHistory(key)}
 	resp := &Response{}
 	err := b.m.Request(req, resp)
+
+	if err != nil && b.keepHistory {
+		session.Append(key, *req, *resp)
+	}
+
 	b.on(ctx, req, resp, err)
 }
 

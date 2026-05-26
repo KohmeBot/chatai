@@ -34,13 +34,13 @@ func NewDeepSeekModel(conf model.Config) model.LargeModel {
 
 func (m *deepSeekModel) Request(request *model.Request, response *model.Response) error {
 
-	msg := make([]model.Message, len(request.History)+2)
-	copy(msg[2:], request.History)
-	msg[0] = m.systemMsg
-	msg[1] = model.Message{
+	msg := make([]model.Message, 0, len(request.History)+2)
+	msg = append(msg, m.systemMsg)
+	msg = append(msg, request.History...)
+	msg = append(msg, model.Message{
 		Role:    "user",
 		Content: request.Question,
-	}
+	})
 
 	requestBody := reqBody{
 		Model:     m.Name,

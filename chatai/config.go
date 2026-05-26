@@ -28,6 +28,9 @@ type Config struct {
 	// 是否开启好感度系统,需要模型支持Json回复
 	Favor bool `yaml:"favor"`
 
+	// 是否开启历史记录功能，可能会增加token使用量
+	History bool `yaml:"history"`
+
 	WarmGroupConfig `yaml:"warm_group"`
 	JoinGroupConfig `yaml:"join_group"`
 	PokeGroupConfig `yaml:"poke_group"`
