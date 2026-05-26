@@ -97,7 +97,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	m := factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
-		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.Prompt),
+		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.System),
 		Online:       c.conf.Online,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -105,7 +105,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	})
 
 	c.batch = model.NewBatch(m, c.onResponse, c.conf.History)
-	for user, prompt := range c.conf.PromptTarget {
+	for user, prompt := range c.conf.SystemTarget {
 		tm := factory.NewLargeModel(model.Config{
 			Name:         c.conf.ModelName,
 			ApiKey:       c.conf.ApiKey,
@@ -124,7 +124,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.warmUpModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.WarmGroupConfig.Prompt,
+		System:       c.conf.System,
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -134,7 +134,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.joinGroupModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.JoinGroupConfig.Prompt,
+		System:       c.conf.System,
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -144,7 +144,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.pokeModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
-		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.PokeGroupConfig.Prompt),
+		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.System),
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -154,7 +154,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.onBootModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.OnBootConfig.Prompt,
+		System:       c.conf.System,
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -164,7 +164,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.otherModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
 		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.Prompt,
+		System:       c.conf.System,
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -195,5 +195,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.3.1"
+	return "v0.3.2"
 }

@@ -1,8 +1,8 @@
 package chatai
 
 type Config struct {
-	// Prompt 预输入提示词
-	Prompt string `yaml:"prompt"`
+	// System 预输入提示词
+	System string `yaml:"system"`
 	// 使用的模型名称
 	ModelName string `yaml:"model_name"`
 	// apikey
@@ -18,7 +18,7 @@ type Config struct {
 	// 触发模型违规后的提示词
 	ErrorTips string `yaml:"error_tips"`
 	// 为qq号指定提示词
-	PromptTarget map[int64]string `yaml:"prompt_target"`
+	SystemTarget map[int64]string `yaml:"system_target"`
 
 	// 控制模型是否联网，如果对应模型支持的话
 	Online bool `yaml:"online"`
@@ -41,8 +41,6 @@ type Config struct {
 type WarmGroupConfig struct {
 	// 是否开启
 	Enable bool `yaml:"enable"`
-	// 预输入提示词
-	Prompt string `yaml:"prompt"`
 	// 触发语句,用%d来代替时间(分钟)
 	Trigger string `yaml:"trigger"`
 	// 冷群间隔(分钟)
@@ -57,8 +55,6 @@ type WarmGroupConfig struct {
 type JoinGroupConfig struct {
 	// 是否开启
 	Enable bool `yaml:"enable"`
-	// 预输入提示词
-	Prompt string `yaml:"prompt"`
 	// 触发语句,用%s来代替新人的NickName
 	Trigger string `yaml:"trigger"`
 }
@@ -66,8 +62,6 @@ type JoinGroupConfig struct {
 type PokeGroupConfig struct {
 	// 是否开启
 	Enable bool `yaml:"enable"`
-	// 预输入提示词
-	Prompt string `yaml:"prompt"`
 	// 触发语句,用%s来代替NickName
 	Trigger string `yaml:"trigger"`
 }
@@ -76,8 +70,6 @@ type PokeGroupConfig struct {
 type OnBootConfig struct {
 	// 是否开启
 	Enable bool `yaml:"enable"`
-	// 预输入提示词
-	Prompt string `yaml:"prompt"`
 	// 触发语句
 	Trigger string `yaml:"trigger"`
 }

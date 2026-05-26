@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	FavorDefault = 65
+	FavorDefault = 165
 	FavorMax     = 1000
 	FavorMin     = -100
 )
