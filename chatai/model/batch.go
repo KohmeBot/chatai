@@ -53,7 +53,7 @@ func (b *Batch) doRequest(ctx *zero.Ctx, key Key, questions []string) {
 	resp := &Response{}
 	err := b.m.Request(req, resp)
 
-	if err != nil && b.keepHistory {
+	if err == nil && b.keepHistory {
 		session.Append(key, *req, *resp)
 	}
 
