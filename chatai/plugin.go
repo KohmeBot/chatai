@@ -8,6 +8,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/wdvxdr1123/ZeroBot"
+	"slices"
 )
 
 type ChatPlugin struct {
@@ -105,6 +106,10 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			Thinking:     c.conf.Thinking,
 			ResponseJson: true,
 		}))
+		if slices.Contains(c.conf.SpeakGroups, group) {
+			p.SetAutoSpeak()
+		}
+
 		c.personaMap[group] = p
 	}
 
@@ -148,5 +153,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.4.3"
+	return "v0.4.4"
 }

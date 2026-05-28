@@ -25,6 +25,8 @@ type Config struct {
 
 	// 触发发言欲
 	Threshold float64 `yaml:"threshold"`
+	// 允许自动发言的群
+	SpeakGroups []int64 `yaml:"speak_groups"`
 
 	JoinGroupConfig `yaml:"join_group"`
 }

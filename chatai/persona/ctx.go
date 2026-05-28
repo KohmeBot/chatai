@@ -2,6 +2,7 @@ package persona
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -12,6 +13,8 @@ type groupContext struct {
 	abstract abstract
 	// 戳一戳限流
 	pokeMp map[int64]time.Time
+	// 复读过的消息
+	repeatMsgs []string
 }
 
 func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
@@ -62,18 +65,50 @@ func (g *groupContext) Flush() {
 	// 以半个小时作为节点，如果最新的消息距今已超过30分钟，则认为起了一个新的话题，需要刷新所有上下文记忆
 	now := time.Now()
 	if len(g.msgs) == 0 {
-		g.msgs = nil
-		g.abstract = abstract{}
+		g.clear()
 		return
 	}
 
 	last := g.msgs[len(g.msgs)-1]
 
 	if now.Sub(last.CreatedAt) >= 30*time.Minute {
-		g.msgs = nil
-		g.abstract = abstract{}
+		g.clear()
 		return
 	}
+}
+
+func (g *groupContext) clear() {
+	g.msgs = nil
+	g.abstract = abstract{}
+	g.repeatMsgs = nil
+}
+
+func (g *groupContext) RepeatThis(content string) (repeat bool, repeated bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.msgs) < 3 {
+		return false, false
+	}
+
+	last3 := g.msgs[len(g.msgs)-3:]
+	for _, msg := range last3 {
+		if msg.MsgType != MsgTypeText {
+			return false, false
+		}
+		if msg.Content != content {
+			return false, false
+		}
+	}
+
+	// 三条都一样，检查是否已经复读过了
+	repeated = slices.Contains(g.repeatMsgs, content)
+
+	if !repeated {
+		g.repeatMsgs = append(g.repeatMsgs, content)
+	}
+
+	return true, repeated
 }
 
 func (g *groupContext) Context() MsgContext {

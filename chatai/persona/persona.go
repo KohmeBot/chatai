@@ -26,6 +26,8 @@ type Persona struct {
 	llm model.LargeModel
 
 	env plugin.Env
+
+	autoSpeak bool
 }
 
 func NewPersona(groupId int64, env plugin.Env, db *gorm.DB, threshold float64, llm model.LargeModel) *Persona {
@@ -36,6 +38,10 @@ func NewPersona(groupId int64, env plugin.Env, db *gorm.DB, threshold float64, l
 		env:     env,
 		urge:    NewSpeechUrge(threshold),
 	}
+}
+
+func (p *Persona) SetAutoSpeak() {
+	p.autoSpeak = true
 }
 
 func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
@@ -109,6 +115,24 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 }
 
 func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
+	isAtMe := ctx.Event.IsToMe
+
+	if !isAtMe && !p.autoSpeak {
+		return nil
+	}
+
+	if msg.MsgType == MsgTypeText {
+		repeat, repeated := p.gc.RepeatThis(msg.Content)
+		if repeated {
+			return nil
+		}
+		if repeat {
+			ctx.Send(ctx.Event.Message)
+			return nil
+		}
+
+	}
+
 	if msg.MsgType == MsgTypePoke && ctx.Event.IsToMe {
 		if !p.gc.CanPoke(msg.User.UserId) {
 			return nil
@@ -116,8 +140,6 @@ func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
 	}
 
 	msgCtx := p.gc.Context()
-
-	isAtMe := ctx.Event.IsToMe
 
 	builder := newPromptBuilder(msgCtx)
 	if isAtMe {
