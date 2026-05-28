@@ -99,6 +99,18 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	// 统计过去 120 秒的消息数，用于活跃度计算
 	recentCount := p.gc.AppendMsg(msg, 120*time.Second)
 
+	if msg.MsgType == MsgTypeText {
+		// 如果群内在复读，直接参与复读就好了
+		repeat, repeated := p.gc.RepeatThis(msg.Content)
+		if repeated {
+			return nil
+		}
+		if repeat {
+			ctx.Send(ctx.Event.Message)
+			return nil
+		}
+	}
+
 	before := p.urge.Value()
 	speak := p.urge.Update(msg, recentCount, ctx.Event.IsToMe)
 	after := p.urge.Value()
@@ -119,18 +131,6 @@ func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
 
 	if !isAtMe && !p.autoSpeak {
 		return nil
-	}
-
-	if msg.MsgType == MsgTypeText {
-		repeat, repeated := p.gc.RepeatThis(msg.Content)
-		if repeated {
-			return nil
-		}
-		if repeat {
-			ctx.Send(ctx.Event.Message)
-			return nil
-		}
-
 	}
 
 	if msg.MsgType == MsgTypePoke && ctx.Event.IsToMe {

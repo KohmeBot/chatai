@@ -14,7 +14,7 @@ const (
 
 const (
 	AddMax = 60
-	SubMax = 100
+	SubMax = 30
 )
 
 type FavorRecord struct {

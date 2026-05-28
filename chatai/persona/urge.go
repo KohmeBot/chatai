@@ -13,6 +13,9 @@ type SpeechUrge struct {
 	value     float64   // 当前发言欲，范围 [0, 100]
 	threshold float64   // 触发发言的阈值
 	lastDecay time.Time // 上次衰减时间
+
+	lastUser    User
+	repeatCount int
 }
 
 func NewSpeechUrge(threshold float64) *SpeechUrge {
@@ -32,25 +35,36 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 	// 1. 消息类型加成
 	switch msg.MsgType {
 	case MsgTypeText:
-		delta += 3.0
-	case MsgTypeImg, MsgTypeRecord:
 		delta += 4.0
 	case MsgTypeReply:
-		delta += 5.0
+		delta += 6.0
 	default:
 		delta += 2.0
 	}
 
-	if isToMe {
-		delta += 5.0
+	if l := runeLen(msg.Content); l > 0 {
+		delta += math.Min(math.Log(float64(l+1))*2.0, 6.0)
+	}
+
+	switch {
+	case isToMe:
+		delta += 8.0
+	case s.lastUser != msg.User:
+		s.lastUser = msg.User
+		s.repeatCount = 0
+		delta += 1.0
+	case s.lastUser == msg.User:
+		s.repeatCount++
+		delta += math.Min(math.Sqrt(float64(s.repeatCount))*3.0, 10.0)
+
 	}
 
 	// 2. 活跃度加成：最近 N 条消息越多，增量越大
 	//    recentCount = 过去 120 秒内的消息数
-	activityBonus := math.Min(float64(recentCount)*0.4, 10.0)
+	activityBonus := math.Min(math.Sqrt(float64(recentCount))*2.0, 10.0)
 	delta += activityBonus
 
-	delta += rand.Float64() * 5
+	delta += rand.Float64() * 2
 
 	return delta
 }
@@ -72,12 +86,12 @@ func (s *SpeechUrge) Update(msg GroupMessage, recentCount int, isToMe bool) bool
 	delta := s.calcDelta(msg, recentCount, isToMe)
 	s.value = math.Min(100, s.value+delta)
 
-	if s.value >= s.threshold {
-		s.value = 0
+	if isToMe {
 		return true
 	}
 
-	if isToMe {
+	if s.value >= s.threshold {
+		s.value = s.threshold * 0.3 // 保留30%，而不是归零
 		return true
 	}
 

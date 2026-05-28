@@ -119,7 +119,19 @@ func getTargetID(ctx *zero.Ctx) int64 {
 }
 
 func formatTime(t time.Time) string {
-	return t.Format("01-02 15:04:05")
+	elapsed := time.Since(t)
+	switch {
+	case elapsed < 20*time.Second:
+		return "刚刚"
+	case elapsed < time.Minute:
+		return fmt.Sprintf("%d秒前", int(elapsed.Seconds()))
+	case elapsed < time.Hour:
+		return fmt.Sprintf("%d分%d秒前", int(elapsed.Minutes()), int(elapsed.Seconds())%60)
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("%d小时%d分前", int(elapsed.Hours()), int(elapsed.Minutes())%60)
+	default:
+		return t.Format("01-02 15:04")
+	}
 }
 
 func formatMessages(msgs []GroupMessage) string {

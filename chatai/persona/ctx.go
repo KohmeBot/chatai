@@ -2,7 +2,6 @@ package persona
 
 import (
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 )
@@ -14,7 +13,7 @@ type groupContext struct {
 	// 戳一戳限流
 	pokeMp map[int64]time.Time
 	// 复读过的消息
-	repeatMsgs []string
+	lastRepeat string
 }
 
 func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
@@ -80,7 +79,7 @@ func (g *groupContext) Flush() {
 func (g *groupContext) clear() {
 	g.msgs = nil
 	g.abstract = abstract{}
-	g.repeatMsgs = nil
+	g.lastRepeat = ""
 }
 
 func (g *groupContext) RepeatThis(content string) (repeat bool, repeated bool) {
@@ -102,10 +101,10 @@ func (g *groupContext) RepeatThis(content string) (repeat bool, repeated bool) {
 	}
 
 	// 三条都一样，检查是否已经复读过了
-	repeated = slices.Contains(g.repeatMsgs, content)
+	repeated = g.lastRepeat == content
 
 	if !repeated {
-		g.repeatMsgs = append(g.repeatMsgs, content)
+		g.lastRepeat = content
 	}
 
 	return true, repeated
