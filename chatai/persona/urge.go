@@ -16,6 +16,12 @@ type SpeechUrge struct {
 	lastSpeakAt time.Time // 上次触发发言的时间
 	lastUser    User
 	repeatCount int
+
+	// 负反馈：记录最近触发时间
+	recentSpeaks []time.Time   // 滑动窗口
+	speakWindow  time.Duration // 窗口大小，比如 5 分钟
+	maxSpeaks    int           // 窗口内最多触发几次
+	penalty      float64       // 当前惩罚值，叠加到阈值上
 }
 
 func NewSpeechUrge(threshold float64) *SpeechUrge {
@@ -23,9 +29,30 @@ func NewSpeechUrge(threshold float64) *SpeechUrge {
 		panic("invalid threshold")
 	}
 	return &SpeechUrge{
-		threshold: threshold,
-		lastDecay: time.Now(),
+		threshold:   threshold,
+		lastDecay:   time.Now(),
+		speakWindow: 5 * time.Minute,
+		maxSpeaks:   3, // 5分钟内超过3次开始惩罚
 	}
+}
+
+func (s *SpeechUrge) calcPenalty() float64 {
+	now := time.Now()
+	cutoff := now.Add(-s.speakWindow)
+
+	valid := make([]time.Time, 0, len(s.recentSpeaks))
+	for _, t := range s.recentSpeaks {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	s.recentSpeaks = valid
+
+	over := len(s.recentSpeaks) - s.maxSpeaks
+	if over <= 0 {
+		return 0
+	}
+	return math.Min(float64(over)*20, 80)
 }
 
 // calcDelta 根据新消息计算发言欲增量
@@ -68,8 +95,8 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 
 	// 3. 寂寞加成：距离上次发言越久，增量越大
 	silentDuration := time.Since(s.lastSpeakAt).Minutes()
-	// 沉默5分钟开始生效，最多加20点
-	lonelyBonus := math.Min(math.Max(silentDuration-5, 0)*0.2, 20.0)
+	// 沉默5分钟开始生效，最多加8点
+	lonelyBonus := math.Min(math.Max(silentDuration-5, 0)*0.2, 8.0)
 	delta += lonelyBonus
 
 	delta += rand.Float64() * 2
@@ -94,15 +121,20 @@ func (s *SpeechUrge) Update(msg GroupMessage, recentCount int, isToMe bool) bool
 	delta := s.calcDelta(msg, recentCount, isToMe)
 	s.value = math.Min(100, s.value+delta)
 
+	penalty := s.calcPenalty()
+	effectiveThreshold := s.threshold + penalty
+
 	if isToMe {
 		s.value *= 0.75
 		s.lastSpeakAt = time.Now()
+		s.recentSpeaks = append(s.recentSpeaks, time.Now())
 		return true
 	}
 
-	if s.value >= s.threshold {
+	if s.value >= effectiveThreshold {
 		s.value = s.threshold * 0.1 // 保留10%，而不是归零
 		s.lastSpeakAt = time.Now()
+		s.recentSpeaks = append(s.recentSpeaks, time.Now())
 		return true
 	}
 
