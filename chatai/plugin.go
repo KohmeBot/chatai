@@ -5,29 +5,24 @@ import (
 	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/factory"
-	"github.com/kohmebot/pkg/gopool"
+	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/plugin/v2"
-	"github.com/sirupsen/logrus"
 	"github.com/wdvxdr1123/ZeroBot"
 )
 
 type ChatPlugin struct {
-	conf           Config
-	env            plugin.Env
-	batch          model.Batch
-	batchMp        model.BatchMap
-	gTicker        *GroupTicker
-	warmUpModel    model.LargeModel
-	joinGroupModel model.LargeModel
-	pokeModel      model.LargeModel
-	onBootModel    model.LargeModel
+	conf Config
+	env  plugin.Env
 
-	otherModel model.LargeModel
+	joinGroupModel model.LargeModel
+	otherModel     model.LargeModel
+
+	personaMap map[int64]*persona.Persona
 }
 
 func NewPlugin() plugin.Plugin {
 	return &ChatPlugin{
-		batchMp: model.NewBatchMap(),
+		personaMap: make(map[int64]*persona.Persona),
 	}
 }
 
@@ -94,42 +89,24 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		return err
 	}
 
-	m := factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.System),
-		Online:       c.conf.Online,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     c.conf.Thinking,
-		ResponseJson: c.conf.Favor,
-	})
+	if c.conf.Threshold == 0 {
+		//默认为50
+		c.conf.Threshold = 50
+	}
 
-	c.batch = model.NewBatch(m, c.onResponse, c.conf.History)
-	for user, prompt := range c.conf.SystemTarget {
-		tm := factory.NewLargeModel(model.Config{
+	c.personaMap = make(map[int64]*persona.Persona)
+	for group := range env.Groups().RangeGroup() {
+		p := persona.NewPersona(group, c.env, db, c.conf.Threshold, factory.NewLargeModel(model.Config{
 			Name:         c.conf.ModelName,
 			ApiKey:       c.conf.ApiKey,
-			System:       prompt,
+			System:       c.conf.System,
 			Online:       c.conf.Online,
 			MaxTokens:    c.conf.MaxTokens,
 			Thinking:     c.conf.Thinking,
-			ResponseJson: c.conf.Favor,
-		})
-
-		b := model.NewBatch(tm, c.onResponse, c.conf.History)
-		c.batchMp.SetBatch(user, b)
-		logrus.Infof("init prompt %s for %d", prompt, user)
+			ResponseJson: true,
+		}))
+		c.personaMap[group] = p
 	}
-
-	c.warmUpModel = factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.System,
-		Online:       false,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     c.conf.Thinking,
-		ResponseJson: c.conf.Favor,
-	})
 
 	c.joinGroupModel = factory.NewLargeModel(model.Config{
 		Name:         c.conf.ModelName,
@@ -138,27 +115,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
-		ResponseJson: c.conf.Favor,
-	})
-
-	c.pokeModel = factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       favor.Favor{Enable: c.conf.Favor}.WithSystem(c.conf.System),
-		Online:       false,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     c.conf.Thinking,
-		ResponseJson: c.conf.Favor,
-	})
-
-	c.onBootModel = factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.System,
-		Online:       false,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     c.conf.Thinking,
-		ResponseJson: c.conf.Favor,
+		ResponseJson: false,
 	})
 
 	c.otherModel = factory.NewLargeModel(model.Config{
@@ -168,22 +125,18 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
-		ResponseJson: c.conf.Favor,
+		ResponseJson: false,
 	})
 
-	c.SetOnAt(engine)
+	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
-	c.SetOnPoke(engine)
-	c.SetOnWarmup(engine)
 
 	return nil
 
 }
 
 func (c *ChatPlugin) OnBoot() {
-	gopool.Go(func() {
-		c.onBoot()
-	})
+
 }
 
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {
@@ -195,5 +148,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.3.2"
+	return "v0.4.0"
 }

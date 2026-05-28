@@ -1,13 +1,14 @@
-package model
+package persona
 
 import (
+	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/sirupsen/logrus"
 	"sync"
 	"time"
 )
 
 var session = chatSession{
-	sMap: make(map[Key][]chat),
+	sMap: make(map[int64][]chat),
 }
 
 func init() {
@@ -32,14 +33,14 @@ type chat struct {
 
 type chatSession struct {
 	rw   sync.RWMutex
-	sMap map[Key][]chat
+	sMap map[int64][]chat
 }
 
-func (c *chatSession) Append(key Key, req Request, resp Response) {
+func (c *chatSession) Append(uid int64, req model.Request, resp model.Response) {
 	c.rw.Lock()
 	defer c.rw.Unlock()
 
-	sess := c.sMap[key]
+	sess := c.sMap[uid]
 
 	sess = append(sess, chat{
 		Request:    req.Question,
@@ -52,22 +53,22 @@ func (c *chatSession) Append(key Key, req Request, resp Response) {
 		sess = sess[1:]
 	}
 
-	c.sMap[key] = sess
+	c.sMap[uid] = sess
 }
 
-func (c *chatSession) GetHistory(key Key) []Message {
+func (c *chatSession) GetHistory(uid int64) []model.Message {
 	c.rw.RLock()
 	defer c.rw.RUnlock()
 
-	sess := c.sMap[key]
+	sess := c.sMap[uid]
 
-	res := make([]Message, 0, len(sess))
+	res := make([]model.Message, 0, len(sess))
 
 	for _, v := range sess {
-		res = append(res, Message{
+		res = append(res, model.Message{
 			Role:    "user",
 			Content: v.Request,
-		}, Message{
+		}, model.Message{
 			Role:    "assistant",
 			Content: v.AIResponse,
 		})

@@ -17,38 +17,16 @@ type Config struct {
 	LimitTips string `yaml:"limit_tips"`
 	// 触发模型违规后的提示词
 	ErrorTips string `yaml:"error_tips"`
-	// 为qq号指定提示词
-	SystemTarget map[int64]string `yaml:"system_target"`
 
 	// 控制模型是否联网，如果对应模型支持的话
 	Online bool `yaml:"online"`
 	// 深度思考，如果对应模型支持的话
 	Thinking bool `yaml:"thinking"`
 
-	// 是否开启好感度系统,需要模型支持Json回复
-	Favor bool `yaml:"favor"`
+	// 触发发言欲
+	Threshold float64 `yaml:"threshold"`
 
-	// 是否开启历史记录功能，可能会增加token使用量
-	History bool `yaml:"history"`
-
-	WarmGroupConfig `yaml:"warm_group"`
 	JoinGroupConfig `yaml:"join_group"`
-	PokeGroupConfig `yaml:"poke_group"`
-	OnBootConfig    `yaml:"on_boot"`
-}
-
-// WarmGroupConfig 暖群配置
-type WarmGroupConfig struct {
-	// 是否开启
-	Enable bool `yaml:"enable"`
-	// 触发语句,用%d来代替时间(分钟)
-	Trigger string `yaml:"trigger"`
-	// 冷群间隔(分钟)
-	Duration int64 `yaml:"duration"`
-	// 开启的群,若为空,则默认为所有群(插件定义内)启用
-	Groups []int64 `yaml:"groups"`
-	// 禁用时间段(几点到几点)
-	DisableTimes []int `yaml:"disable_times"`
 }
 
 // JoinGroupConfig 加群配置
@@ -56,20 +34,5 @@ type JoinGroupConfig struct {
 	// 是否开启
 	Enable bool `yaml:"enable"`
 	// 触发语句,用%s来代替新人的NickName
-	Trigger string `yaml:"trigger"`
-}
-
-type PokeGroupConfig struct {
-	// 是否开启
-	Enable bool `yaml:"enable"`
-	// 触发语句,用%s来代替NickName
-	Trigger string `yaml:"trigger"`
-}
-
-// OnBootConfig 启动配置
-type OnBootConfig struct {
-	// 是否开启
-	Enable bool `yaml:"enable"`
-	// 触发语句
 	Trigger string `yaml:"trigger"`
 }
