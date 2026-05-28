@@ -23,10 +23,12 @@ func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 		}
 	})
 
-	// 每个群,每人最多
-
 	engine.OnNotice(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
 		if ctx.Event.SubType != persona.MsgTypePoke {
+			return
+		}
+		if ctx.Event.Sender.ID == ctx.Event.SelfID {
+			// 发送者是自己就不用记录了
 			return
 		}
 		group := ctx.Event.GroupID
