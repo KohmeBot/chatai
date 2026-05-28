@@ -32,16 +32,19 @@ func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
 
 }
 
-func (g *groupContext) Refer(msgId int64) {
+func (g *groupContext) Refer(msgId int64) (referred bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for i, msg := range g.msgs {
 		if msg.MsgID == msgId {
+			referred = msg.Refer
 			msg.Refer = true
 			g.msgs[i] = msg
-			return
+			return referred
 		}
 	}
+
+	return false
 
 }
 

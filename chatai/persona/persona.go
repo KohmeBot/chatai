@@ -193,7 +193,10 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 			rMsg := ctx.GetMessage(rsp.ReplayMsg)
 			if len(rMsg.Elements) > 0 {
 				msgs = append(msgs, message.Reply(rsp.ReplayMsg), message.At(rMsg.Sender.ID))
-				p.gc.Refer(rsp.ReplayMsg)
+				if p.gc.Refer(rsp.ReplayMsg) {
+					// 如果已引用过，则忽略就好了，容错
+					return
+				}
 			}
 		case rsp.AtTarget > 0:
 			// 有At对象

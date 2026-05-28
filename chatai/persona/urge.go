@@ -35,11 +35,11 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 	// 1. 消息类型加成
 	switch msg.MsgType {
 	case MsgTypeText:
-		delta += 4.0
+		delta += 2.0
 	case MsgTypeReply:
 		delta += 6.0
 	default:
-		delta += 2.0
+		delta += 1.0
 	}
 
 	if l := runeLen(msg.Content); l > 0 {
@@ -55,7 +55,7 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 		delta += 1.0
 	case s.lastUser == msg.User:
 		s.repeatCount++
-		delta += math.Min(math.Sqrt(float64(s.repeatCount))*3.0, 10.0)
+		delta += math.Min(float64(s.repeatCount), 6.0)
 
 	}
 
@@ -73,8 +73,8 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 func (s *SpeechUrge) applyDecay() {
 	now := time.Now()
 	elapsed := now.Sub(s.lastDecay).Seconds()
-	// 每秒衰减 0.5 点，群沉默时 AI 也会逐渐"冷静"
-	s.value = math.Max(0, s.value-elapsed*0.5)
+	// 每秒衰减 1 点，群沉默时 AI 也会逐渐"冷静"
+	s.value = math.Max(0, s.value-elapsed*1)
 	s.lastDecay = now
 }
 
@@ -91,7 +91,7 @@ func (s *SpeechUrge) Update(msg GroupMessage, recentCount int, isToMe bool) bool
 	}
 
 	if s.value >= s.threshold {
-		s.value = s.threshold * 0.3 // 保留30%，而不是归零
+		s.value = s.threshold * 0.1 // 保留10%，而不是归零
 		return true
 	}
 
