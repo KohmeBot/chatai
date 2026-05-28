@@ -76,6 +76,67 @@ type GroupMessage struct {
 	Refer      bool      // 是否已引用
 }
 
+func (g GroupMessage) IsEmpty() bool {
+	return g == GroupMessage{}
+}
+
+func newMessage(ctx *zero.Ctx) GroupMessage {
+	segments := ctx.Event.Message
+
+	msgType := getMsgType(segments)
+
+	if ctx.Event.SubType == MsgTypePoke {
+		msgType = MsgTypePoke
+	}
+
+	if !HasMsgType(msgType) {
+		return GroupMessage{}
+	}
+
+	msgId, _ := ctx.Event.MessageID.(int64)
+
+	msg := GroupMessage{
+		User: User{
+			UserId:   ctx.Event.UserID,
+			Nickname: ctx.CardOrNickName(ctx.Event.UserID),
+		},
+		TargetUser: User{},
+		Url:        getUrl(segments),
+		Content:    getText(segments),
+		MsgType:    msgType,
+		MsgID:      msgId,
+		CreatedAt:  time.Now(),
+	}
+
+	target := getTargetID(ctx)
+	if target > 0 {
+		msg.TargetUser = User{
+			UserId:   target,
+			Nickname: ctx.CardOrNickName(target),
+		}
+	}
+
+	if ctx.Event.IsToMe {
+		msg.TargetUser = User{
+			Nickname: "你",
+			UserId:   ctx.Event.SelfID,
+		}
+	}
+	return msg
+}
+
+func getMsgType(msgs message.Message) string {
+	var msgType string
+	for _, m := range msgs {
+		msgType = m.Type
+		if msgType != MsgTypeText {
+			// 找到第一个非text的消息
+			break
+		}
+	}
+	return msgType
+}
+
 func getUrl(msgs message.Message) string {
 	for _, m := range msgs {
 		if m.Type == MsgTypeImg {
@@ -93,9 +154,13 @@ func getTargetID(ctx *zero.Ctx) int64 {
 	if ctx.Event.TargetID != 0 {
 		return ctx.Event.TargetID
 	}
+	return getTargetIDFromMsgs(ctx, ctx.Event.Message)
+}
+
+func getTargetIDFromMsgs(ctx *zero.Ctx, msgs message.Message) int64 {
 	var targetID int64
 	// 优先找at
-	for _, segment := range ctx.Event.Message {
+	for _, segment := range msgs {
 		if segment.Type == "at" {
 			targetID, _ = strconv.ParseInt(segment.Data["qq"], 10, 64)
 			break
@@ -106,7 +171,7 @@ func getTargetID(ctx *zero.Ctx) int64 {
 	}
 
 	// 找引用的消息
-	for _, segment := range ctx.Event.Message {
+	for _, segment := range msgs {
 		if segment.Type == "reply" {
 			msgId, _ := strconv.ParseInt(segment.Data["id"], 10, 64)
 			m := ctx.GetMessage(msgId)
@@ -116,7 +181,6 @@ func getTargetID(ctx *zero.Ctx) int64 {
 	}
 
 	return targetID
-
 }
 
 func formatTime(t time.Time) string {

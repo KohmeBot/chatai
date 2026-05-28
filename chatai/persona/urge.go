@@ -87,6 +87,7 @@ func (s *SpeechUrge) Update(msg GroupMessage, recentCount int, isToMe bool) bool
 	s.value = math.Min(100, s.value+delta)
 
 	if isToMe {
+		s.value *= 0.75
 		return true
 	}
 

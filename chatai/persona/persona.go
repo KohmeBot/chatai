@@ -48,52 +48,9 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 
 	p.gc.Flush()
 
-	segments := ctx.Event.Message
-	var msgType string
-	for _, segment := range segments {
-		msgType = segment.Type
-		if msgType != MsgTypeText {
-			// 找到第一个非text的消息
-			break
-		}
-	}
-
-	if ctx.Event.SubType == MsgTypePoke {
-		msgType = MsgTypePoke
-	}
-
-	if !HasMsgType(msgType) {
+	msg := newMessage(ctx)
+	if msg.IsEmpty() {
 		return nil
-	}
-
-	msgId, _ := ctx.Event.MessageID.(int64)
-
-	msg := GroupMessage{
-		User: User{
-			UserId:   ctx.Event.UserID,
-			Nickname: ctx.CardOrNickName(ctx.Event.UserID),
-		},
-		TargetUser: User{},
-		Url:        getUrl(segments),
-		Content:    getText(segments),
-		MsgType:    msgType,
-		MsgID:      msgId,
-		CreatedAt:  time.Now(),
-	}
-
-	target := getTargetID(ctx)
-	if target > 0 {
-		msg.TargetUser = User{
-			UserId:   target,
-			Nickname: ctx.CardOrNickName(target),
-		}
-	}
-
-	if ctx.Event.IsToMe {
-		msg.TargetUser = User{
-			Nickname: "你",
-			UserId:   ctx.Event.SelfID,
-		}
 	}
 
 	// 统计过去 120 秒的消息数，用于活跃度计算
@@ -106,7 +63,7 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 			return nil
 		}
 		if repeat {
-			ctx.Send(ctx.Event.Message)
+			p.aiSend(ctx, ctx.Event.Message)
 			return nil
 		}
 	}
@@ -206,8 +163,7 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 	}
 
 	if rsp.PokeTarget > 0 {
-		// send_poke为napcat的私有接口，并不遵循onebot11标准，在非napcat上可能会报错
-		ctx.CallAction("send_poke", zero.Params{"group_id": p.groupId, "user_id": rsp.PokeTarget})
+		p.aiPoke(ctx, rsp.PokeTarget)
 	}
 
 	if rsp.Text != "" {
@@ -217,7 +173,44 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 		msgs = append(msgs, message.Text(rsp.Text))
 	}
 
-	ctx.Send(msgs)
+	p.aiSend(ctx, msgs)
+
+}
+
+func (p *Persona) aiSend(ctx *zero.Ctx, segments message.Message) {
+	msgId := ctx.Send(segments).ID()
+	targetId := getTargetIDFromMsgs(ctx, segments)
+	msg := GroupMessage{
+		User:      User{UserId: ctx.Event.SelfID, Nickname: "你"},
+		Content:   segments.ExtractPlainText(),
+		MsgType:   getMsgType(segments),
+		MsgID:     msgId,
+		CreatedAt: time.Now(),
+		Url:       getUrl(segments),
+	}
+
+	if targetId > 0 {
+		msg.TargetUser = User{
+			UserId:   targetId,
+			Nickname: ctx.CardOrNickName(targetId),
+		}
+	}
+	p.gc.AppendMsg(msg, 0)
+}
+
+func (p *Persona) aiPoke(ctx *zero.Ctx, targetId int64) {
+	// send_poke为napcat的私有接口，并不遵循onebot11标准，在非napcat上可能会报错
+	ctx.CallAction("send_poke", zero.Params{"group_id": p.groupId, "user_id": targetId})
+	msg := GroupMessage{
+		User: User{UserId: ctx.Event.SelfID, Nickname: "你"},
+		TargetUser: User{
+			UserId:   targetId,
+			Nickname: ctx.CardOrNickName(targetId),
+		},
+		MsgType:   MsgTypePoke,
+		CreatedAt: time.Now(),
+	}
+	p.gc.AppendMsg(msg, 0)
 }
 
 func (p *Persona) sendRequest(builder *promptBuilder) (*ChatJson, error) {
