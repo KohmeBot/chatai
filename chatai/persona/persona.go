@@ -52,6 +52,10 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 		}
 	}
 
+	if ctx.Event.SubType == MsgTypePoke {
+		msgType = MsgTypePoke
+	}
+
 	if !HasMsgType(msgType) {
 		return nil
 	}
@@ -102,6 +106,11 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 }
 
 func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
+	if msg.MsgType == MsgTypePoke && ctx.Event.IsToMe {
+		if !p.gc.CanPoke(msg.User.UserId) {
+			return nil
+		}
+	}
 
 	msgCtx := p.gc.Context()
 

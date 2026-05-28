@@ -10,6 +10,8 @@ type groupContext struct {
 	mu       sync.RWMutex
 	msgs     []GroupMessage
 	abstract abstract
+	// 戳一戳限流
+	pokeMp map[int64]time.Time
 }
 
 func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
@@ -26,6 +28,22 @@ func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
 	}
 	return count
 
+}
+
+func (g *groupContext) CanPoke(qq int64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pokeMp == nil {
+		g.pokeMp = map[int64]time.Time{}
+	}
+	// 每个人cd为8s
+	now := time.Now()
+	last := g.pokeMp[qq]
+	if now.Sub(last) < 8*time.Second {
+		return false
+	}
+	g.pokeMp[qq] = now
+	return true
 }
 
 func (g *groupContext) UpdateAbstract(ab abstract) {
@@ -83,8 +101,8 @@ func (g *groupContext) Context() MsgContext {
 
 func (g *groupContext) needUpdateAbstract(ctxText string) bool {
 	// 判断当前是否需要更新摘要
-	if runeLen(ctxText) >= 600 {
-		// 上下文长度超过600，需要更新摘要
+	if runeLen(ctxText) >= 1500 {
+		// 上下文长度超过1500，需要更新摘要
 		return true
 	}
 	return false

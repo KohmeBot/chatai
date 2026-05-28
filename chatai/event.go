@@ -3,6 +3,7 @@ package chatai
 import (
 	"fmt"
 	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/pkg/chain"
 	"github.com/kohmebot/pkg/gopool"
 	"github.com/kohmebot/plugin/v2"
@@ -13,6 +14,21 @@ import (
 
 func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 	engine.OnMessage(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
+		group := ctx.Event.GroupID
+		p := c.personaMap[group]
+		err := p.UpdateContext(ctx)
+		if err != nil {
+			c.env.Error(ctx, err)
+			return
+		}
+	})
+
+	// 每个群,每人最多
+
+	engine.OnNotice(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
+		if ctx.Event.SubType != persona.MsgTypePoke {
+			return
+		}
 		group := ctx.Event.GroupID
 		p := c.personaMap[group]
 		err := p.UpdateContext(ctx)
