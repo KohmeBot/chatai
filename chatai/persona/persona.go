@@ -60,6 +60,8 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 		return nil
 	}
 
+	msgId, _ := ctx.Event.MessageID.(int64)
+
 	msg := GroupMessage{
 		User: User{
 			UserId:   ctx.Event.UserID,
@@ -69,7 +71,7 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 		Url:        getUrl(segments),
 		Content:    getText(segments),
 		MsgType:    msgType,
-		MsgID:      ctx.Event.MessageID.(int64),
+		MsgID:      msgId,
 		CreatedAt:  time.Now(),
 	}
 
@@ -152,7 +154,10 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 	msgs := make([]message.Segment, 0)
 	if isAtMe {
 		_ = favor.UpdateFavor(p.db, msg.User.UserId, rsp.Favor)
-		msgs = append(msgs, message.Reply(ctx.Event.MessageID), message.At(msg.User.UserId), message.Text(" "))
+		if msg.MsgID > 0 {
+			msgs = append(msgs, message.Reply(msg.MsgID))
+		}
+		msgs = append(msgs, message.At(msg.User.UserId), message.Text(" "))
 
 	} else {
 		// 非At消息

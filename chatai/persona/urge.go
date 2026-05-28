@@ -50,7 +50,7 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 	activityBonus := math.Min(float64(recentCount)*0.4, 10.0)
 	delta += activityBonus
 
-	delta += rand.Float64() * 10
+	delta += rand.Float64() * 5
 
 	return delta
 }
