@@ -32,6 +32,19 @@ func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
 
 }
 
+func (g *groupContext) Refer(msgId int64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for i, msg := range g.msgs {
+		if msg.MsgID == msgId {
+			msg.Refer = true
+			g.msgs[i] = msg
+			return
+		}
+	}
+
+}
+
 func (g *groupContext) CanPoke(qq int64) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()

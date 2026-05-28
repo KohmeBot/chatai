@@ -73,6 +73,7 @@ type GroupMessage struct {
 	MsgID      int64     // 消息ID,可以定位消息
 	CreatedAt  time.Time // 创建时间
 	Url        string    // url
+	Refer      bool      // 是否已引用
 }
 
 func getUrl(msgs message.Message) string {
@@ -189,6 +190,9 @@ func formatMessage(msg GroupMessage) string {
 	if runeLen(content) > 30 {
 		// 限制30字
 		content = string([]rune(content)[:30]) + "..."
+	}
+	if msg.Refer {
+		builder.WriteString("[已回复] ")
 	}
 	// <ID> [5-15 11:11] 某某: XXX
 	builder.WriteString(fmt.Sprintf("<%d> [%s] %s [%s]", msg.MsgID, formatTime(msg.CreatedAt), u.String(), action))

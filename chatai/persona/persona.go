@@ -179,6 +179,7 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 		_ = favor.UpdateFavor(p.db, msg.User.UserId, rsp.Favor)
 		if msg.MsgID > 0 {
 			msgs = append(msgs, message.Reply(msg.MsgID))
+			p.gc.Refer(msg.MsgID)
 		}
 		msgs = append(msgs, message.At(msg.User.UserId))
 
@@ -192,6 +193,7 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 			rMsg := ctx.GetMessage(rsp.ReplayMsg)
 			if len(rMsg.Elements) > 0 {
 				msgs = append(msgs, message.Reply(rsp.ReplayMsg), message.At(rMsg.Sender.ID))
+				p.gc.Refer(rsp.ReplayMsg)
 			}
 		case rsp.AtTarget > 0:
 			// 有At对象
