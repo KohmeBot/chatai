@@ -86,6 +86,7 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	if ctx.Event.IsToMe {
 		msg.TargetUser = User{
 			Nickname: "你",
+			UserId:   ctx.Event.SelfID,
 		}
 	}
 
@@ -157,7 +158,7 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 		if msg.MsgID > 0 {
 			msgs = append(msgs, message.Reply(msg.MsgID))
 		}
-		msgs = append(msgs, message.At(msg.User.UserId), message.Text(" "))
+		msgs = append(msgs, message.At(msg.User.UserId))
 
 	} else {
 		// 非At消息
@@ -168,11 +169,11 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 			// 获取到对应消息的发送者，需要at
 			rMsg := ctx.GetMessage(rsp.ReplayMsg)
 			if len(rMsg.Elements) > 0 {
-				msgs = append(msgs, message.Reply(rsp.ReplayMsg), message.At(rMsg.Sender.ID), message.Text(" "))
+				msgs = append(msgs, message.Reply(rsp.ReplayMsg), message.At(rMsg.Sender.ID))
 			}
 		case rsp.AtTarget > 0:
 			// 有At对象
-			msgs = append(msgs, message.At(rsp.AtTarget), message.Text(" "))
+			msgs = append(msgs, message.At(rsp.AtTarget))
 		}
 
 	}
@@ -182,7 +183,12 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 		ctx.CallAction("send_poke", zero.Params{"group_id": p.groupId, "user_id": rsp.PokeTarget})
 	}
 
-	msgs = append(msgs, message.Text(rsp.Text))
+	if rsp.Text != "" {
+		if len(msgs) > 0 {
+			msgs = append(msgs, message.Text(" "))
+		}
+		msgs = append(msgs, message.Text(rsp.Text))
+	}
 
 	ctx.Send(msgs)
 }
