@@ -9,11 +9,11 @@ import (
 
 // SpeechUrge 管理AI的"发言欲"数值
 type SpeechUrge struct {
-	mu        sync.RWMutex
-	value     float64   // 当前发言欲，范围 [0, 100]
-	threshold float64   // 触发发言的阈值
-	lastDecay time.Time // 上次衰减时间
-
+	mu          sync.RWMutex
+	value       float64   // 当前发言欲，范围 [0, 100]
+	threshold   float64   // 触发发言的阈值
+	lastDecay   time.Time // 上次衰减时间
+	lastSpeakAt time.Time // 上次触发发言的时间
 	lastUser    User
 	repeatCount int
 }
@@ -36,6 +36,8 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 	switch msg.MsgType {
 	case MsgTypeText:
 		delta += 2.0
+	case MsgTypeAt:
+		delta += 4.0
 	case MsgTypeReply:
 		delta += 6.0
 	default:
@@ -64,6 +66,12 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 	activityBonus := math.Min(math.Sqrt(float64(recentCount))*2.0, 10.0)
 	delta += activityBonus
 
+	// 3. 寂寞加成：距离上次发言越久，增量越大
+	silentDuration := time.Since(s.lastSpeakAt).Minutes()
+	// 沉默5分钟开始生效，最多加20点
+	lonelyBonus := math.Min(math.Max(silentDuration-5, 0)*0.2, 20.0)
+	delta += lonelyBonus
+
 	delta += rand.Float64() * 2
 
 	return delta
@@ -73,8 +81,8 @@ func (s *SpeechUrge) calcDelta(msg GroupMessage, recentCount int, isToMe bool) f
 func (s *SpeechUrge) applyDecay() {
 	now := time.Now()
 	elapsed := now.Sub(s.lastDecay).Seconds()
-	// 每秒衰减 1 点，群沉默时 AI 也会逐渐"冷静"
-	s.value = math.Max(0, s.value-elapsed*1)
+	// 每秒衰减 0.3 点，群沉默时 AI 也会逐渐"冷静"
+	s.value = math.Max(0, s.value-elapsed*0.3)
 	s.lastDecay = now
 }
 
@@ -88,11 +96,13 @@ func (s *SpeechUrge) Update(msg GroupMessage, recentCount int, isToMe bool) bool
 
 	if isToMe {
 		s.value *= 0.75
+		s.lastSpeakAt = time.Now()
 		return true
 	}
 
 	if s.value >= s.threshold {
 		s.value = s.threshold * 0.1 // 保留10%，而不是归零
+		s.lastSpeakAt = time.Now()
 		return true
 	}
 

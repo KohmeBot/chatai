@@ -27,7 +27,7 @@ func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 		if ctx.Event.SubType != persona.MsgTypePoke {
 			return
 		}
-		if ctx.Event.Sender.ID == ctx.Event.SelfID {
+		if ctx.Event.UserID == ctx.Event.SelfID {
 			// 发送者是自己就不用记录了
 			return
 		}
