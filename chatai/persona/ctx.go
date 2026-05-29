@@ -2,6 +2,7 @@ package persona
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -13,7 +14,7 @@ type groupContext struct {
 	// 戳一戳限流
 	pokeMp map[int64]time.Time
 	// 复读过的消息
-	lastRepeat string
+	lastRepeat GroupMessage
 }
 
 func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
@@ -95,10 +96,10 @@ func (g *groupContext) Flush() {
 func (g *groupContext) clear() {
 	g.msgs = nil
 	g.abstract = abstract{}
-	g.lastRepeat = ""
+	g.lastRepeat = GroupMessage{}
 }
 
-func (g *groupContext) RepeatThis(content string) (repeat bool, repeated bool) {
+func (g *groupContext) RepeatThis(m GroupMessage) (repeat bool, repeated bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -108,19 +109,20 @@ func (g *groupContext) RepeatThis(content string) (repeat bool, repeated bool) {
 
 	last3 := g.msgs[len(g.msgs)-3:]
 	for _, msg := range last3 {
-		if msg.MsgType != MsgTypeText {
+		if !slices.Contains([]string{MsgTypeText, MsgTypeAt, MsgTypeReply, MsgTypeImg}, msg.MsgType) {
 			return false, false
 		}
-		if msg.Content != content {
+
+		if !msg.ContentEqual(m) {
 			return false, false
 		}
 	}
 
 	// 三条都一样，检查是否已经复读过了
-	repeated = g.lastRepeat == content
+	repeated = g.lastRepeat.ContentEqual(m)
 
 	if !repeated {
-		g.lastRepeat = content
+		g.lastRepeat = m
 	}
 
 	return true, repeated

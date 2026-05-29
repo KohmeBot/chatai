@@ -89,6 +89,10 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
+	err = db.AutoMigrate(&persona.UserImpression{})
+	if err != nil {
+		return err
+	}
 
 	if c.conf.Threshold == 0 {
 		//默认为50
@@ -153,5 +157,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.4.11"
+	return "v0.4.12"
 }

@@ -74,6 +74,33 @@ type GroupMessage struct {
 	CreatedAt  time.Time // 创建时间
 	Url        string    // url
 	Refer      bool      // 是否已引用
+
+}
+
+func (g GroupMessage) ContentEqual(msg GroupMessage) bool {
+	switch g.MsgType {
+	case MsgTypeText:
+		return g.Content == msg.Content
+	case MsgTypeImg:
+		return g.Content == msg.Content && g.Url == msg.Url
+	case MsgTypeAt:
+		return g.Content == msg.Content && g.TargetUser == msg.TargetUser
+	case MsgTypePoke:
+		return g.TargetUser == msg.TargetUser
+	case MsgTypeReply:
+		return g.Content == msg.Content && g.TargetUser == msg.TargetUser
+	case MsgTypeForward:
+		// TODO 还没实现
+		return false
+	case MsgTypeRecord:
+		// TODO 还没实现
+		return false
+	case MsgTypeJson:
+		// TODO 还没实现
+		return false
+	}
+
+	return false
 }
 
 func (g GroupMessage) IsEmpty() bool {

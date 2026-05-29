@@ -56,16 +56,14 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	// 统计过去 120 秒的消息数，用于活跃度计算
 	recentCount := p.gc.AppendMsg(msg, 120*time.Second)
 
-	if msg.MsgType == MsgTypeText {
-		// 如果群内在复读，直接参与复读就好了
-		repeat, repeated := p.gc.RepeatThis(msg.Content)
-		if repeated {
-			return nil
-		}
-		if repeat {
-			p.aiSend(ctx, ctx.Event.Message)
-			return nil
-		}
+	// 如果群内在复读，直接参与复读就好了
+	repeat, repeated := p.gc.RepeatThis(msg)
+	if repeated {
+		return nil
+	}
+	if repeat {
+		p.aiSend(ctx, ctx.Event.Message)
+		return nil
 	}
 
 	before := p.urge.Value()
@@ -104,7 +102,12 @@ func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
 		if err != nil {
 			return err
 		}
-		builder.WithAtMe(msg, val, msg.MsgType == MsgTypePoke)
+		imper, err := new(UserImpression).Get(p.db, p.groupId, msg.User.UserId)
+		if err != nil {
+			return err
+		}
+
+		builder.WithAtMe(msg, val, msg.MsgType == MsgTypePoke, imper)
 	}
 
 	go p.thinking(ctx, msg, builder)
@@ -174,6 +177,11 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 	}
 
 	p.aiSend(ctx, msgs)
+
+	// 更新印象
+	for _, impression := range rsp.UpdateImpressions {
+		_ = new(UserImpression).Update(p.db, p.groupId, impression)
+	}
 
 }
 

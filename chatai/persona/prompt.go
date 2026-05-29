@@ -36,6 +36,8 @@ const speakPrompt = `
 
 const speakPromptWithAtMe = `
 %s @了你，对你说了「%s」，你对他的好感度是%d(%s:%s)，好感度的范围是(%d~%d)，你需要根据他说的话做出反应
+你对他的印象是:
+%s
 你需要认真回应他说的话。除非他明显是在开玩笑或随便聊，否则都应该给出实质性的回答，不要一笔带过
 以下是较早之前的聊天摘要，仅供参考背景，不代表当前话题：
 %s
@@ -52,6 +54,8 @@ const speakPromptWithAtMe = `
 
 const speakPromptWithPokeMe = `
 %s 戳了一下你，你对他的好感度是%d(%s:%s)，好感度的范围是(%d~%d)，你需要对他作出反应，如果你想回戳他，在 pokeTarget 里填上他的ID
+你对他的印象是:
+%s
 以下是较早之前的聊天摘要，仅供参考背景，不代表当前话题：
 %s
 
@@ -70,7 +74,13 @@ const speakJson = `
 {
 	"text": "你要说的话,如果你在最近的消息记录中已经对某个话题发表过看法，不要重复接同一个话题，换一个角度或保持沉默。以下情况可以留空保持沉默：群内刚有人说过类似的话、你没有有价值的补充",
 	"atTarget": 如果你判断说这句话需要@一个人,则把它的ID填到这里(int格式),非必要不@,
-	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复
+	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复,
+	"updateImpressions": [
+			{
+				"userId": 你需要更新印象的这个人的ID(int格式),只更新在群聊中有实质性内容的人,
+				"content": "用第一人称更新你对这个人的印象，融合之前的印象和本次互动内容，400字以内。记录他的性格、说话习惯、对你的态度、值得记住的细节。写得像备忘录而不是日记，信息密度高一点，不要有废话"
+			}
+		]
 }
 `
 const speakAndUpdateAbstractJson = `
@@ -80,7 +90,13 @@ const speakAndUpdateAbstractJson = `
 	"atTarget": 如果你判断说这句话需要@一个人,则把它的ID填到这里(int格式),非必要不@,
 	"pokeTarget": 如果你判断需要戳一个人，则把它的ID填到这里(int格式),非必要不戳他,
 	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复,
-	"newAbstract": "为你自己下次参与群聊准备的上下文备忘，用第一人称记录关键事件、你说了什么、群友的态度变化，1000字以内"
+	"newAbstract": "为你自己下次参与群聊准备的上下文备忘，用第一人称记录关键事件、你说了什么、群友的态度变化，1000字以内",
+	"updateImpressions": [
+			{
+				"userId": 你需要更新印象的这个人的ID(int格式),只更新在群聊中有实质性内容的人,
+				"content": "用第一人称更新你对这个人的印象，融合之前的印象和本次互动内容，400字以内。记录他的性格、说话习惯、对你的态度、值得记住的细节。写得像备忘录而不是日记，信息密度高一点，不要有废话"
+			}
+		]
 }
 `
 const atMeJson = `
@@ -90,7 +106,13 @@ const atMeJson = `
 	"atTarget": 如果你判断说这句话需要@一个人,则把它的ID填到这里(int格式),非必要不@,
 	"pokeTarget": 如果你判断需要戳一个人，则把它的ID填到这里(int格式),非必要不戳他,
 	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复,
-	"favor": 这是根据群友对你说的话增加或者减少的好感度(int格式),每次最多增加%d点,减少%d点
+	"favor": 这是根据群友对你说的话增加或者减少的好感度(int格式),每次最多增加%d点,减少%d点,
+	"updateImpressions": [
+			{
+				"userId": 你需要更新印象的这个人的ID(int格式),只更新在群聊中有实质性内容的人,
+				"content": "用第一人称更新你对这个人的印象，融合之前的印象和本次互动内容，400字以内。记录他的性格、说话习惯、对你的态度、值得记住的细节。写得像备忘录而不是日记，信息密度高一点，不要有废话"
+			}
+		]
 }
 `
 const atMeAndUpdateAbstractJson = `
@@ -101,7 +123,13 @@ const atMeAndUpdateAbstractJson = `
 	"pokeTarget": 如果你判断需要戳一个人，则把它的ID填到这里(int格式),非必要不戳他,
 	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复,
 	"favor": 这是根据群友对你说的话增加或者减少的好感度(int格式),每次最多增加%d点,减少%d点,
-	"newAbstract": "为你自己下次参与群聊准备的上下文备忘，用第一人称记录关键事件、你说了什么、群友的态度变化，1000字以内"
+	"newAbstract": "为你自己下次参与群聊准备的上下文备忘，用第一人称记录关键事件、你说了什么、群友的态度变化，1000字以内",
+	"updateImpressions": [
+			{
+				"userId": 你需要更新印象的这个人的ID(int格式),只更新在群聊中有实质性内容的人,
+				"content": "用第一人称更新你对这个人的印象，融合之前的印象和本次互动内容，400字以内。记录他的性格、说话习惯、对你的态度、值得记住的细节。写得像备忘录而不是日记，信息密度高一点，不要有废话"
+			}
+		]
 }
 `
 const pokeMeJson = `
@@ -111,7 +139,13 @@ const pokeMeJson = `
 	"atTarget": 如果你判断说这句话需要@一个人,则把它的ID填到这里(int格式),非必要不@,
 	"pokeTarget": 如果你判断需要戳一个人，则把它的ID填到这里(int格式),非必要不戳他,
 	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复,
-	"favor": 这是根据群友对你说的话增加或者减少的好感度(int格式),每次最多增加%d点,减少%d点
+	"favor": 这是根据群友对你说的话增加或者减少的好感度(int格式),每次最多增加%d点,减少%d点,
+	"updateImpressions": [
+			{
+				"userId": 你需要更新印象的这个人的ID(int格式),只更新在群聊中有实质性内容的人,
+				"content": "用第一人称更新你对这个人的印象，融合之前的印象和本次互动内容，400字以内。记录他的性格、说话习惯、对你的态度、值得记住的细节。写得像备忘录而不是日记，信息密度高一点，不要有废话"
+			}
+		]
 }
 `
 const pokeMeAndUpdateAbstractJson = `
@@ -122,7 +156,13 @@ const pokeMeAndUpdateAbstractJson = `
 	"pokeTarget": 如果你判断需要戳一个人，则把它的ID填到这里(int格式),非必要不戳他,
 	"replayMsg": 如果你判断说这句话需要引用某条消息,则把它的消息id填到这里(int格式),标注了[已回复]的消息不要再引用或回应，避免重复,非必要不回复,
 	"favor": 这是根据群友对你说的话增加或者减少的好感度(int格式),每次最多增加%d点,减少%d点,
-	"newAbstract": "为你自己下次参与群聊准备的上下文备忘，用第一人称记录关键事件、你说了什么、群友的态度变化，1000字以内"
+	"newAbstract": "为你自己下次参与群聊准备的上下文备忘，用第一人称记录关键事件、你说了什么、群友的态度变化，1000字以内",
+	"updateImpressions": [
+			{
+				"userId": 你需要更新印象的这个人的ID(int格式),只更新在群聊中有实质性内容的人,
+				"content": "用第一人称更新你对这个人的印象，融合之前的印象和本次互动内容，400字以内。记录他的性格、说话习惯、对你的态度、值得记住的细节。写得像备忘录而不是日记，信息密度高一点，不要有废话"
+			}
+		]
 }
 `
 
@@ -131,6 +171,7 @@ type promptBuilder struct {
 	isPokeMe    bool
 	toMeMsg     GroupMessage
 	targetFavor int64
+	impression  Impression
 
 	msgCtx MsgContext
 }
@@ -141,11 +182,12 @@ func newPromptBuilder(msgCtx MsgContext) *promptBuilder {
 	}
 }
 
-func (p *promptBuilder) WithAtMe(msg GroupMessage, targetFavor int64, isPoke bool) {
+func (p *promptBuilder) WithAtMe(msg GroupMessage, targetFavor int64, isPoke bool, impression Impression) {
 	p.isAtMe = true
 	p.toMeMsg = msg
 	p.targetFavor = targetFavor
 	p.isPokeMe = isPoke
+	p.impression = impression
 }
 
 func (p *promptBuilder) Build() string {
@@ -161,6 +203,7 @@ func (p *promptBuilder) Build() string {
 			speakPromptWithPokeMe,
 			p.toMeMsg.User.String(),
 			p.targetFavor, desc.Name, desc.Desc, favor.FavorMin, favor.FavorMax,
+			p.impression.String(),
 			p.msgCtx.abstract.String(),
 			p.msgCtx.groupMsgContent,
 		))
@@ -170,6 +213,7 @@ func (p *promptBuilder) Build() string {
 			speakPromptWithAtMe,
 			p.toMeMsg.User.String(), p.toMeMsg.Content,
 			p.targetFavor, desc.Name, desc.Desc, favor.FavorMin, favor.FavorMax,
+			p.impression.String(),
 			p.msgCtx.abstract.String(),
 			p.msgCtx.groupMsgContent,
 		))
