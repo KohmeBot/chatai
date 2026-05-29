@@ -55,10 +55,10 @@ func (g *groupContext) CanPoke(qq int64) bool {
 	if g.pokeMp == nil {
 		g.pokeMp = map[int64]time.Time{}
 	}
-	// 每个人cd为8s
+	// 每个人cd为10s
 	now := time.Now()
 	last := g.pokeMp[qq]
-	if now.Sub(last) < 8*time.Second {
+	if now.Sub(last) < 10*time.Second {
 		return false
 	}
 	g.pokeMp[qq] = now

@@ -73,6 +73,7 @@ type GroupMessage struct {
 	MsgID      int64     // 消息ID,可以定位消息
 	CreatedAt  time.Time // 创建时间
 	Url        string    // url
+	FileName   string    // file name
 	Refer      bool      // 是否已引用
 
 }
@@ -82,7 +83,7 @@ func (g GroupMessage) ContentEqual(msg GroupMessage) bool {
 	case MsgTypeText:
 		return g.Content == msg.Content
 	case MsgTypeImg:
-		return g.Content == msg.Content && g.Url == msg.Url
+		return g.Content == msg.Content && (g.Url == msg.Url || g.FileName == msg.FileName)
 	case MsgTypeAt:
 		return g.Content == msg.Content && g.TargetUser == msg.TargetUser
 	case MsgTypePoke:
@@ -130,6 +131,7 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 		TargetUser: User{},
 		Url:        getUrl(segments),
 		Content:    getText(segments),
+		FileName:   getFileName(segments),
 		MsgType:    msgType,
 		MsgID:      msgId,
 		CreatedAt:  time.Now(),
@@ -175,6 +177,14 @@ func getUrl(msgs message.Message) string {
 
 func getText(msgs message.Message) string {
 	return msgs.ExtractPlainText()
+}
+func getFileName(msgs message.Message) string {
+	for _, m := range msgs {
+		if m.Type == MsgTypeImg {
+			return m.Data["file"]
+		}
+	}
+	return ""
 }
 
 func getTargetID(ctx *zero.Ctx) int64 {

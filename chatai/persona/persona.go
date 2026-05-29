@@ -195,6 +195,7 @@ func (p *Persona) aiSend(ctx *zero.Ctx, segments message.Message) {
 		MsgID:     msgId,
 		CreatedAt: time.Now(),
 		Url:       getUrl(segments),
+		FileName:  getFileName(segments),
 	}
 
 	if targetId > 0 {
