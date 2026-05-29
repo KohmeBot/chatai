@@ -6,13 +6,17 @@ import (
 )
 
 type ChatJson struct {
-	Text              string       `json:"text"`
-	AtTarget          int64        `json:"atTarget"`
-	ReplayMsg         int64        `json:"replayMsg"`
+	Messages          []Message    `json:"messages"`
 	NewAbstract       string       `json:"newAbstract"`
 	Favor             int64        `json:"favor"`
-	PokeTarget        int64        `json:"pokeTarget"`
 	UpdateImpressions []Impression `json:"updateImpressions,omitempty"`
+}
+
+type Message struct {
+	Text       string `json:"text"`
+	AtTarget   int64  `json:"atTarget"`
+	ReplayMsg  int64  `json:"replayMsg"`
+	PokeTarget int64  `json:"pokeTarget"`
 }
 
 type Impression struct {

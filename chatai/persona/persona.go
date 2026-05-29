@@ -9,6 +9,7 @@ import (
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
+	"math/rand/v2"
 	"strings"
 	"time"
 )
@@ -134,49 +135,45 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 		})
 	}
 
-	msgs := make([]message.Segment, 0)
 	if isAtMe {
 		_ = favor.UpdateFavor(p.db, msg.User.UserId, rsp.Favor)
-		if msg.MsgID > 0 {
-			msgs = append(msgs, message.Reply(msg.MsgID))
-			p.gc.Refer(msg.MsgID)
-		}
-		msgs = append(msgs, message.At(msg.User.UserId))
+	}
 
-	} else {
+	for _, m := range rsp.Messages {
+		msgs := make([]message.Segment, 0)
 		// 非At消息
 		switch {
-
-		case rsp.ReplayMsg > 0:
+		case m.ReplayMsg > 0:
 			// 有引用回复
 			// 获取到对应消息的发送者，需要at
-			rMsg := ctx.GetMessage(rsp.ReplayMsg)
+			rMsg := ctx.GetMessage(m.ReplayMsg)
 			if len(rMsg.Elements) > 0 {
-				msgs = append(msgs, message.Reply(rsp.ReplayMsg), message.At(rMsg.Sender.ID))
-				if p.gc.Refer(rsp.ReplayMsg) {
+				msgs = append(msgs, message.Reply(m.ReplayMsg), message.At(rMsg.Sender.ID))
+				if p.gc.Refer(m.ReplayMsg) {
 					// 如果已引用过，则忽略就好了，容错
-					return
+					continue
 				}
 			}
-		case rsp.AtTarget > 0:
+		case m.AtTarget > 0:
 			// 有At对象
-			msgs = append(msgs, message.At(rsp.AtTarget))
+			msgs = append(msgs, message.At(m.AtTarget))
 		}
 
-	}
-
-	if rsp.PokeTarget > 0 {
-		p.aiPoke(ctx, rsp.PokeTarget)
-	}
-
-	if rsp.Text != "" {
-		if len(msgs) > 0 {
-			msgs = append(msgs, message.Text(" "))
+		if m.PokeTarget > 0 {
+			p.aiPoke(ctx, m.PokeTarget)
+			p.randSleep()
 		}
-		msgs = append(msgs, message.Text(rsp.Text))
-	}
 
-	p.aiSend(ctx, msgs)
+		if m.Text != "" {
+			if len(msgs) > 0 {
+				msgs = append(msgs, message.Text(" "))
+			}
+			msgs = append(msgs, message.Text(m.Text))
+		}
+
+		p.aiSend(ctx, msgs)
+		p.randSleep()
+	}
 
 	// 更新印象
 	for _, impression := range rsp.UpdateImpressions {
@@ -243,4 +240,10 @@ func (p *Persona) sendRequest(builder *promptBuilder) (*ChatJson, error) {
 	var cj ChatJson
 	err = json.Unmarshal([]byte(res), &cj)
 	return &cj, err
+}
+
+func (p *Persona) randSleep() {
+	d := time.Duration(rand.IntN(1000)) * time.Millisecond
+	d += time.Second
+	time.Sleep(d)
 }
