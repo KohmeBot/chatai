@@ -210,6 +210,10 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 	for _, impression := range rsp.UpdateImpressions {
 		_ = new(UserImpression).Update(p.db, impression)
 	}
+	_ = new(GroupImpression).Update(p.db, GroupImpression{
+		GroupID: p.groupId,
+		Content: rsp.GroupImpression,
+	})
 
 }
 

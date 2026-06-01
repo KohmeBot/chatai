@@ -72,15 +72,15 @@ func (g *GroupImpression) Update(db *gorm.DB, i GroupImpression) error {
 		return nil
 	}
 
-	return db.Where(UserImpression{UserID: i.GroupID}).
-		Assign(UserImpression{Content: i.Content}).
+	return db.Where(GroupImpression{GroupID: i.GroupID}).
+		Assign(GroupImpression{Content: i.Content}).
 		FirstOrCreate(g).Error
 }
 
-func (g *GroupImpression) Get(db *gorm.DB, user int64) (GroupImpression, error) {
-	err := db.Where(UserImpression{UserID: user}).First(g).Error
+func (g *GroupImpression) Get(db *gorm.DB, group int64) (GroupImpression, error) {
+	err := db.Where(GroupImpression{GroupID: group}).First(g).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return GroupImpression{GroupID: user}, nil
+		return GroupImpression{GroupID: group}, nil
 	}
 	if err != nil {
 		return GroupImpression{}, err
