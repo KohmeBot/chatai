@@ -6,6 +6,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
@@ -82,23 +83,48 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 
 }
 
-func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
-	isAtMe := ctx.Event.IsToMe
+func (p *Persona) canSendMsg(ctx *zero.Ctx, msg GroupMessage) bool {
+	// get_group_shut_list为napcat的私有接口，并不遵循onebot11标准，在非napcat上可能会报错
+	data := ctx.CallAction("get_group_shut_list", zero.Params{"group_id": p.groupId}).Data
 
-	if !isAtMe && !p.autoSpeak {
-		return nil
+	// 查看是否被禁言
+	var isBan bool
+	data.ForEach(func(_, value gjson.Result) bool {
+		if value.Get("user_id").Int() == ctx.Event.SelfID {
+			isBan = true
+			return false
+		}
+		return true
+	})
+	if isBan {
+		return false
 	}
 
+	// 查看是否启动了auto speak
+	if !ctx.Event.IsToMe && !p.autoSpeak {
+		return false
+	}
+
+	// 查看是否poke限流
 	if msg.MsgType == MsgTypePoke && ctx.Event.IsToMe {
 		if !p.gc.CanPoke(msg.User.UserId) {
-			return nil
+			return false
 		}
+	}
+
+	return true
+}
+
+func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
+
+	if !p.canSendMsg(ctx, msg) {
+		return nil
 	}
 
 	msgCtx := p.gc.Context()
 
 	builder := newPromptBuilder(msgCtx)
-	if isAtMe {
+	if ctx.Event.IsToMe {
 		val, err := favor.GetFavor(p.db, msg.User.UserId)
 		if err != nil {
 			return err
