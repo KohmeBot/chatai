@@ -123,13 +123,18 @@ func (p *Persona) speak(ctx *zero.Ctx, msg GroupMessage) error {
 
 	msgCtx := p.gc.Context()
 
-	builder := newPromptBuilder(msgCtx)
+	groupImper, err := new(GroupImpression).Get(p.db, p.groupId)
+	if err != nil {
+		return err
+	}
+
+	builder := newPromptBuilder(msgCtx, groupImper)
 	if ctx.Event.IsToMe {
 		val, err := favor.GetFavor(p.db, msg.User.UserId)
 		if err != nil {
 			return err
 		}
-		imper, err := new(UserImpression).Get(p.db, p.groupId, msg.User.UserId)
+		imper, err := new(UserImpression).Get(p.db, msg.User.UserId)
 		if err != nil {
 			return err
 		}
@@ -203,7 +208,7 @@ func (p *Persona) thinking(ctx *zero.Ctx, msg GroupMessage, builder *promptBuild
 
 	// 更新印象
 	for _, impression := range rsp.UpdateImpressions {
-		_ = new(UserImpression).Update(p.db, p.groupId, impression)
+		_ = new(UserImpression).Update(p.db, impression)
 	}
 
 }

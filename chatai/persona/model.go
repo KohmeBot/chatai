@@ -6,10 +6,11 @@ import (
 )
 
 type ChatJson struct {
-	Messages          []Message    `json:"messages"`
-	NewAbstract       string       `json:"newAbstract"`
-	Favor             int64        `json:"favor"`
-	UpdateImpressions []Impression `json:"updateImpressions,omitempty"`
+	Messages          []Message        `json:"messages"`
+	NewAbstract       string           `json:"newAbstract"`
+	Favor             int64            `json:"favor"`
+	GroupImpression   string           `json:"groupImpression"`
+	UpdateImpressions []UserImpression `json:"updateImpressions,omitempty"`
 }
 
 type Message struct {
@@ -19,40 +20,73 @@ type Message struct {
 	PokeTarget int64  `json:"pokeTarget"`
 }
 
-type Impression struct {
-	UserID  int64  `json:"userId"`
-	Content string `json:"content"` // 对这个人的印象，400字以内
+type UserImpression struct {
+	UserID  int64  ` json:"userId" gorm:"primaryKey" `
+	Content string `json:"content"` // 印象内容
 }
 
-func (i Impression) String() string {
-	if i.Content == "" {
+func (u *UserImpression) String() string {
+	if u.Content == "" {
 		return "你对他没有任何印象"
 	}
-	return i.Content
+	return u.Content
 }
 
-type UserImpression struct {
-	GroupID int64  `gorm:"index:idx_group_user,unique"`
-	UserID  int64  `gorm:"index:idx_group_user,unique"`
-	Content string // 印象内容
-}
-
-func (u *UserImpression) Update(db *gorm.DB, group int64, i Impression) error {
-	return db.Where(UserImpression{GroupID: group, UserID: i.UserID}).
+func (u *UserImpression) Update(db *gorm.DB, i UserImpression) error {
+	if i.Content == "" {
+		return nil
+	}
+	return db.Where(UserImpression{UserID: i.UserID}).
 		Assign(UserImpression{Content: i.Content}).
 		FirstOrCreate(u).Error
 }
 
-func (u *UserImpression) Get(db *gorm.DB, group int64, user int64) (Impression, error) {
-	err := db.Where(UserImpression{GroupID: group, UserID: user}).First(u).Error
+func (u *UserImpression) Get(db *gorm.DB, user int64) (UserImpression, error) {
+	err := db.Where(UserImpression{UserID: user}).First(u).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Impression{UserID: user}, nil
+		return UserImpression{UserID: user}, nil
 	}
 	if err != nil {
-		return Impression{}, err
+		return UserImpression{}, err
 	}
-	return Impression{
+	return UserImpression{
 		UserID:  u.UserID,
 		Content: u.Content,
+	}, nil
+}
+
+type GroupImpression struct {
+	GroupID int64  `gorm:"primaryKey"`
+	Content string // 印象内容
+}
+
+func (g *GroupImpression) String() string {
+	if g.Content == "" {
+		return "你对该群聊没有任何印象"
+	}
+	return g.Content
+}
+
+func (g *GroupImpression) Update(db *gorm.DB, i GroupImpression) error {
+	if i.Content == "" {
+		return nil
+	}
+
+	return db.Where(UserImpression{UserID: i.GroupID}).
+		Assign(UserImpression{Content: i.Content}).
+		FirstOrCreate(g).Error
+}
+
+func (g *GroupImpression) Get(db *gorm.DB, user int64) (GroupImpression, error) {
+	err := db.Where(UserImpression{UserID: user}).First(g).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return GroupImpression{GroupID: user}, nil
+	}
+	if err != nil {
+		return GroupImpression{}, err
+	}
+	return GroupImpression{
+		GroupID: g.GroupID,
+		Content: g.Content,
 	}, nil
 }
