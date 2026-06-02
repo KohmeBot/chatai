@@ -70,6 +70,18 @@ func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, respons
 	})
 }
 
+func (c *ChatPlugin) NewDefaultModel(online bool, thinking bool, responseJson bool) model.LargeModel {
+	return factory.NewLargeModel(model.Config{
+		Name:         c.conf.ModelName,
+		ApiKey:       c.conf.ApiKey,
+		System:       c.conf.System,
+		Online:       online,
+		MaxTokens:    c.conf.MaxTokens,
+		Thinking:     thinking,
+		ResponseJson: responseJson,
+	})
+}
+
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
 	err := env.GetConf(&c.conf)
@@ -161,5 +173,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.4.17"
+	return "v0.4.18"
 }

@@ -41,6 +41,14 @@ func (c *ChatAIInvoker) NewModel(system string, online bool, thinking bool, resp
 	return res[0].Interface().(model.LargeModel), nil
 }
 
+func (c *ChatAIInvoker) NewDefaultModel(online bool, thinking bool, responseJson bool) (model.LargeModel, error) {
+	res := c.v.MethodByName("NewDefaultModel").Call([]reflect.Value{reflect.ValueOf(online), reflect.ValueOf(thinking), reflect.ValueOf(responseJson)})
+	if len(res) != 1 {
+		return nil, fmt.Errorf("NewDefaultModel method not found")
+	}
+	return res[0].Interface().(model.LargeModel), nil
+}
+
 func (c *ChatAIInvoker) DoRequestWithModel(req string, m model.LargeModel) (string, error) {
 	res := c.v.MethodByName("DoRequestWithModel").Call([]reflect.Value{reflect.ValueOf(req), reflect.ValueOf(m)})
 	if len(res) != 2 {
