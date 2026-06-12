@@ -53,7 +53,7 @@ func (m *modelWithUsage) Request(request *model.Request, response *model.Respons
 			OutputToken: response.OutToken,
 			ModelName:   m.conf.Name,
 			TTL:         time.Since(start),
-			CreateAt:    start.UTC(),
+			CreatedAt:   start.UTC(),
 		}
 		_ = u.Insert(m.conf.DB)
 	}

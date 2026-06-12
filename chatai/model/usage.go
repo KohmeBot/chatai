@@ -11,7 +11,7 @@ type TokenUsage struct {
 	OutputToken int64
 	ModelName   string
 	TTL         time.Duration
-	CreateAt    time.Time
+	CreatedAt   time.Time
 }
 
 func (t *TokenUsage) Insert(db *gorm.DB) error {
