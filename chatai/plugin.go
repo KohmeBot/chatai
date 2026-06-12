@@ -8,6 +8,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/wdvxdr1123/ZeroBot"
+	"gorm.io/gorm"
 	"slices"
 )
 
@@ -19,6 +20,8 @@ type ChatPlugin struct {
 	otherModel     model.LargeModel
 
 	personaMap map[int64]*persona.Persona
+
+	db *gorm.DB
 }
 
 func NewPlugin() plugin.Plugin {
@@ -67,6 +70,7 @@ func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, respons
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     thinking,
 		ResponseJson: responseJson,
+		DB:           c.db,
 	})
 }
 
@@ -79,6 +83,7 @@ func (c *ChatPlugin) NewDefaultModel(online bool, thinking bool, responseJson bo
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     thinking,
 		ResponseJson: responseJson,
+		DB:           c.db,
 	})
 }
 
@@ -93,6 +98,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
+
 	err = db.AutoMigrate(&UsageRecord{})
 	if err != nil {
 		return err
@@ -109,11 +115,16 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if err != nil {
 		return err
 	}
+	err = db.AutoMigrate(&model.TokenUsage{})
+	if err != nil {
+		return err
+	}
 
 	if c.conf.Threshold == 0 {
 		//默认为50
 		c.conf.Threshold = 50
 	}
+	c.db = db
 
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
@@ -125,6 +136,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			MaxTokens:    c.conf.MaxTokens,
 			Thinking:     c.conf.Thinking,
 			ResponseJson: true,
+			DB:           c.db,
 		}))
 		if slices.Contains(c.conf.SpeakGroups, group) {
 			p.SetAutoSpeak()
@@ -141,6 +153,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
 		ResponseJson: false,
+		DB:           c.db,
 	})
 
 	c.otherModel = factory.NewLargeModel(model.Config{
@@ -151,10 +164,12 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
 		ResponseJson: false,
+		DB:           c.db,
 	})
 
 	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
+	c.SetOnUsage(engine)
 
 	return nil
 
@@ -173,5 +188,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.4.18"
+	return "v0.4.19"
 }

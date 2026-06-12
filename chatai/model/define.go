@@ -1,5 +1,7 @@
 package model
 
+import "gorm.io/gorm"
+
 type Key struct {
 	GroupId int64
 	UserId  int64
@@ -29,7 +31,7 @@ type Response struct {
 }
 
 type LargeModel interface {
-	Request(Request *Request, response *Response) error
+	Request(request *Request, response *Response) error
 }
 
 type Config struct {
@@ -40,4 +42,6 @@ type Config struct {
 	MaxTokens    int64
 	Thinking     bool
 	ResponseJson bool
+
+	DB *gorm.DB
 }
