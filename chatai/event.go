@@ -103,7 +103,7 @@ func (c *ChatPlugin) SetOnUsage(engine plugin.Engine) {
 			return
 		}
 
-		day := 0
+		day := 1
 		if cmdArgs.Args != "" {
 			day, err = strconv.Atoi(cmdArgs.Args)
 			if err != nil {
