@@ -30,6 +30,10 @@ func NewPlugin() plugin.Plugin {
 	}
 }
 
+func (c *ChatPlugin) ConfigModel() any {
+	return new(Config)
+}
+
 func (c *ChatPlugin) DoRequest(req string) (string, error) {
 	request := &model.Request{
 		Question: req,
@@ -62,9 +66,10 @@ func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string,
 }
 
 func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, responseJson bool) model.LargeModel {
+	modelName, key := c.conf.Model()
 	return factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
+		Name:         modelName,
+		ApiKey:       key,
 		System:       system,
 		Online:       online,
 		MaxTokens:    c.conf.MaxTokens,
@@ -75,10 +80,11 @@ func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, respons
 }
 
 func (c *ChatPlugin) NewDefaultModel(online bool, thinking bool, responseJson bool) model.LargeModel {
+	modelName, key := c.conf.Model()
 	return factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.System,
+		Name:         modelName,
+		ApiKey:       key,
+		System:       string(c.conf.System),
 		Online:       online,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     thinking,
@@ -127,11 +133,13 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.db = db
 
 	c.personaMap = make(map[int64]*persona.Persona)
+	modelName, key := c.conf.Model()
 	for group := range env.Groups().RangeGroup() {
+
 		p := persona.NewPersona(group, c.env, db, c.conf.Threshold, factory.NewLargeModel(model.Config{
-			Name:         c.conf.ModelName,
-			ApiKey:       c.conf.ApiKey,
-			System:       c.conf.System,
+			Name:         modelName,
+			ApiKey:       key,
+			System:       string(c.conf.System),
 			Online:       c.conf.Online,
 			MaxTokens:    c.conf.MaxTokens,
 			Thinking:     c.conf.Thinking,
@@ -146,9 +154,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 
 	c.joinGroupModel = factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.System,
+		Name:         modelName,
+		ApiKey:       key,
+		System:       string(c.conf.System),
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -157,9 +165,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	})
 
 	c.otherModel = factory.NewLargeModel(model.Config{
-		Name:         c.conf.ModelName,
-		ApiKey:       c.conf.ApiKey,
-		System:       c.conf.System,
+		Name:         modelName,
+		ApiKey:       key,
+		System:       string(c.conf.System),
 		Online:       false,
 		MaxTokens:    c.conf.MaxTokens,
 		Thinking:     c.conf.Thinking,
@@ -188,5 +196,5 @@ func (c *ChatPlugin) Name() string {
 }
 
 func (c *ChatPlugin) Version() string {
-	return "v0.4.21"
+	return "v0.4.25"
 }

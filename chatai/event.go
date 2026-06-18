@@ -64,7 +64,7 @@ func (c *ChatPlugin) SetOnJoinGroup(engine plugin.Engine) {
 			nickName := ctx.CardOrNickName(ctx.Event.UserID)
 
 			req := &model.Request{
-				Question: fmt.Sprintf(c.conf.JoinGroupConfig.Trigger, nickName),
+				Question: fmt.Sprintf(string(c.conf.JoinGroupConfig.Trigger), nickName),
 			}
 			res := &model.Response{}
 			err = c.joinGroupModel.Request(req, res)
