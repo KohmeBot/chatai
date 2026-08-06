@@ -2,62 +2,92 @@ package chatai
 
 import (
 	"fmt"
+
 	"github.com/kohmebot/plugin/v2/ui"
 )
 
 type Config struct {
-	// System 预输入提示词
-	System ui.TextArea `yaml:"system" jsonschema:"description=系统提示词"`
-	// 使用的模型名称
-	ModelName string `yaml:"model_name" jsonschema:"description=使用的模型名称"`
-	// 使用的供应商名称
-	ProviderName string `yaml:"provider_name" jsonschema:"description=使用的供应商名称,enum=tongyi,enum=deepseek"`
-	// 模型供应商配置
-	Providers []ModelProviderConfig `yaml:"providers" jsonschema:"description=模型供应商配置"`
+	System       ui.TextArea           `yaml:"system" jsonschema:"description=Agent 系统提示词"`
+	ProviderName string                `yaml:"provider_name" jsonschema:"description=默认供应商,enum=tongyi,enum=deepseek"`
+	ModelName    string                `yaml:"model_name" jsonschema:"description=默认模型名称"`
+	Providers    []ModelProviderConfig `yaml:"providers" jsonschema:"description=模型供应商配置"`
+	Routes       ModelRoutes           `yaml:"routes" jsonschema:"description=按能力选择模型；留空时回退默认模型"`
 
-	// 最大输出Tokens限制
-	MaxTokens int64 `yaml:"max_tokens" jsonschema:"description=最大输出Tokens限制"`
-	// 每个人每天的input token上限
-	InputToken int64 `yaml:"input_token" jsonschema:"description=每个人每天的input token上限"`
-	// 每人每天的output token上限
-	OutputToken int64 `yaml:"output_token" jsonschema:"description=每个人每天的output token上限"`
-	// 达到上限后的提示词
-	LimitTips ui.TextArea `yaml:"limit_tips" jsonschema:"description=达到上限后的提示词"`
-	// 触发模型违规后的提示词
-	ErrorTips ui.TextArea `yaml:"error_tips" jsonschema:"description=触发模型违规后的提示词"`
+	MaxTokens   int64       `yaml:"max_tokens" jsonschema:"description=最大输出 Tokens"`
+	InputToken  int64       `yaml:"input_token" jsonschema:"description=每人每天 input token 上限"`
+	OutputToken int64       `yaml:"output_token" jsonschema:"description=每人每天 output token 上限"`
+	LimitTips   ui.TextArea `yaml:"limit_tips" jsonschema:"description=达到限额后的提示"`
+	ErrorTips   ui.TextArea `yaml:"error_tips" jsonschema:"description=模型错误提示"`
+	Thinking    bool        `yaml:"thinking" jsonschema:"description=默认是否启用深度思考"`
 
-	// 控制模型是否联网，如果对应模型支持的话
-	Online bool `yaml:"online" jsonschema:"description=模型是否联网，如果对应模型支持的话"`
-	// 深度思考，如果对应模型支持的话
-	Thinking bool `yaml:"thinking" jsonschema:"description=深度思考，如果对应模型支持的话"`
-
-	// 触发发言欲
-	Threshold float64 `yaml:"threshold" jsonschema:"description=触发发言欲,minimum=0,maximum=300"`
-	// 允许自动发言的群
-	SpeakGroups []int64 `yaml:"speak_groups" jsonschema:"description=允许自动发言的群"`
-
+	Agent           AgentConfig      `yaml:"agent" jsonschema:"description=Agent 配置"`
+	Repeat          RepeatConfig     `yaml:"repeat" jsonschema:"description=群聊复读配置"`
+	Impression      ImpressionConfig `yaml:"impression" jsonschema:"description=周期印象配置"`
 	JoinGroupConfig `yaml:"join_group" jsonschema:"description=加群配置"`
 }
 
-func (c Config) Model() (name string, apiKey string) {
-	name = fmt.Sprintf("%s:%s", c.ProviderName, c.ModelName)
-	for _, provider := range c.Providers {
-		if provider.ProviderName == c.ProviderName {
-			return name, string(provider.ApiKey)
-		}
-	}
-	return name, ""
+type AgentConfig struct {
+	MaxSteps       int `yaml:"max_steps" jsonschema:"description=单次 Agent 最大工具调用轮数,minimum=1,maximum=20"`
+	ContextLimit   int `yaml:"context_limit" jsonschema:"description=上下文工具默认返回的最大消息数,minimum=1,maximum=200"`
+	WebMaxBytes    int `yaml:"web_max_bytes" jsonschema:"description=网页工具最大读取字节数"`
+	ScheduleMaxSec int `yaml:"schedule_max_seconds" jsonschema:"description=定时任务允许的最大延迟秒数"`
 }
 
+type RepeatConfig struct {
+	Enable       bool `yaml:"enable" jsonschema:"description=是否启用复读"`
+	TriggerCount int  `yaml:"trigger_count" jsonschema:"description=连续相同消息达到多少条时复读,minimum=2,maximum=20"`
+}
+
+type ImpressionConfig struct {
+	Enable          bool `yaml:"enable" jsonschema:"description=是否周期生成印象"`
+	IntervalMinutes int  `yaml:"interval_minutes" jsonschema:"description=印象生成周期（分钟）,minimum=1"`
+	MinMessages     int  `yaml:"min_messages" jsonschema:"description=周期内至少多少条消息才生成印象,minimum=1"`
+}
+
+type ModelRoutes struct {
+	Agent      ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
+	Vision     ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
+	Impression ModelRouteConfig `yaml:"impression" jsonschema:"description=印象总结模型"`
+	Join       ModelRouteConfig `yaml:"join" jsonschema:"description=入群欢迎模型"`
+}
+
+type ModelRouteConfig struct {
+	ProviderName string `yaml:"provider_name" jsonschema:"description=供应商名称,enum=tongyi,enum=deepseek"`
+	ModelName    string `yaml:"model_name" jsonschema:"description=模型名称"`
+	Thinking     *bool  `yaml:"thinking,omitempty" jsonschema:"description=是否启用深度思考"`
+	MaxTokens    int64  `yaml:"max_tokens,omitempty" jsonschema:"description=该路由最大输出 Tokens"`
+}
+
+func (r ModelRouteConfig) Configured() bool { return r.ProviderName != "" && r.ModelName != "" }
+
 type ModelProviderConfig struct {
-	ProviderName string    `yaml:"model_name" jsonschema:"description=模型提供商名称,enum=tongyi,enum=deepseek"`
+	ProviderName string    `yaml:"provider_name" jsonschema:"description=模型提供商名称,enum=tongyi,enum=deepseek"`
+	LegacyName   string    `yaml:"model_name,omitempty" jsonschema:"-"`
 	ApiKey       ui.Secret `yaml:"api_key"`
 }
 
-// JoinGroupConfig 加群配置
+func (c Config) Model() (string, string) {
+	return c.modelFor(ModelRouteConfig{ProviderName: c.ProviderName, ModelName: c.ModelName})
+}
+
+func (c Config) modelFor(route ModelRouteConfig) (string, string) {
+	provider, name := route.ProviderName, route.ModelName
+	if provider == "" || name == "" {
+		provider, name = c.ProviderName, c.ModelName
+	}
+	for _, item := range c.Providers {
+		itemProvider := item.ProviderName
+		if itemProvider == "" {
+			itemProvider = item.LegacyName
+		}
+		if itemProvider == provider {
+			return fmt.Sprintf("%s:%s", provider, name), string(item.ApiKey)
+		}
+	}
+	return fmt.Sprintf("%s:%s", provider, name), ""
+}
+
 type JoinGroupConfig struct {
-	// 是否开启
-	Enable bool `yaml:"enable" jsonschema:"description=是否开启"`
-	// 触发语句,用%s来代替新人的NickName
-	Trigger ui.Code `yaml:"trigger" jsonschema:"description=触发语句|用%s来代替新人的NickName"`
+	Enable  bool    `yaml:"enable" jsonschema:"description=是否开启"`
+	Trigger ui.Code `yaml:"trigger" jsonschema:"description=触发语句|用%s代替新人昵称"`
 }

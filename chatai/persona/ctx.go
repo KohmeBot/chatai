@@ -1,201 +1,92 @@
 package persona
 
 import (
-	"fmt"
-	"slices"
 	"sync"
 	"time"
 )
 
+// groupContext 是仅在工具被调用时才会读取的内存消息缓冲区。
 type groupContext struct {
-	mu       sync.RWMutex
-	msgs     []GroupMessage
-	abstract abstract
-	// 戳一戳限流
-	pokeMp map[int64]time.Time
-	// 复读过的消息
+	mu         sync.RWMutex
+	msgs       []GroupMessage
 	lastRepeat GroupMessage
 }
 
-func (g *groupContext) AppendMsg(msg GroupMessage, duration time.Duration) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.msgs = append(g.msgs, msg)
-	cutoff := time.Now().Add(-duration)
-	count := 0
-	for i := len(g.msgs) - 1; i >= 0; i-- {
-		if g.msgs[i].CreatedAt.Before(cutoff) {
-			break
-		}
-		count++
+// ShouldRepeat 在连续相同消息达到阈值时仅触发一次。
+func (g *groupContext) ShouldRepeat(msg GroupMessage, threshold int) bool {
+	if threshold < 2 {
+		threshold = 3
 	}
-	return count
-
-}
-
-func (g *groupContext) Refer(msgId int64) (referred bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	for i, msg := range g.msgs {
-		if msg.MsgID == msgId {
-			referred = msg.Refer
-			msg.Refer = true
-			g.msgs[i] = msg
-			return referred
-		}
-	}
-
-	return false
-
-}
-
-func (g *groupContext) CanPoke(qq int64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.pokeMp == nil {
-		g.pokeMp = map[int64]time.Time{}
-	}
-	// 每个人cd为10s
-	now := time.Now()
-	last := g.pokeMp[qq]
-	if now.Sub(last) < 10*time.Second {
+	switch msg.MsgType {
+	case MsgTypeText, MsgTypeImg, MsgTypeAt, MsgTypeReply:
+	default:
 		return false
 	}
-	g.pokeMp[qq] = now
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	consecutive := 0
+	for i := len(g.msgs) - 1; i >= 0; i-- {
+		if !g.msgs[i].ContentEqual(msg) {
+			break
+		}
+		consecutive++
+	}
+	if consecutive < threshold {
+		if consecutive == 1 && g.lastRepeat.ContentEqual(msg) {
+			// 相同内容在中间出现过其他消息后，视为新的一轮复读。
+			g.lastRepeat = GroupMessage{}
+		}
+		return false
+	}
+	if g.lastRepeat.ContentEqual(msg) {
+		return false
+	}
+	g.lastRepeat = msg
 	return true
 }
 
-func (g *groupContext) UpdateAbstract(ab abstract) {
+func (g *groupContext) AppendMsg(msg GroupMessage, _ time.Duration) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if count := g.cleanBefore(ab.endTime); count > 0 {
-		// 成功清理，才进行摘要更新
-		g.abstract = ab
+	g.msgs = append(g.msgs, msg)
+	if len(g.msgs) > 500 {
+		g.msgs = append([]GroupMessage(nil), g.msgs[len(g.msgs)-500:]...)
 	}
+	return len(g.msgs)
 }
 
-func (g *groupContext) Flush() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	// 以半个小时作为节点，如果最新的消息距今已超过30分钟，则认为起了一个新的话题，需要刷新所有上下文记忆
-	now := time.Now()
-	if len(g.msgs) == 0 {
-		g.clear()
-		return
-	}
-
-	last := g.msgs[len(g.msgs)-1]
-
-	if now.Sub(last.CreatedAt) >= 30*time.Minute {
-		g.clear()
-		return
-	}
-}
-
-func (g *groupContext) clear() {
-	g.msgs = nil
-	g.abstract = abstract{}
-	g.lastRepeat = GroupMessage{}
-}
-
-func (g *groupContext) RepeatThis(m GroupMessage) (repeat bool, repeated bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if len(g.msgs) < 3 {
-		return false, false
-	}
-
-	last3 := g.msgs[len(g.msgs)-3:]
-	for _, msg := range last3 {
-		if !slices.Contains([]string{MsgTypeText, MsgTypeAt, MsgTypeReply, MsgTypeImg}, msg.MsgType) {
-			return false, false
-		}
-
-		if !msg.ContentEqual(m) {
-			return false, false
-		}
-	}
-
-	// 三条都一样，检查是否已经复读过了
-	repeated = g.lastRepeat.ContentEqual(m)
-
-	if !repeated {
-		g.lastRepeat = m
-	}
-
-	return true, repeated
-}
-
-func (g *groupContext) Context() MsgContext {
+func (g *groupContext) Snapshot(limit int) []GroupMessage {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	if len(g.msgs) == 0 {
-		return MsgContext{}
+	if limit <= 0 || limit > len(g.msgs) {
+		limit = len(g.msgs)
 	}
-	fm := formatMessages(g.msgs)
-
-	startTime := g.abstract.startTime
-	if startTime.IsZero() {
-		startTime = g.msgs[0].CreatedAt
-	}
-
-	return MsgContext{
-		abstract:           g.abstract,
-		groupMsgContent:    fm,
-		startTime:          startTime,
-		endTime:            g.msgs[len(g.msgs)-1].CreatedAt,
-		needUpdateAbstract: g.needUpdateAbstract(fm),
-	}
-
+	return append([]GroupMessage(nil), g.msgs[len(g.msgs)-limit:]...)
 }
 
-func (g *groupContext) needUpdateAbstract(ctxText string) bool {
-	// 判断当前是否需要更新摘要
-	if runeLen(ctxText) >= 1500 {
-		// 上下文长度超过1500，需要更新摘要
-		return true
-	}
-	return false
-
-}
-
-func (g *groupContext) cleanBefore(t time.Time) int {
-	var idx int
+func (g *groupContext) Since(since time.Time) []GroupMessage {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	result := make([]GroupMessage, 0)
 	for _, msg := range g.msgs {
-		if !msg.CreatedAt.After(t) {
-			idx++
+		if msg.CreatedAt.After(since) {
+			result = append(result, msg)
 		}
 	}
-	g.msgs = g.msgs[idx:]
-	return idx
-
+	return result
 }
 
-type MsgContext struct {
-	abstract           abstract
-	groupMsgContent    string
-	startTime          time.Time
-	endTime            time.Time
-	needUpdateAbstract bool
-}
-
-type abstract struct {
-	// 摘要内容
-	content string
-	// 摘要开始时间
-	startTime time.Time
-	// 摘要结束时间
-	endTime time.Time
-}
-
-func (a abstract) String() string {
-	if a.IsEmpty() {
-		return "最近没有摘要"
+func (g *groupContext) UserSnapshot(userID int64, limit int) []GroupMessage {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	result := make([]GroupMessage, 0, limit)
+	for i := len(g.msgs) - 1; i >= 0 && len(result) < limit; i-- {
+		if g.msgs[i].User.UserId == userID {
+			result = append(result, g.msgs[i])
+		}
 	}
-	return fmt.Sprintf("从%s到%s的聊天内容摘要:\n%s", formatTime(a.startTime), formatTime(a.endTime), a.content)
-}
-func (a abstract) IsEmpty() bool {
-	return a.content == ""
+	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
+		result[left], result[right] = result[right], result[left]
+	}
+	return result
 }

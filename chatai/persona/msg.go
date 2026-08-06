@@ -288,9 +288,8 @@ func formatMessage(msg GroupMessage) string {
 		return ""
 	}
 	content = msg.Content
-	if runeLen(content) > 30 {
-		// 限制30字
-		content = string([]rune(content)[:30]) + "..."
+	if runeLen(content) > 500 {
+		content = string([]rune(content)[:500]) + "..."
 	}
 	if msg.Refer {
 		builder.WriteString("[已回复] ")

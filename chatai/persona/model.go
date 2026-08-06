@@ -21,7 +21,7 @@ type Message struct {
 }
 
 type UserImpression struct {
-	UserID  int64  ` json:"userId" gorm:"primaryKey" `
+	UserID  int64  `json:"userId" gorm:"primaryKey"`
 	Content string `json:"content"` // 印象内容
 }
 

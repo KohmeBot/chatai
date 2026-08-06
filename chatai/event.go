@@ -20,6 +20,9 @@ func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 	engine.OnMessage(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
 		group := ctx.Event.GroupID
 		p := c.personaMap[group]
+		if p == nil {
+			return
+		}
 		err := p.UpdateContext(ctx)
 		if err != nil {
 			c.env.Error(ctx, err)
@@ -37,6 +40,9 @@ func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 		}
 		group := ctx.Event.GroupID
 		p := c.personaMap[group]
+		if p == nil {
+			return
+		}
 		err := p.UpdateContext(ctx)
 		if err != nil {
 			c.env.Error(ctx, err)

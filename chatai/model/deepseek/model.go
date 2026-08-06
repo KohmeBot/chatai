@@ -8,6 +8,7 @@ type reqBody struct {
 	Thinking       Option          `json:"thinking,omitempty"`
 	MaxTokens      int             `json:"max_tokens"`
 	ResponseFormat *Option         `json:"response_format,omitempty"`
+	Tools          []model.Tool    `json:"tools,omitempty"`
 }
 
 type Option struct {

@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"time"
 )
 
 type tongYiModel struct {
@@ -25,7 +26,7 @@ func NewTongYiModel(conf model.Config) model.LargeModel {
 			Role:    "system",
 			Content: conf.System,
 		},
-		client: &http.Client{},
+		client: &http.Client{Timeout: 90 * time.Second},
 	}
 }
 
@@ -34,18 +35,18 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 	msg := make([]model.Message, 0, len(request.History)+2)
 	msg = append(msg, m.systemMsg)
 	msg = append(msg, request.History...)
-	msg = append(msg, model.Message{
-		Role:    "user",
-		Content: request.Question,
-	})
+	content := any(request.Question)
+	if request.ImageURL != "" {
+		content = []model.ContentPart{{Type: "text", Text: request.Question}, {Type: "image_url", ImageURL: &model.ImageURL{URL: request.ImageURL}}}
+	}
+	if request.Question != "" || request.ImageURL != "" {
+		msg = append(msg, model.Message{Role: "user", Content: content})
+	}
 
-	var tools []Tool
+	tools := request.Tools
 	if m.Online {
-		tools = append(tools,
-			Tool{Type: "web_search"},
-			Tool{Type: "web_extractor"},
-			Tool{Type: "code_interpreter"},
-		)
+		// Agent 的联网能力由 browse_web 工具统一提供，避免供应商私有工具
+		// 与标准 function calling 混用时产生不兼容结果。
 	}
 
 	requestBody := reqBody{
@@ -92,7 +93,12 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 		response.ErrorMsg = responseBody.Error.Message
 		return nil
 	}
-	response.Answer = responseBody.Choices[0].Message.Content
+	if len(responseBody.Choices) == 0 {
+		return io.ErrUnexpectedEOF
+	}
+	response.Answer = model.Text(responseBody.Choices[0].Message.Content)
+	response.ToolCalls = responseBody.Choices[0].Message.ToolCalls
+	response.Reasoning = responseBody.Choices[0].Message.ReasoningContent
 	response.InputToken = responseBody.PromptTokens
 	response.OutToken = responseBody.CompletionTokens
 

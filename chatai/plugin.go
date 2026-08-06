@@ -2,14 +2,16 @@ package chatai
 
 import (
 	"errors"
+	"time"
+
+	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/factory"
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/plugin/v2"
-	"github.com/wdvxdr1123/ZeroBot"
+	zero "github.com/wdvxdr1123/ZeroBot"
 	"gorm.io/gorm"
-	"slices"
 )
 
 type ChatPlugin struct {
@@ -18,183 +20,119 @@ type ChatPlugin struct {
 
 	joinGroupModel model.LargeModel
 	otherModel     model.LargeModel
-
-	personaMap map[int64]*persona.Persona
-
-	db *gorm.DB
+	personaMap     map[int64]*persona.Persona
+	extraTools     []agent.Tool
+	db             *gorm.DB
 }
 
-func NewPlugin() plugin.Plugin {
-	return &ChatPlugin{
-		personaMap: make(map[int64]*persona.Persona),
-	}
-}
-
-func (c *ChatPlugin) ConfigModel() any {
-	return new(Config)
-}
+func NewPlugin() plugin.Plugin         { return &ChatPlugin{personaMap: make(map[int64]*persona.Persona)} }
+func (c *ChatPlugin) ConfigModel() any { return new(Config) }
 
 func (c *ChatPlugin) DoRequest(req string) (string, error) {
-	request := &model.Request{
-		Question: req,
-	}
-	resp := &model.Response{}
-	err := c.otherModel.Request(request, resp)
-	if err != nil {
-		return "", err
-	}
-	if len(resp.ErrorMsg) > 0 {
-		return "", errors.New(resp.ErrorMsg)
-	}
-	return resp.Answer, nil
-
+	return c.DoRequestWithModel(req, c.otherModel)
 }
-
 func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string, error) {
-	request := &model.Request{
-		Question: req,
-	}
-	resp := &model.Response{}
-	err := m.Request(request, resp)
-	if err != nil {
+	response := new(model.Response)
+	if err := m.Request(&model.Request{Question: req}, response); err != nil {
 		return "", err
 	}
-	if len(resp.ErrorMsg) > 0 {
-		return "", errors.New(resp.ErrorMsg)
+	if response.ErrorMsg != "" {
+		return "", errors.New(response.ErrorMsg)
 	}
-	return resp.Answer, nil
+	return response.Answer, nil
 }
 
-func (c *ChatPlugin) NewModel(system string, online bool, thinking bool, responseJson bool) model.LargeModel {
-	modelName, key := c.conf.Model()
-	return factory.NewLargeModel(model.Config{
-		Name:         modelName,
-		ApiKey:       key,
-		System:       system,
-		Online:       online,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     thinking,
-		ResponseJson: responseJson,
-		DB:           c.db,
-	})
+// 兼容旧 SDK：未指定路由时仍可直接创建默认模型。
+func (c *ChatPlugin) NewModel(system string, online, thinking, responseJSON bool) model.LargeModel {
+	name, key := c.conf.Model()
+	return factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, Online: online, MaxTokens: c.conf.MaxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db})
+}
+func (c *ChatPlugin) NewDefaultModel(online, thinking, responseJSON bool) model.LargeModel {
+	return c.NewModel(string(c.conf.System), online, thinking, responseJSON)
 }
 
-func (c *ChatPlugin) NewDefaultModel(online bool, thinking bool, responseJson bool) model.LargeModel {
-	modelName, key := c.conf.Model()
-	return factory.NewLargeModel(model.Config{
-		Name:         modelName,
-		ApiKey:       key,
-		System:       string(c.conf.System),
-		Online:       online,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     thinking,
-		ResponseJson: responseJson,
-		DB:           c.db,
-	})
+// RegisterAgentTool 是稳定的工具扩展入口，其他插件可在初始化阶段注册自定义工具。
+func (c *ChatPlugin) RegisterAgentTool(tool agent.Tool) error {
+	for _, p := range c.personaMap {
+		if err := p.RegisterTool(tool); err != nil {
+			return err
+		}
+	}
+	c.extraTools = append(c.extraTools, tool)
+	return nil
+}
+
+func (c *ChatPlugin) routeModel(route ModelRouteConfig, system string, responseJSON bool) model.LargeModel {
+	name, key := c.conf.modelFor(route)
+	thinking := c.conf.Thinking
+	if route.Thinking != nil {
+		thinking = *route.Thinking
+	}
+	maxTokens := c.conf.MaxTokens
+	if route.MaxTokens > 0 {
+		maxTokens = route.MaxTokens
+	}
+	return factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, MaxTokens: maxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db})
 }
 
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
-	err := env.GetConf(&c.conf)
-	if err != nil {
+	if err := env.GetConf(&c.conf); err != nil {
 		return err
 	}
-
 	db, err := env.GetDB()
 	if err != nil {
 		return err
 	}
-
-	err = db.AutoMigrate(&UsageRecord{})
-	if err != nil {
-		return err
-	}
-	err = db.AutoMigrate(&favor.FavorRecord{})
-	if err != nil {
-		return err
-	}
-	err = db.AutoMigrate(&persona.UserImpression{})
-	if err != nil {
-		return err
-	}
-	err = db.AutoMigrate(&persona.GroupImpression{})
-	if err != nil {
-		return err
-	}
-	err = db.AutoMigrate(&model.TokenUsage{})
-	if err != nil {
-		return err
-	}
-
-	if c.conf.Threshold == 0 {
-		//默认为50
-		c.conf.Threshold = 50
-	}
 	c.db = db
+	for _, table := range []any{&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{}, &model.TokenUsage{}} {
+		if err := db.AutoMigrate(table); err != nil {
+			return err
+		}
+	}
+	if c.conf.Agent.MaxSteps <= 0 {
+		c.conf.Agent.MaxSteps = 8
+	}
+	if c.conf.Repeat.TriggerCount < 2 {
+		c.conf.Repeat.TriggerCount = 3
+	}
+	if c.conf.Impression.IntervalMinutes <= 0 {
+		c.conf.Impression.IntervalMinutes = 60
+	}
+	if c.conf.Impression.MinMessages <= 0 {
+		c.conf.Impression.MinMessages = 20
+	}
 
 	c.personaMap = make(map[int64]*persona.Persona)
-	modelName, key := c.conf.Model()
 	for group := range env.Groups().RangeGroup() {
-
-		p := persona.NewPersona(group, c.env, db, c.conf.Threshold, factory.NewLargeModel(model.Config{
-			Name:         modelName,
-			ApiKey:       key,
-			System:       string(c.conf.System),
-			Online:       c.conf.Online,
-			MaxTokens:    c.conf.MaxTokens,
-			Thinking:     c.conf.Thinking,
-			ResponseJson: true,
-			DB:           c.db,
-		}))
-		if slices.Contains(c.conf.SpeakGroups, group) {
-			p.SetAutoSpeak()
+		var vision model.LargeModel
+		if c.conf.Routes.Vision.Configured() {
+			vision = c.routeModel(c.conf.Routes.Vision, "你是图片解析器。", false)
 		}
-
-		c.personaMap[group] = p
+		var impression model.LargeModel
+		var impressionEvery time.Duration
+		if c.conf.Impression.Enable {
+			impression = c.routeModel(c.conf.Routes.Impression, "你负责提炼稳定、长期有效的群聊印象。", true)
+			impressionEvery = time.Duration(c.conf.Impression.IntervalMinutes) * time.Minute
+		}
+		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
+			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
+			VisionModel: vision, ImpressionModel: impression, MaxSteps: c.conf.Agent.MaxSteps,
+			ContextLimit: c.conf.Agent.ContextLimit, WebMaxBytes: c.conf.Agent.WebMaxBytes,
+			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, RepeatEnable: c.conf.Repeat.Enable,
+			RepeatCount: c.conf.Repeat.TriggerCount, ImpressionEvery: impressionEvery,
+			ImpressionMin: c.conf.Impression.MinMessages, ExtraTools: c.extraTools,
+		})
 	}
-
-	c.joinGroupModel = factory.NewLargeModel(model.Config{
-		Name:         modelName,
-		ApiKey:       key,
-		System:       string(c.conf.System),
-		Online:       false,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     c.conf.Thinking,
-		ResponseJson: false,
-		DB:           c.db,
-	})
-
-	c.otherModel = factory.NewLargeModel(model.Config{
-		Name:         modelName,
-		ApiKey:       key,
-		System:       string(c.conf.System),
-		Online:       false,
-		MaxTokens:    c.conf.MaxTokens,
-		Thinking:     c.conf.Thinking,
-		ResponseJson: false,
-		DB:           c.db,
-	})
-
+	c.joinGroupModel = c.routeModel(c.conf.Routes.Join, string(c.conf.System), false)
+	c.otherModel = c.routeModel(c.conf.Routes.Agent, string(c.conf.System), false)
 	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnUsage(engine)
-
 	return nil
-
 }
 
-func (c *ChatPlugin) OnBoot() {
-
-}
-
-func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {
-
-}
-
-func (c *ChatPlugin) Name() string {
-	return "chatai"
-}
-
-func (c *ChatPlugin) Version() string {
-	return "v0.4.25"
-}
+func (c *ChatPlugin) OnBoot()              {}
+func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
+func (c *ChatPlugin) Name() string         { return "chatai" }
+func (c *ChatPlugin) Version() string      { return "v1.0.0-beta" }

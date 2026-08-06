@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"time"
 )
 
 type deepSeekModel struct {
@@ -28,7 +29,7 @@ func NewDeepSeekModel(conf model.Config) model.LargeModel {
 			Content: conf.System,
 		},
 		responseJson: conf.ResponseJson,
-		client:       &http.Client{},
+		client:       &http.Client{Timeout: 90 * time.Second},
 	}
 }
 
@@ -37,16 +38,20 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 	msg := make([]model.Message, 0, len(request.History)+2)
 	msg = append(msg, m.systemMsg)
 	msg = append(msg, request.History...)
-	msg = append(msg, model.Message{
-		Role:    "user",
-		Content: request.Question,
-	})
+	content := any(request.Question)
+	if request.ImageURL != "" {
+		content = []model.ContentPart{{Type: "text", Text: request.Question}, {Type: "image_url", ImageURL: &model.ImageURL{URL: request.ImageURL}}}
+	}
+	if request.Question != "" || request.ImageURL != "" {
+		msg = append(msg, model.Message{Role: "user", Content: content})
+	}
 
 	requestBody := reqBody{
 		Model:     m.Name,
 		Message:   msg,
 		MaxTokens: int(m.MaxTokens),
 		Thinking:  Option{Type: "disabled"},
+		Tools:     request.Tools,
 	}
 
 	if m.Thinking {
@@ -89,7 +94,12 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 		response.ErrorMsg = responseBody.Error.Message
 		return nil
 	}
-	response.Answer = responseBody.Choices[0].Message.Content
+	if len(responseBody.Choices) == 0 {
+		return io.ErrUnexpectedEOF
+	}
+	response.Answer = model.Text(responseBody.Choices[0].Message.Content)
+	response.ToolCalls = responseBody.Choices[0].Message.ToolCalls
+	response.Reasoning = responseBody.Choices[0].Message.ReasoningContent
 	response.InputToken = responseBody.PromptTokens
 	response.OutToken = responseBody.CompletionTokens
 
