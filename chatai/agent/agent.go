@@ -23,6 +23,8 @@ type RunContext struct {
 
 	actionMu        sync.RWMutex
 	actionPerformed bool
+	decisionMu      sync.RWMutex
+	latestDecision  string
 }
 
 // MarkActionPerformed records that this run has completed a visible group action.
@@ -37,6 +39,24 @@ func (r *RunContext) ActionPerformed() bool {
 	r.actionMu.RLock()
 	defer r.actionMu.RUnlock()
 	return r.actionPerformed
+}
+
+// SetLatestDecision publishes the newest model decision for slow-run progress reporting.
+func (r *RunContext) SetLatestDecision(decision string) {
+	decision = strings.TrimSpace(decision)
+	if decision == "" {
+		return
+	}
+	r.decisionMu.Lock()
+	r.latestDecision = decision
+	r.decisionMu.Unlock()
+}
+
+// LatestDecision returns the newest decision published by the runner.
+func (r *RunContext) LatestDecision() string {
+	r.decisionMu.RLock()
+	defer r.decisionMu.RUnlock()
+	return r.latestDecision
 }
 
 type Handler func(*RunContext, json.RawMessage) (any, error)
@@ -87,6 +107,23 @@ func (r *Registry) Definitions(names map[string]bool) []model.Tool {
 	result := make([]model.Tool, 0, len(selected)+1)
 	result = append(result, searchToolDefinition())
 	for _, name := range selected {
+		result = append(result, r.tools[name].Definition)
+	}
+	return result
+}
+
+func (r *Registry) GroupActionDefinitions() []model.Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0)
+	for name, tool := range r.tools {
+		if tool.GroupAction {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	result := make([]model.Tool, 0, len(names))
+	for _, name := range names {
 		result = append(result, r.tools[name].Definition)
 	}
 	return result
@@ -197,8 +234,18 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 	question := prompt
 	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, r.RequireAction, imageURL != "", logValue(prompt))
 	for i := 0; i < steps; i++ {
+		finalActionStep := r.RequireAction && !ctx.ActionPerformed() && i == steps-1
+		if finalActionStep {
+			question = finalActionPrompt(question)
+		}
 		requestQuestion, requestImageURL := question, imageURL
 		definitions := r.Tools.Definitions(activeTools)
+		if finalActionStep {
+			definitions = r.Tools.GroupActionDefinitions()
+			for _, definition := range definitions {
+				activeTools[definition.Function.Name] = true
+			}
+		}
 		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v question=%s", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions), logValue(question))
 		response := new(model.Response)
 		err := r.Model.Request(&model.Request{
@@ -221,6 +268,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 		} else {
 			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=<模型未返回 reasoning_content>", runID, i+1, steps)
 		}
+		ctx.SetLatestDecision(decisionProgress(response))
 		// Question 只会由模型适配器临时附加到当前请求；必须同步写入历史，
 		// 否则下一轮工具调用会从 assistant 消息开始并丢失原始用户问题。
 		if userMessage, ok := requestUserMessage(requestQuestion, requestImageURL); ok {
@@ -247,7 +295,9 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 			logrus.Infof("[Agent][run=%d][调用工具] step=%d/%d call_id=%s tool=%s args=%s", runID, i+1, steps, call.ID, call.Function.Name, logValue(call.Function.Arguments))
 			var result any
 			var callErr error
-			if call.Function.Name == "search_tools" {
+			if finalActionStep && call.Function.Name == "search_tools" {
+				callErr = errors.New("the final step only allows a group action")
+			} else if call.Function.Name == "search_tools" {
 				var input struct {
 					Query string `json:"query"`
 					Limit int    `json:"limit"`
@@ -278,9 +328,42 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 			logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=%t action_done=%t payload=%s", runID, i+1, steps, call.ID, call.Function.Name, callErr == nil, ctx.ActionPerformed(), logValue(string(encoded)))
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)})
 		}
+		if ctx.ActionPerformed() {
+			logrus.Infof("[Agent][run=%d][完成] step=%d/%d 原因=群聊动作已执行", runID, i+1, steps)
+			return response.Answer, nil
+		}
+		if finalActionStep {
+			logrus.Warnf("[Agent][run=%d][未完成] 最后一步未执行群聊动作 answer=%s", runID, logValue(response.Answer))
+			return response.Answer, ErrGroupActionRequired
+		}
 	}
 	logrus.Warnf("[Agent][run=%d][未完成] exceeded maximum of %d steps action_done=%t", runID, steps, ctx.ActionPerformed())
 	return "", fmt.Errorf("agent exceeded maximum of %d steps", steps)
+}
+
+func finalActionPrompt(question string) string {
+	const instruction = "决策步数只剩最后一步。禁止继续搜索、浏览、读取上下文或调用其他非发送工具；必须基于已经获得的信息立即形成最终判断，并调用当前提供的 send_message、send_messages、at_user 或 poke_user 完成回复。信息不足时应明确说明不确定性，但仍然必须回复。"
+	if strings.TrimSpace(question) == "" {
+		return instruction
+	}
+	return question + "\n\n" + instruction
+}
+
+func decisionProgress(response *model.Response) string {
+	if answer := strings.TrimSpace(response.Answer); answer != "" {
+		return answer
+	}
+	if reasoning := strings.TrimSpace(response.Reasoning); reasoning != "" {
+		return reasoning
+	}
+	if len(response.ToolCalls) > 0 {
+		names := make([]string, 0, len(response.ToolCalls))
+		for _, call := range response.ToolCalls {
+			names = append(names, call.Function.Name)
+		}
+		return "准备执行：" + strings.Join(names, "、")
+	}
+	return ""
 }
 
 func (r *Registry) isGroupAction(name string) bool {

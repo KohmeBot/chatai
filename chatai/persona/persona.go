@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ type Options struct {
 	ContextLimit    int
 	WebMaxBytes     int
 	ScheduleMaxSec  int
+	ProgressAfter   time.Duration
 	RepeatEnable    bool
 	RepeatCount     int
 	ImpressionEvery time.Duration
@@ -50,7 +52,10 @@ type Persona struct {
 	opts    Options
 	tools   *agent.Registry
 
-	mu sync.Mutex
+	mu              sync.Mutex
+	repeatMu        sync.Mutex
+	repeatWindow    []GroupMessage
+	repeatTriggered bool
 }
 
 func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Persona {
@@ -62,6 +67,9 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 	}
 	if opts.ScheduleMaxSec <= 0 {
 		opts.ScheduleMaxSec = 86400
+	}
+	if opts.ProgressAfter <= 0 {
+		opts.ProgressAfter = 15 * time.Second
 	}
 	if opts.ImpressionMin <= 0 {
 		opts.ImpressionMin = 20
@@ -89,11 +97,7 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 		return err
 	}
 	if p.opts.RepeatEnable {
-		repeat, err := p.shouldRepeat(msg, p.opts.RepeatCount)
-		if err != nil {
-			return err
-		}
-		if repeat {
+		if p.shouldRepeat(msg, p.opts.RepeatCount) {
 			segments := repeatMessage(ctx.Event.Message)
 			id := ctx.SendGroupMessage(p.groupID, segments)
 			return p.recordBotMessage(ctx, segments, id)
@@ -123,9 +127,25 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 	}
 	runner := agent.Runner{Model: p.opts.AgentModel, Tools: p.tools, MaxSteps: p.opts.MaxSteps, RequireAction: true}
 	runCtx := &agent.RunContext{Context: context.Background(), GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p}}
-	_, runErr := runner.Run(runCtx, prompt, "")
+	done := make(chan struct{})
+	go p.reportSlowDecision(ctx, runCtx, done)
+	answer, runErr := runner.Run(runCtx, prompt, "")
+	close(done)
 	if runCtx.ActionPerformed() {
 		return runErr
+	}
+	finalDecision := strings.TrimSpace(answer)
+	if finalDecision == "" && runErr != nil {
+		latest := conciseProgress(runCtx.LatestDecision())
+		if latest != "" && !strings.HasPrefix(latest, "准备执行：") {
+			finalDecision = "决策步数已到上限。基于目前已有信息，我的判断是：" + latest
+		}
+	}
+	if finalDecision != "" {
+		logrus.Warnf("[Agent][group=%d user=%d][最终文本直发] 模型未调用群聊动作，直接发送最后决策；error=%v", p.groupID, msg.User.UserId, runErr)
+		segments := message.Message{message.Text(finalDecision)}
+		id := ctx.SendGroupMessage(p.groupID, segments)
+		return p.recordBotMessage(ctx, segments, id)
 	}
 	logrus.Warnf("[Agent][group=%d user=%d][兜底动作] 决策链未完成群聊动作，发送兜底消息；error=%v", p.groupID, msg.User.UserId, runErr)
 	segments := message.Message{message.Text("……刚才走神了，再叫我一次吧。")}
@@ -135,6 +155,50 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 		return runErr
 	}
 	return recordErr
+}
+
+func (p *Persona) reportSlowDecision(ctx *zero.Ctx, runCtx *agent.RunContext, done <-chan struct{}) {
+	ticker := time.NewTicker(p.opts.ProgressAfter)
+	defer ticker.Stop()
+	lastReported := ""
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if runCtx.ActionPerformed() {
+				return
+			}
+			decision := conciseProgress(runCtx.LatestDecision())
+			if decision == "" {
+				decision = "正在等待当前决策完成，还没有卡住。"
+			}
+			if decision == lastReported {
+				continue
+			}
+			lastReported = decision
+			segments := message.Message{message.At(runCtx.UserID), message.Text(" 当前决策进展：" + decision)}
+			id := ctx.SendGroupMessage(p.groupID, segments)
+			if err := p.recordBotMessage(ctx, segments, id); err != nil {
+				logrus.Warnf("[Agent][group=%d user=%d][进度消息记录失败] %v", p.groupID, runCtx.UserID, err)
+			}
+		}
+	}
+}
+
+func conciseProgress(raw string) string {
+	raw = strings.Join(strings.Fields(raw), " ")
+	const maxRunes = 160
+	runes := []rune(raw)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "……"
+	}
+	return raw
 }
 
 func (p *Persona) eventPrompt(msg GroupMessage, scheduled string) string {

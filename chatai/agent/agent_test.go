@@ -101,12 +101,12 @@ func TestRunnerRequiresSuccessfulGroupAction(t *testing.T) {
 	llm := &scriptedModel{steps: []model.Response{
 		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
 		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
-		{Answer: "done"},
 	}}
 	runCtx := &RunContext{}
 	_, err := (&Runner{Model: llm, Tools: registry, RequireAction: true}).Run(runCtx, "reply", "")
 	require.NoError(t, err)
 	require.True(t, runCtx.ActionPerformed())
+	require.Len(t, llm.requests, 2, "runner should finish immediately after the visible action")
 }
 
 func TestRunnerRepromptsThenErrorsWhenModelStaysSilent(t *testing.T) {
@@ -115,6 +115,54 @@ func TestRunnerRepromptsThenErrorsWhenModelStaysSilent(t *testing.T) {
 	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 2, RequireAction: true}).Run(&RunContext{}, "reply", "")
 	require.ErrorIs(t, err, ErrGroupActionRequired)
 	require.Contains(t, llm.requests[1].Question, "必须")
+}
+
+func TestRunnerFinalStepOnlyOffersAndExecutesGroupActions(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition:  Function("search_web", "search", map[string]any{}),
+		SearchTerms: []string{"web"},
+		Handler:     func(_ *RunContext, _ json.RawMessage) (any, error) { return "result", nil },
+	}))
+	sent := false
+	require.NoError(t, registry.Register(Tool{
+		Definition:  Function("send_message", "send", map[string]any{}),
+		SearchTerms: []string{"send"},
+		GroupAction: true,
+		Handler:     func(_ *RunContext, _ json.RawMessage) (any, error) { sent = true; return "sent", nil },
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("find-web", "search_tools", `{"query":"web"}`)}},
+		{ToolCalls: []model.ToolCall{call("web", "search_web", `{}`)}},
+		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
+	}}
+
+	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 3, RequireAction: true}).Run(&RunContext{}, "understand this", "")
+	require.NoError(t, err)
+	require.True(t, sent)
+	require.Equal(t, []string{"send_message"}, toolNames(llm.requests[2].Tools))
+	require.Contains(t, llm.requests[2].Question, "最后一步")
+	require.Contains(t, llm.requests[2].Question, "禁止继续搜索")
+}
+
+func TestRunnerReturnsFinalTextWhenLastStepDoesNotCallAction(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "send", map[string]any{}), GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return "sent", nil },
+	}))
+	llm := &scriptedModel{steps: []model.Response{{Answer: "基于现有资料，这是最终判断。"}}}
+
+	answer, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 1, RequireAction: true}).Run(&RunContext{}, "reply", "")
+	require.ErrorIs(t, err, ErrGroupActionRequired)
+	require.Equal(t, "基于现有资料，这是最终判断。", answer)
+	require.Equal(t, []string{"send_message"}, toolNames(llm.requests[0].Tools))
+}
+
+func TestRunContextPublishesLatestDecision(t *testing.T) {
+	runCtx := new(RunContext)
+	runCtx.SetLatestDecision("  正在整理搜索结果  ")
+	require.Equal(t, "正在整理搜索结果", runCtx.LatestDecision())
 }
 
 func toolNames(tools []model.Tool) []string {

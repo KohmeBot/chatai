@@ -79,11 +79,15 @@ type GroupMessage struct {
 }
 
 func (g GroupMessage) ContentEqual(msg GroupMessage) bool {
+	if g.MsgType != msg.MsgType {
+		return false
+	}
 	switch g.MsgType {
 	case MsgTypeText:
 		return g.Content == msg.Content
 	case MsgTypeImg:
-		return g.Content == msg.Content && (g.Url == msg.Url || g.FileName == msg.FileName)
+		sameImage := (g.Url != "" && g.Url == msg.Url) || (g.FileName != "" && g.FileName == msg.FileName)
+		return g.Content == msg.Content && sameImage
 	case MsgTypeAt:
 		return g.Content == msg.Content && g.TargetUser == msg.TargetUser
 	case MsgTypePoke:

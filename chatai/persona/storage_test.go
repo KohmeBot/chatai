@@ -25,15 +25,25 @@ func TestChatMessageRecordRoundTripPreservesContextFields(t *testing.T) {
 	require.Equal(t, want, record.message())
 }
 
-func TestRepeatSignatureIncludesImageAndTarget(t *testing.T) {
-	base := GroupMessage{MsgType: MsgTypeReply, Content: "same", TargetUser: User{UserId: 1}, Url: "https://example.com/a.png"}
-	differentImage := base
-	differentImage.Url = "https://example.com/b.png"
-	differentTarget := base
-	differentTarget.TargetUser.UserId = 2
+func TestShouldRepeatUsesInMemorySlidingWindow(t *testing.T) {
+	p := new(Persona)
+	first := GroupMessage{MsgType: MsgTypeText, Content: "same"}
+	different := GroupMessage{MsgType: MsgTypeText, Content: "different"}
 
-	require.NotEqual(t, repeatSignature(base), repeatSignature(differentImage))
-	require.NotEqual(t, repeatSignature(base), repeatSignature(differentTarget))
-	require.True(t, repeatable(base))
-	require.False(t, repeatable(GroupMessage{MsgType: MsgTypePoke}))
+	require.False(t, p.shouldRepeat(first, 3))
+	require.False(t, p.shouldRepeat(first, 3))
+	require.True(t, p.shouldRepeat(first, 3))
+	require.False(t, p.shouldRepeat(first, 3), "only repeat once in one uninterrupted run")
+	require.False(t, p.shouldRepeat(different, 3))
+	require.False(t, p.shouldRepeat(different, 3))
+	require.True(t, p.shouldRepeat(different, 3), "a different message starts a new run")
+}
+
+func TestShouldRepeatUsesContentEqualForImages(t *testing.T) {
+	p := new(Persona)
+	first := GroupMessage{MsgType: MsgTypeImg, Url: "https://example.com/first", FileName: "same.image"}
+	second := GroupMessage{MsgType: MsgTypeImg, Url: "https://example.com/second", FileName: "same.image"}
+
+	require.False(t, p.shouldRepeat(first, 2))
+	require.True(t, p.shouldRepeat(second, 2), "matching image file names are the same content even if URLs change")
 }

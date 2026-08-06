@@ -87,7 +87,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.db = db
 	for _, table := range []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
-		&persona.ChatMessageRecord{}, &persona.RepeatState{}, &persona.ImpressionCursor{}, &model.TokenUsage{},
+		&persona.ChatMessageRecord{}, &persona.ImpressionCursor{}, &model.TokenUsage{},
 	} {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
@@ -95,6 +95,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 	if c.conf.Agent.MaxSteps <= 0 {
 		c.conf.Agent.MaxSteps = 8
+	}
+	if c.conf.Agent.ProgressAfterSeconds <= 0 {
+		c.conf.Agent.ProgressAfterSeconds = 15
 	}
 	if c.conf.Repeat.TriggerCount < 2 {
 		c.conf.Repeat.TriggerCount = 3
@@ -122,8 +125,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
 			VisionModel: vision, ImpressionModel: impression, MaxSteps: c.conf.Agent.MaxSteps,
 			ContextLimit: c.conf.Agent.ContextLimit, WebMaxBytes: c.conf.Agent.WebMaxBytes,
-			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, RepeatEnable: c.conf.Repeat.Enable,
-			RepeatCount: c.conf.Repeat.TriggerCount, ImpressionEvery: impressionEvery,
+			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
+			RepeatEnable: c.conf.Repeat.Enable,
+			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionEvery: impressionEvery,
 			ImpressionMin: c.conf.Impression.MinMessages, ExtraTools: c.extraTools,
 		})
 	}
@@ -138,4 +142,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.3-beta" }
+func (c *ChatPlugin) Version() string      { return "v1.0.4-beta" }
