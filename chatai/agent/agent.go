@@ -197,6 +197,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 	question := prompt
 	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, r.RequireAction, imageURL != "", logValue(prompt))
 	for i := 0; i < steps; i++ {
+		requestQuestion, requestImageURL := question, imageURL
 		definitions := r.Tools.Definitions(activeTools)
 		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v question=%s", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions), logValue(question))
 		response := new(model.Response)
@@ -219,6 +220,12 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=%s", runID, i+1, steps, logValue(response.Reasoning))
 		} else {
 			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=<模型未返回 reasoning_content>", runID, i+1, steps)
+		}
+		// Question 只会由模型适配器临时附加到当前请求；必须同步写入历史，
+		// 否则下一轮工具调用会从 assistant 消息开始并丢失原始用户问题。
+		if userMessage, ok := requestUserMessage(requestQuestion, requestImageURL); ok {
+			history = append(history, userMessage)
+			logrus.Infof("[Agent][run=%d][写入历史] step=%d/%d role=user image=%t content=%s", runID, i+1, steps, requestImageURL != "", logValue(requestQuestion))
 		}
 		question, imageURL = "", ""
 		if len(response.ToolCalls) == 0 {
@@ -307,6 +314,20 @@ func searchResultNames(results []SearchResult) []string {
 		names[i] = results[i].Name
 	}
 	return names
+}
+
+func requestUserMessage(question, imageURL string) (model.Message, bool) {
+	if question == "" && imageURL == "" {
+		return model.Message{}, false
+	}
+	content := any(question)
+	if imageURL != "" {
+		content = []model.ContentPart{
+			{Type: "text", Text: question},
+			{Type: "image_url", ImageURL: &model.ImageURL{URL: imageURL}},
+		}
+	}
+	return model.Message{Role: "user", Content: content}, true
 }
 
 func logValue(value string) string {

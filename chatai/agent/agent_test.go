@@ -43,8 +43,10 @@ func TestRunnerSearchesBeforeLoadingAndCallingTool(t *testing.T) {
 	require.Len(t, llm.requests, 3)
 	require.Equal(t, []string{"search_tools"}, toolNames(llm.requests[0].Tools))
 	require.Equal(t, []string{"search_tools", "read_context"}, toolNames(llm.requests[1].Tools))
-	require.Len(t, llm.requests[2].History, 4)
-	require.Equal(t, "tool", llm.requests[2].History[3].Role)
+	require.Equal(t, "user", llm.requests[1].History[0].Role)
+	require.Equal(t, "current event", llm.requests[1].History[0].Content)
+	require.Len(t, llm.requests[2].History, 5)
+	require.Equal(t, "tool", llm.requests[2].History[4].Role)
 }
 
 func TestRunnerRejectsUnloadedTool(t *testing.T) {
@@ -61,7 +63,23 @@ func TestRunnerRejectsUnloadedTool(t *testing.T) {
 	_, err := (&Runner{Model: llm, Tools: registry}).Run(&RunContext{}, "current event", "")
 	require.NoError(t, err)
 	require.False(t, called)
-	require.Contains(t, llm.requests[1].History[1].Content, "not active")
+	require.Contains(t, llm.requests[1].History[2].Content, "not active")
+}
+
+func TestRunnerPreservesImageUserMessageAcrossToolRounds(t *testing.T) {
+	registry := NewRegistry()
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"missing"}`)}},
+		{Answer: "done"},
+	}}
+	_, err := (&Runner{Model: llm, Tools: registry}).Run(&RunContext{}, "describe this", "https://example.com/image.png")
+	require.NoError(t, err)
+	require.Len(t, llm.requests[1].History, 3)
+	require.Equal(t, "user", llm.requests[1].History[0].Role)
+	parts, ok := llm.requests[1].History[0].Content.([]model.ContentPart)
+	require.True(t, ok)
+	require.Equal(t, "describe this", parts[0].Text)
+	require.Equal(t, "https://example.com/image.png", parts[1].ImageURL.URL)
 }
 
 func TestRegistryRejectsReservedSearchToolName(t *testing.T) {
