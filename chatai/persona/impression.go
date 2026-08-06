@@ -26,7 +26,7 @@ func (p *Persona) impressionLoop() {
 func (p *Persona) generateImpressions() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	rows, cursor, err := p.impressionMessages(500)
+	rows, cursor, err := p.impressionMessages(100)
 	if err != nil {
 		return err
 	}
