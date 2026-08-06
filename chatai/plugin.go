@@ -85,7 +85,10 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		return err
 	}
 	c.db = db
-	for _, table := range []any{&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{}, &model.TokenUsage{}} {
+	for _, table := range []any{
+		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
+		&persona.ChatMessageRecord{}, &persona.RepeatState{}, &persona.ImpressionCursor{}, &model.TokenUsage{},
+	} {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
 		}
@@ -135,4 +138,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.0-beta" }
+func (c *ChatPlugin) Version() string      { return "v1.0.1-beta" }

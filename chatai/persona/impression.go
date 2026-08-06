@@ -26,9 +26,16 @@ func (p *Persona) impressionLoop() {
 func (p *Persona) generateImpressions() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	messages := p.gc.Since(p.lastImpression)
-	if len(messages) < p.opts.ImpressionMin {
+	rows, cursor, err := p.impressionMessages(500)
+	if err != nil {
+		return err
+	}
+	if len(rows) < p.opts.ImpressionMin {
 		return nil
+	}
+	messages := make([]GroupMessage, len(rows))
+	for i := range rows {
+		messages[i] = rows[i].message()
 	}
 	old, err := new(GroupImpression).Get(p.db, p.groupID)
 	if err != nil {
@@ -67,6 +74,5 @@ func (p *Persona) generateImpressions() error {
 			}
 		}
 	}
-	p.lastImpression = messages[len(messages)-1].CreatedAt
-	return nil
+	return p.advanceImpressionCursor(cursor, rows[len(rows)-1].ID)
 }

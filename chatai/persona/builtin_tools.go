@@ -1,0 +1,539 @@
+package persona
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/kohmebot/chatai/chatai/agent"
+	"github.com/kohmebot/chatai/chatai/favor"
+	zero "github.com/wdvxdr1123/ZeroBot"
+	"github.com/wdvxdr1123/ZeroBot/message"
+)
+
+// registerBuiltinTools 只维护工具元数据与处理器映射；每个工具的逻辑在独立具名函数中。
+func (p *Persona) registerBuiltinTools() {
+	tools := []agent.Tool{
+		{Definition: agent.Function("read_group_context", "读取当前群最近的聊天上下文", map[string]any{"limit": integerProperty("返回条数，默认使用配置值")}), SearchTerms: []string{"群聊上下文", "聊天记录", "历史消息", "最近消息", "上下文"}, Handler: p.handleReadGroupContext},
+		{Definition: agent.Function("read_user_context", "读取某个用户在当前群最近的发言", map[string]any{"user_id": integerProperty("用户 QQ 号"), "limit": integerProperty("返回条数")}, "user_id"), SearchTerms: []string{"用户上下文", "某人发言", "用户记录", "历史消息"}, Handler: p.handleReadUserContext},
+		{Definition: agent.Function("read_messages_by_time", "从数据库读取当前群一个或多个时间区间内的消息，可选只看指定用户", map[string]any{
+			"ranges":  map[string]any{"type": "array", "minItems": 1, "maxItems": 10, "description": "一个或多个时间区间，开始时间包含、结束时间不包含", "items": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"start": stringProperty("开始时间，如 2026-08-06 09:00 或 RFC3339"), "end": stringProperty("结束时间，如 2026-08-06 12:00 或 RFC3339")}, "required": []string{"start", "end"}}},
+			"user_id": integerProperty("可选，只查询该用户的 QQ 号"), "limit": integerProperty("全部区间合计最多返回条数"),
+		}, "ranges"), SearchTerms: []string{"时间段消息", "按时间查询", "某段时间", "多个时间段", "历史记录", "日期消息"}, Handler: p.handleReadMessagesByTime},
+		{Definition: agent.Function("read_user_impression", "读取对某个用户的长期印象", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"), SearchTerms: []string{"用户印象", "对某人的印象", "长期记忆"}, Handler: p.handleReadUserImpression},
+		{Definition: agent.Function("read_group_impression", "读取对当前群的长期印象", map[string]any{}), SearchTerms: []string{"群聊印象", "群印象", "长期记忆"}, Handler: p.handleReadGroupImpression},
+		{Definition: agent.Function("read_user_favor", "读取指定用户当前的好感度、等级和说明", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"), SearchTerms: []string{"读取好感度", "查询好感度", "关系等级", "亲密度"}, Handler: p.handleReadUserFavor},
+		{Definition: agent.Function("update_user_favor", "按增量修改指定用户的好感度；单次增加最多60，减少最多30", map[string]any{"user_id": integerProperty("用户 QQ 号"), "delta": integerProperty("增加或减少的数值，负数表示减少"), "reason": stringProperty("修改原因")}, "user_id", "delta", "reason"), SearchTerms: []string{"修改好感度", "增加好感度", "减少好感度", "关系变化", "亲密度"}, Handler: p.handleUpdateUserFavor},
+		{Definition: agent.Function("send_message", "向当前群发送一句话，可选择引用消息", map[string]any{"text": stringProperty("要发送的话"), "reply_message_id": integerProperty("可选，引用的消息 ID")}, "text"), SearchTerms: []string{"发送消息", "回复", "说话", "引用回复"}, GroupAction: true, Handler: p.handleSendMessage},
+		{Definition: agent.Function("send_messages", "把回复拆成多条独立消息依次发送，最多5条", map[string]any{"messages": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 2, "maxItems": 5, "description": "按发送顺序排列的多句话"}, "interval_ms": integerProperty("消息间隔毫秒，默认500，范围0到3000")}, "messages"), SearchTerms: []string{"多句话", "分多条回复", "拆分回复", "连续发送", "多段消息"}, GroupAction: true, Handler: p.handleSendMessages},
+		{Definition: agent.Function("at_user", "在当前群 @ 某人并发送文字", map[string]any{"user_id": integerProperty("用户 QQ 号"), "text": stringProperty("要说的话")}, "user_id", "text"), SearchTerms: []string{"At某人", "@某人", "提醒某人", "指定用户回复"}, GroupAction: true, Handler: p.handleAtUser},
+		{Definition: agent.Function("poke_user", "在当前群戳一戳某人", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"), SearchTerms: []string{"戳一戳", "戳某人", "poke"}, GroupAction: true, Handler: p.handlePokeUser},
+		{Definition: agent.Function("schedule_task", "创建一次性定时任务，到期后由 Agent 再次决定如何执行", map[string]any{"delay_seconds": integerProperty("延迟秒数"), "instruction": stringProperty("到期时交给 Agent 的任务说明")}, "delay_seconds", "instruction"), SearchTerms: []string{"定时任务", "提醒", "稍后执行", "延迟"}, Handler: p.handleScheduleTask},
+		{Definition: agent.Function("search_web", "联网搜索公开网页，返回标题、链接和摘要；遇到不懂或不确定的信息时使用", map[string]any{"query": stringProperty("搜索关键词"), "limit": integerProperty("结果数量，默认5，最大8")}, "query"), SearchTerms: []string{"联网搜索", "搜索", "搜索网页", "查资料", "最新信息", "互联网", "不懂", "不知道", "陌生概念", "事实核实"}, Handler: p.handleSearchWeb},
+		{Definition: agent.Function("browse_web", "读取公开网页正文；搜索结果摘要不足时使用", map[string]any{"url": stringProperty("http 或 https 网页地址")}, "url"), SearchTerms: []string{"浏览网页", "读取网页", "打开链接", "网页正文", "原文", "URL"}, Handler: p.handleBrowseWeb},
+	}
+	for _, tool := range tools {
+		_ = p.tools.Register(tool)
+	}
+}
+
+func integerProperty(description string) map[string]any {
+	return map[string]any{"type": "integer", "description": description}
+}
+
+func stringProperty(description string) map[string]any {
+	return map[string]any{"type": "string", "description": description}
+}
+
+func (p *Persona) handleReadGroupContext(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		Limit int `json:"limit"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	input.Limit = p.contextLimit(input.Limit)
+	messages, err := p.recentMessages(input.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return formatMessages(messages), nil
+}
+
+func (p *Persona) handleReadUserContext(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		UserID int64 `json:"user_id"`
+		Limit  int   `json:"limit"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if err := validateUserID(input.UserID); err != nil {
+		return nil, err
+	}
+	messages, err := p.recentUserMessages(input.UserID, p.contextLimit(input.Limit))
+	if err != nil {
+		return nil, err
+	}
+	return formatMessages(messages), nil
+}
+
+type messageTimeRangeInput struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+func (p *Persona) handleReadMessagesByTime(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		Ranges []messageTimeRangeInput `json:"ranges"`
+		UserID int64                   `json:"user_id"`
+		Limit  int                     `json:"limit"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if len(input.Ranges) == 0 || len(input.Ranges) > 10 {
+		return nil, errors.New("ranges must contain between 1 and 10 items")
+	}
+	if input.UserID < 0 {
+		return nil, errors.New("user_id must not be negative")
+	}
+	ranges := make([]MessageTimeRange, len(input.Ranges))
+	for i, item := range input.Ranges {
+		start, err := parseToolTime(item.Start, false)
+		if err != nil {
+			return nil, fmt.Errorf("ranges[%d].start: %w", i, err)
+		}
+		end, err := parseToolTime(item.End, true)
+		if err != nil {
+			return nil, fmt.Errorf("ranges[%d].end: %w", i, err)
+		}
+		if !start.Before(end) {
+			return nil, fmt.Errorf("ranges[%d]: start must be before end", i)
+		}
+		ranges[i] = MessageTimeRange{Start: start, End: end}
+	}
+	messages, err := p.messagesInTimeRanges(ranges, input.UserID, p.contextLimit(input.Limit))
+	if err != nil {
+		return nil, err
+	}
+	return timeMessageResults(messages), nil
+}
+
+func (p *Persona) handleReadUserImpression(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+	userID, err := decodeUserID(raw)
+	if err != nil {
+		return nil, err
+	}
+	return new(UserImpression).Get(p.db, userID)
+}
+
+func (p *Persona) handleReadGroupImpression(_ *agent.RunContext, _ json.RawMessage) (any, error) {
+	return new(GroupImpression).Get(p.db, p.groupID)
+}
+
+func (p *Persona) handleReadUserFavor(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+	userID, err := decodeUserID(raw)
+	if err != nil {
+		return nil, err
+	}
+	value, err := favor.GetFavor(p.db, userID)
+	if err != nil {
+		return nil, err
+	}
+	level := favor.GetFavorLevelInfo(value)
+	return map[string]any{"user_id": userID, "favor": value, "level": level.Name, "description": level.Desc, "range": []int64{favor.FavorMin, favor.FavorMax}}, nil
+}
+
+func (p *Persona) handleUpdateUserFavor(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		UserID int64  `json:"user_id"`
+		Delta  int64  `json:"delta"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if err := validateUserID(input.UserID); err != nil {
+		return nil, err
+	}
+	if input.Delta == 0 {
+		return nil, errors.New("delta must not be zero")
+	}
+	before, err := favor.GetFavor(p.db, input.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := favor.UpdateFavor(p.db, input.UserID, input.Delta); err != nil {
+		return nil, err
+	}
+	after, err := favor.GetFavor(p.db, input.UserID)
+	if err != nil {
+		return nil, err
+	}
+	level := favor.GetFavorLevelInfo(after)
+	return map[string]any{"user_id": input.UserID, "before": before, "after": after, "actual_delta": after - before, "level": level.Name, "reason": input.Reason}, nil
+}
+
+func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		Text    string `json:"text"`
+		ReplyID int64  `json:"reply_message_id"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.Text) == "" {
+		return nil, errors.New("message text cannot be empty")
+	}
+	ctx, err := zeroContext(rc)
+	if err != nil {
+		return nil, err
+	}
+	segments := message.Message{}
+	if input.ReplyID > 0 {
+		segments = append(segments, message.Reply(input.ReplyID))
+	}
+	segments = append(segments, message.Text(input.Text))
+	id := ctx.SendGroupMessage(p.groupID, segments)
+	rc.MarkActionPerformed()
+	if err := p.recordBotMessage(ctx, segments, id); err != nil {
+		return nil, err
+	}
+	return map[string]any{"message_id": id}, nil
+}
+
+func (p *Persona) handleSendMessages(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		Messages   []string `json:"messages"`
+		IntervalMS int      `json:"interval_ms"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if len(input.Messages) < 2 || len(input.Messages) > 5 {
+		return nil, errors.New("messages must contain between 2 and 5 items")
+	}
+	if input.IntervalMS == 0 {
+		input.IntervalMS = 500
+	}
+	if input.IntervalMS < 0 || input.IntervalMS > 3000 {
+		return nil, errors.New("interval_ms must be between 0 and 3000")
+	}
+	ctx, err := zeroContext(rc)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(input.Messages))
+	for i, text := range input.Messages {
+		if strings.TrimSpace(text) == "" {
+			return nil, errors.New("message text cannot be empty")
+		}
+		segments := message.Message{message.Text(text)}
+		id := ctx.SendGroupMessage(p.groupID, segments)
+		rc.MarkActionPerformed()
+		if err := p.recordBotMessage(ctx, segments, id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		if i < len(input.Messages)-1 && input.IntervalMS > 0 {
+			time.Sleep(time.Duration(input.IntervalMS) * time.Millisecond)
+		}
+	}
+	return map[string]any{"message_ids": ids}, nil
+}
+
+func (p *Persona) handleAtUser(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		UserID int64  `json:"user_id"`
+		Text   string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if err := validateUserID(input.UserID); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.Text) == "" {
+		return nil, errors.New("message text cannot be empty")
+	}
+	ctx, err := zeroContext(rc)
+	if err != nil {
+		return nil, err
+	}
+	segments := message.Message{message.At(input.UserID), message.Text(" " + input.Text)}
+	id := ctx.SendGroupMessage(p.groupID, segments)
+	rc.MarkActionPerformed()
+	if err := p.recordBotMessage(ctx, segments, id); err != nil {
+		return nil, err
+	}
+	return map[string]any{"message_id": id}, nil
+}
+
+func (p *Persona) handlePokeUser(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	userID, err := decodeUserID(raw)
+	if err != nil {
+		return nil, err
+	}
+	ctx, err := zeroContext(rc)
+	if err != nil {
+		return nil, err
+	}
+	ctx.CallAction("send_poke", zero.Params{"group_id": p.groupID, "user_id": userID})
+	rc.MarkActionPerformed()
+	return "ok", nil
+}
+
+func (p *Persona) handleScheduleTask(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		Delay       int    `json:"delay_seconds"`
+		Instruction string `json:"instruction"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if input.Delay <= 0 || input.Delay > p.opts.ScheduleMaxSec {
+		return nil, fmt.Errorf("delay_seconds must be between 1 and %d", p.opts.ScheduleMaxSec)
+	}
+	ctx, err := zeroContext(rc)
+	if err != nil {
+		return nil, err
+	}
+	taskID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	time.AfterFunc(time.Duration(input.Delay)*time.Second, func() {
+		_ = p.run(ctx, GroupMessage{User: User{UserId: rc.UserID, Nickname: "定时任务"}, CreatedAt: time.Now(), MsgType: MsgTypeText}, input.Instruction)
+	})
+	return map[string]any{"task_id": taskID, "run_at": time.Now().Add(time.Duration(input.Delay) * time.Second)}, nil
+}
+
+func (p *Persona) handleSearchWeb(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	return p.searchWeb(rc, input.Query, input.Limit)
+}
+
+func (p *Persona) handleBrowseWeb(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	return p.readWeb(rc, input.URL)
+}
+
+func (p *Persona) contextLimit(limit int) int {
+	if limit <= 0 || limit > p.opts.ContextLimit {
+		return p.opts.ContextLimit
+	}
+	return limit
+}
+
+func decodeUserID(raw json.RawMessage) (int64, error) {
+	var input struct {
+		UserID int64 `json:"user_id"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return 0, err
+	}
+	if err := validateUserID(input.UserID); err != nil {
+		return 0, err
+	}
+	return input.UserID, nil
+}
+
+func validateUserID(userID int64) error {
+	if userID <= 0 {
+		return errors.New("user_id must be positive")
+	}
+	return nil
+}
+
+func parseToolTime(raw string, dateEnd bool) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, errors.New("time cannot be empty")
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed, nil
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04"} {
+		if parsed, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02", raw, time.Local); err == nil {
+		if dateEnd {
+			parsed = parsed.AddDate(0, 0, 1)
+		}
+		return parsed, nil
+	}
+	return time.Time{}, fmt.Errorf("unsupported time %q; use RFC3339 or YYYY-MM-DD[ HH:MM[:SS]]", raw)
+}
+
+type timeMessageResult struct {
+	MessageID      int64  `json:"message_id"`
+	CreatedAt      string `json:"created_at"`
+	UserID         int64  `json:"user_id"`
+	Nickname       string `json:"nickname"`
+	TargetUserID   int64  `json:"target_user_id,omitempty"`
+	TargetNickname string `json:"target_nickname,omitempty"`
+	Type           string `json:"type"`
+	Content        string `json:"content,omitempty"`
+	ImageURL       string `json:"image_url,omitempty"`
+	FileName       string `json:"file_name,omitempty"`
+}
+
+func timeMessageResults(messages []GroupMessage) []timeMessageResult {
+	results := make([]timeMessageResult, len(messages))
+	for i, item := range messages {
+		results[i] = timeMessageResult{MessageID: item.MsgID, CreatedAt: item.CreatedAt.Format(time.RFC3339), UserID: item.User.UserId, Nickname: item.User.Nickname, TargetUserID: item.TargetUser.UserId, TargetNickname: item.TargetUser.Nickname, Type: item.MsgType, Content: item.Content, ImageURL: item.Url, FileName: item.FileName}
+	}
+	return results
+}
+
+func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
+	ctx, ok := rc.Values["zero_ctx"].(*zero.Ctx)
+	if !ok || ctx == nil {
+		return nil, errors.New("zero context unavailable")
+	}
+	return ctx, nil
+}
+
+func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id int64) error {
+	return p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: "你"}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now()})
+}
+
+func (p *Persona) readWeb(rc *agent.RunContext, rawURL string) (string, error) {
+	u, err := validatePublicURL(rc, rawURL)
+	if err != nil {
+		return "", err
+	}
+	req, _ := http.NewRequestWithContext(rc, http.MethodGet, u.String(), nil)
+	req.Header.Set("User-Agent", "kohme-chatai-agent/1.0")
+	resp, err := publicHTTPClient(rc).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("web returned %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.opts.WebMaxBytes)))
+	if err != nil {
+		return "", err
+	}
+	text := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`).ReplaceAllString(string(body), " ")
+	return strings.Join(strings.Fields(html.UnescapeString(text)), " "), nil
+}
+
+type webSearchResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet,omitempty"`
+}
+
+func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]webSearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("search query cannot be empty")
+	}
+	if limit <= 0 || limit > 8 {
+		limit = 5
+	}
+	endpoint := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
+	req, _ := http.NewRequestWithContext(rc, http.MethodGet, endpoint, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; kohme-chatai-agent/1.0)")
+	resp, err := publicHTTPClient(rc).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("search returned %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.opts.WebMaxBytes)))
+	if err != nil {
+		return nil, err
+	}
+	source := string(body)
+	anchorRE := regexp.MustCompile(`(?s)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
+	snippetRE := regexp.MustCompile(`(?s)class="result__snippet"[^>]*>(.*?)</(?:a|div)>`)
+	strip := regexp.MustCompile(`<[^>]+>`)
+	anchors := anchorRE.FindAllStringSubmatchIndex(source, limit)
+	results := make([]webSearchResult, 0, len(anchors))
+	for i, match := range anchors {
+		rawLink := html.UnescapeString(source[match[2]:match[3]])
+		title := strings.Join(strings.Fields(html.UnescapeString(strip.ReplaceAllString(source[match[4]:match[5]], " "))), " ")
+		link := normalizeSearchURL(rawLink)
+		end := len(source)
+		if i+1 < len(anchors) {
+			end = anchors[i+1][0]
+		}
+		snippet := ""
+		if found := snippetRE.FindStringSubmatch(source[match[1]:end]); len(found) > 1 {
+			snippet = strings.Join(strings.Fields(html.UnescapeString(strip.ReplaceAllString(found[1], " "))), " ")
+		}
+		results = append(results, webSearchResult{Title: title, URL: link, Snippet: snippet})
+	}
+	if len(results) == 0 {
+		return nil, errors.New("search provider returned no parseable results")
+	}
+	return results, nil
+}
+
+func normalizeSearchURL(raw string) string {
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if target := u.Query().Get("uddg"); target != "" {
+		return target
+	}
+	return raw
+}
+
+func publicHTTPClient(rc *agent.RunContext) *http.Client {
+	return &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("too many redirects")
+		}
+		_, err := validatePublicURL(rc, req.URL.String())
+		return err
+	}}
+}
+
+func validatePublicURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return nil, errors.New("invalid http(s) URL")
+	}
+	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, u.Hostname())
+	if err != nil {
+		return nil, err
+	}
+	for _, addr := range addresses {
+		if addr.IP.IsLoopback() || addr.IP.IsPrivate() || addr.IP.IsUnspecified() || addr.IP.IsLinkLocalUnicast() {
+			return nil, errors.New("private or local addresses are not allowed")
+		}
+	}
+	return u, nil
+}

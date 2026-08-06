@@ -2,23 +2,15 @@ package persona
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
-	"regexp"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/plugin/v2"
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"gorm.io/gorm"
@@ -26,8 +18,10 @@ import (
 
 const agentRules = `
 你是群聊中的一个 Agent。当前输入只包含本次触发事件，不包含历史记录。
-需要背景时再调用 read_group_context 或 read_user_context；需要长期记忆时再调用印象工具。
-需要回复时必须调用 send_message、at_user 或 poke_user，不能只在最终答案里写准备发送的内容。
+你起初只会看到 search_tools。需要任何能力时，先用它搜索与当前任务有关的少量工具，再调用加载后的工具。
+需要背景时再搜索并调用群聊上下文、用户上下文或按时间查询消息的工具；需要长期记忆时再调用印象工具。
+遇到不认识的词、不了解的事情、无法确认的事实或可能变化的最新信息时，不要猜测：先用 search_tools 搜索“联网搜索”，再调用 search_web 求证；需要原文时再调用 browse_web。
+每次执行都必须成功调用 send_message、send_messages、at_user 或 poke_user 至少一次，不能只在最终答案里写准备发送的内容，也不能静默结束。
 不要为了“了解情况”无条件读取全部工具，只读取完成当前请求真正需要的信息。
 发送完成后用简短最终答案结束，不要重复发送。
 `
@@ -53,12 +47,10 @@ type Persona struct {
 	groupID int64
 	env     plugin.Env
 	db      *gorm.DB
-	gc      groupContext
 	opts    Options
 	tools   *agent.Registry
 
-	mu             sync.Mutex
-	lastImpression time.Time
+	mu sync.Mutex
 }
 
 func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Persona {
@@ -74,7 +66,7 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 	if opts.ImpressionMin <= 0 {
 		opts.ImpressionMin = 20
 	}
-	p := &Persona{groupID: groupID, env: env, db: db, opts: opts, tools: agent.NewRegistry(), lastImpression: time.Now()}
+	p := &Persona{groupID: groupID, env: env, db: db, opts: opts, tools: agent.NewRegistry()}
 	p.registerBuiltinTools()
 	for _, tool := range opts.ExtraTools {
 		_ = p.tools.Register(tool)
@@ -93,12 +85,19 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	if msg.IsEmpty() {
 		return nil
 	}
-	p.gc.AppendMsg(msg, 0)
-	if p.opts.RepeatEnable && p.gc.ShouldRepeat(msg, p.opts.RepeatCount) {
-		segments := ctx.Event.Message
-		id := ctx.SendGroupMessage(p.groupID, segments)
-		p.recordBotMessage(ctx, segments, id)
-		return nil
+	if err := p.saveMessage(msg); err != nil {
+		return err
+	}
+	if p.opts.RepeatEnable {
+		repeat, err := p.shouldRepeat(msg, p.opts.RepeatCount)
+		if err != nil {
+			return err
+		}
+		if repeat {
+			segments := ctx.Event.Message
+			id := ctx.SendGroupMessage(p.groupID, segments)
+			return p.recordBotMessage(ctx, segments, id)
+		}
 	}
 	triggered := ctx.Event.IsToMe || (msg.MsgType == MsgTypePoke && msg.TargetUser.UserId == ctx.Event.SelfID)
 	if !triggered {
@@ -116,14 +115,26 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 	prompt := p.eventPrompt(msg, scheduledInstruction)
 	if msg.Url != "" && p.opts.VisionModel != nil {
 		description, err := p.describeImage(msg.Url)
-		if err == nil && description != "" {
+		if err != nil {
+			logrus.Warnf("[Agent][group=%d user=%d][图片解析失败] %v", p.groupID, msg.User.UserId, err)
+		} else if description != "" {
 			prompt += "\n图片解析结果：" + description
 		}
 	}
-	runner := agent.Runner{Model: p.opts.AgentModel, Tools: p.tools, MaxSteps: p.opts.MaxSteps}
+	runner := agent.Runner{Model: p.opts.AgentModel, Tools: p.tools, MaxSteps: p.opts.MaxSteps, RequireAction: true}
 	runCtx := &agent.RunContext{Context: context.Background(), GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p}}
-	_, err := runner.Run(runCtx, prompt, "")
-	return err
+	_, runErr := runner.Run(runCtx, prompt, "")
+	if runCtx.ActionPerformed() {
+		return runErr
+	}
+	logrus.Warnf("[Agent][group=%d user=%d][兜底动作] 决策链未完成群聊动作，发送兜底消息；error=%v", p.groupID, msg.User.UserId, runErr)
+	segments := message.Message{message.Text("……刚才走神了，再叫我一次吧。")}
+	id := ctx.SendGroupMessage(p.groupID, segments)
+	recordErr := p.recordBotMessage(ctx, segments, id)
+	if runErr != nil {
+		return runErr
+	}
+	return recordErr
 }
 
 func (p *Persona) eventPrompt(msg GroupMessage, scheduled string) string {
@@ -143,187 +154,4 @@ func (p *Persona) describeImage(imageURL string) (string, error) {
 		return "", errors.New(res.ErrorMsg)
 	}
 	return res.Answer, nil
-}
-
-func (p *Persona) registerBuiltinTools() {
-	integer := func(desc string) map[string]any { return map[string]any{"type": "integer", "description": desc} }
-	stringProp := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
-	register := func(t agent.Tool) { _ = p.tools.Register(t) }
-
-	register(agent.Tool{Definition: agent.Function("read_group_context", "按需读取当前群最近的聊天上下文", map[string]any{"limit": integer("返回条数，默认使用配置值")}), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			Limit int `json:"limit"`
-		}
-		_ = json.Unmarshal(raw, &in)
-		if in.Limit <= 0 || in.Limit > p.opts.ContextLimit {
-			in.Limit = p.opts.ContextLimit
-		}
-		return formatMessages(p.gc.Snapshot(in.Limit)), nil
-	}})
-	register(agent.Tool{Definition: agent.Function("read_user_context", "按需读取某个用户在当前群最近的发言", map[string]any{"user_id": integer("用户 QQ 号"), "limit": integer("返回条数")}, "user_id"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			UserID int64 `json:"user_id"`
-			Limit  int   `json:"limit"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		if in.Limit <= 0 || in.Limit > p.opts.ContextLimit {
-			in.Limit = p.opts.ContextLimit
-		}
-		return formatMessages(p.gc.UserSnapshot(in.UserID, in.Limit)), nil
-	}})
-	register(agent.Tool{Definition: agent.Function("read_user_impression", "读取对某个用户的长期印象", map[string]any{"user_id": integer("用户 QQ 号")}, "user_id"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			UserID int64 `json:"user_id"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		return new(UserImpression).Get(p.db, in.UserID)
-	}})
-	register(agent.Tool{Definition: agent.Function("read_group_impression", "读取对当前群的长期印象", map[string]any{}), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		return new(GroupImpression).Get(p.db, p.groupID)
-	}})
-	register(agent.Tool{Definition: agent.Function("send_message", "向当前群发送一句话，可选择引用消息", map[string]any{"text": stringProp("要发送的话"), "reply_message_id": integer("可选，引用的消息 ID")}, "text"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			Text    string `json:"text"`
-			ReplyID int64  `json:"reply_message_id"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		ctx, err := zeroContext(rc)
-		if err != nil {
-			return nil, err
-		}
-		segments := message.Message{}
-		if in.ReplyID > 0 {
-			segments = append(segments, message.Reply(in.ReplyID))
-		}
-		segments = append(segments, message.Text(in.Text))
-		id := ctx.SendGroupMessage(p.groupID, segments)
-		p.recordBotMessage(ctx, segments, id)
-		return map[string]any{"message_id": id}, nil
-	}})
-	register(agent.Tool{Definition: agent.Function("at_user", "在当前群 @ 某人并发送文字", map[string]any{"user_id": integer("用户 QQ 号"), "text": stringProp("要说的话")}, "user_id", "text"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			UserID int64  `json:"user_id"`
-			Text   string `json:"text"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		ctx, err := zeroContext(rc)
-		if err != nil {
-			return nil, err
-		}
-		segments := message.Message{message.At(in.UserID), message.Text(" " + in.Text)}
-		id := ctx.SendGroupMessage(p.groupID, segments)
-		p.recordBotMessage(ctx, segments, id)
-		return map[string]any{"message_id": id}, nil
-	}})
-	register(agent.Tool{Definition: agent.Function("poke_user", "在当前群戳一戳某人", map[string]any{"user_id": integer("用户 QQ 号")}, "user_id"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			UserID int64 `json:"user_id"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		ctx, err := zeroContext(rc)
-		if err != nil {
-			return nil, err
-		}
-		ctx.CallAction("send_poke", zero.Params{"group_id": p.groupID, "user_id": in.UserID})
-		return "ok", nil
-	}})
-	register(agent.Tool{Definition: agent.Function("schedule_task", "创建一次性定时任务，到期后由 Agent 再次决定如何执行", map[string]any{"delay_seconds": integer("延迟秒数"), "instruction": stringProp("到期时交给 Agent 的任务说明")}, "delay_seconds", "instruction"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			Delay       int    `json:"delay_seconds"`
-			Instruction string `json:"instruction"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		if in.Delay <= 0 || in.Delay > p.opts.ScheduleMaxSec {
-			return nil, fmt.Errorf("delay_seconds must be between 1 and %d", p.opts.ScheduleMaxSec)
-		}
-		ctx, err := zeroContext(rc)
-		if err != nil {
-			return nil, err
-		}
-		taskID := strconv.FormatInt(time.Now().UnixNano(), 36)
-		time.AfterFunc(time.Duration(in.Delay)*time.Second, func() {
-			_ = p.run(ctx, GroupMessage{User: User{UserId: rc.UserID, Nickname: "定时任务"}, CreatedAt: time.Now(), MsgType: MsgTypeText}, in.Instruction)
-		})
-		return map[string]any{"task_id": taskID, "run_at": time.Now().Add(time.Duration(in.Delay) * time.Second)}, nil
-	}})
-	register(agent.Tool{Definition: agent.Function("browse_web", "读取公开网页正文；仅在确实需要外部资料时调用", map[string]any{"url": stringProp("http 或 https 网页地址")}, "url"), Handler: func(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-		var in struct {
-			URL string `json:"url"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		return p.readWeb(rc, in.URL)
-	}})
-}
-
-func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
-	ctx, ok := rc.Values["zero_ctx"].(*zero.Ctx)
-	if !ok || ctx == nil {
-		return nil, errors.New("zero context unavailable")
-	}
-	return ctx, nil
-}
-
-func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id int64) {
-	p.gc.AppendMsg(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: "你"}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now()}, 0)
-}
-
-func (p *Persona) readWeb(rc *agent.RunContext, rawURL string) (string, error) {
-	u, err := validatePublicURL(rc, rawURL)
-	if err != nil {
-		return "", err
-	}
-	req, _ := http.NewRequestWithContext(rc, http.MethodGet, u.String(), nil)
-	req.Header.Set("User-Agent", "kohme-chatai-agent/1.0")
-	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
-			return errors.New("too many redirects")
-		}
-		_, err := validatePublicURL(rc, req.URL.String())
-		return err
-	}}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("web returned %s", resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.opts.WebMaxBytes)))
-	if err != nil {
-		return "", err
-	}
-	text := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`).ReplaceAllString(string(body), " ")
-	return strings.Join(strings.Fields(html.UnescapeString(text)), " "), nil
-}
-
-func validatePublicURL(ctx context.Context, rawURL string) (*url.URL, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-		return nil, errors.New("invalid http(s) URL")
-	}
-	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, u.Hostname())
-	if err != nil {
-		return nil, err
-	}
-	for _, addr := range addresses {
-		if addr.IP.IsLoopback() || addr.IP.IsPrivate() || addr.IP.IsUnspecified() || addr.IP.IsLinkLocalUnicast() {
-			return nil, errors.New("private or local addresses are not allowed")
-		}
-	}
-	return u, nil
 }

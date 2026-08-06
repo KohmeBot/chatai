@@ -110,6 +110,7 @@ func (g GroupMessage) IsEmpty() bool {
 
 func newMessage(ctx *zero.Ctx) GroupMessage {
 	segments := ctx.Event.Message
+	quoted := getQuotedMessage(ctx, segments)
 
 	msgType := getMsgType(segments)
 
@@ -129,9 +130,9 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 			Nickname: ctx.CardOrNickName(ctx.Event.UserID),
 		},
 		TargetUser: User{},
-		Url:        getUrl(segments),
+		Url:        firstNonEmpty(getUrl(segments), getUrl(quoted.Elements)),
 		Content:    getText(segments),
-		FileName:   getFileName(segments),
+		FileName:   firstNonEmpty(getFileName(segments), getFileName(quoted.Elements)),
 		MsgType:    msgType,
 		MsgID:      msgId,
 		CreatedAt:  time.Now(),
@@ -212,12 +213,36 @@ func getTargetIDFromMsgs(ctx *zero.Ctx, msgs message.Message) int64 {
 		if segment.Type == "reply" {
 			msgId, _ := strconv.ParseInt(segment.Data["id"], 10, 64)
 			m := ctx.GetMessage(msgId)
-			targetID = m.Sender.ID
+			if m.Sender != nil {
+				targetID = m.Sender.ID
+			}
 			break
 		}
 	}
 
 	return targetID
+}
+
+func getQuotedMessage(ctx *zero.Ctx, msgs message.Message) zero.Message {
+	for _, segment := range msgs {
+		if segment.Type != MsgTypeReply {
+			continue
+		}
+		messageID, err := strconv.ParseInt(segment.Data["id"], 10, 64)
+		if err == nil && messageID > 0 {
+			return ctx.GetMessage(messageID, true)
+		}
+	}
+	return zero.Message{}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func formatTime(t time.Time) string {
