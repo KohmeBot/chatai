@@ -142,4 +142,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.4-beta" }
+func (c *ChatPlugin) Version() string      { return "v1.0.5" }
