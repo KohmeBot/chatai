@@ -20,7 +20,7 @@ import (
 const agentRules = `
 你是群聊中的一个 Agent。当前输入只包含本次触发事件，不包含历史记录。
 你起初只会看到 search_tools。需要任何能力时，先用它搜索与当前任务有关的少量工具，再调用加载后的工具。
-需要背景时再搜索并调用群聊上下文、用户上下文或按时间查询消息的工具；需要长期记忆时再调用印象工具。
+收到事件后的第一步是判断是否需要群聊上下文、该用户的上下文或按时间查询消息；需要就立即搜索并调用相应工具。能从上下文查明的信息不要反问用户“说了什么”或要求用户重复。需要长期记忆时再调用印象工具。
 遇到不认识的词、不了解的事情、无法确认的事实或可能变化的最新信息时，不要猜测：先用 search_tools 搜索“联网搜索”，再调用 search_web 求证；需要原文时再调用 browse_web。
 每次执行都必须成功调用 send_message、send_messages、at_user 或 poke_user 至少一次，不能只在最终答案里写准备发送的内容，也不能静默结束。
 不要为了“了解情况”无条件读取全部工具，只读取完成当前请求真正需要的信息。
@@ -38,6 +38,8 @@ type Options struct {
 	WebMaxBytes     int
 	ScheduleMaxSec  int
 	ProgressAfter   time.Duration
+	ProgressTips    []string
+	WebSearchPrefer time.Duration
 	RepeatEnable    bool
 	RepeatCount     int
 	ImpressionEvery time.Duration
@@ -52,10 +54,13 @@ type Persona struct {
 	opts    Options
 	tools   *agent.Registry
 
-	mu              sync.Mutex
-	repeatMu        sync.Mutex
-	repeatWindow    []GroupMessage
-	repeatTriggered bool
+	mu                      sync.Mutex
+	repeatMu                sync.Mutex
+	repeatWindow            []GroupMessage
+	repeatTriggered         bool
+	searchMu                sync.Mutex
+	preferredSearchProvider string
+	preferredSearchUntil    time.Time
 }
 
 func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Persona {
@@ -70,6 +75,20 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 	}
 	if opts.ProgressAfter <= 0 {
 		opts.ProgressAfter = 15 * time.Second
+	}
+	validProgressTips := make([]string, 0, len(opts.ProgressTips))
+	for _, tip := range opts.ProgressTips {
+		if tip = strings.TrimSpace(tip); tip != "" {
+			validProgressTips = append(validProgressTips, tip)
+		}
+	}
+	if len(validProgressTips) == 0 {
+		opts.ProgressTips = []string{"正在处理，请稍等一下。", "还在处理中，很快就好。", "正在整理结果，请稍候。"}
+	} else {
+		opts.ProgressTips = validProgressTips
+	}
+	if opts.WebSearchPrefer <= 0 {
+		opts.WebSearchPrefer = time.Hour
 	}
 	if opts.ImpressionMin <= 0 {
 		opts.ImpressionMin = 20
@@ -160,7 +179,7 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 func (p *Persona) reportSlowDecision(ctx *zero.Ctx, runCtx *agent.RunContext, done <-chan struct{}) {
 	ticker := time.NewTicker(p.opts.ProgressAfter)
 	defer ticker.Stop()
-	lastReported := ""
+	tipIndex := 0
 	for {
 		select {
 		case <-done:
@@ -174,15 +193,9 @@ func (p *Persona) reportSlowDecision(ctx *zero.Ctx, runCtx *agent.RunContext, do
 			if runCtx.ActionPerformed() {
 				return
 			}
-			decision := conciseProgress(runCtx.LatestDecision())
-			if decision == "" {
-				decision = "正在等待当前决策完成，还没有卡住。"
-			}
-			if decision == lastReported {
-				continue
-			}
-			lastReported = decision
-			segments := message.Message{message.At(runCtx.UserID), message.Text(" 当前决策进展：" + decision)}
+			tip := p.opts.ProgressTips[tipIndex%len(p.opts.ProgressTips)]
+			tipIndex++
+			segments := message.Message{message.At(runCtx.UserID), message.Text(" " + tip)}
 			id := ctx.SendGroupMessage(p.groupID, segments)
 			if err := p.recordBotMessage(ctx, segments, id); err != nil {
 				logrus.Warnf("[Agent][group=%d user=%d][进度消息记录失败] %v", p.groupID, runCtx.UserID, err)
@@ -205,7 +218,7 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string) string {
 	if scheduled != "" {
 		return fmt.Sprintf("定时任务到期。群号：%d。任务内容：%s", p.groupID, scheduled)
 	}
-	return fmt.Sprintf("群号：%d\n当前事件类型：%s\n发起人：%s\n目标：%s\n消息ID：%d\n完整文本：%s", p.groupID, MsgTypeString(msg.MsgType), msg.User.String(), msg.TargetUser.String(), msg.MsgID, msg.Content)
+	return fmt.Sprintf("群号：%d\n当前触发事件：\n%s", p.groupID, formatMessage(msg))
 }
 
 func (p *Persona) describeImage(imageURL string) (string, error) {

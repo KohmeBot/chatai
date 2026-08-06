@@ -66,15 +66,19 @@ func (u User) String() string {
 }
 
 type GroupMessage struct {
-	User       User      // 发言人
-	TargetUser User      // 群内@对方的ID或者是reply的人
-	Content    string    // 文字内容
-	MsgType    string    // text/image/poke/mixed
-	MsgID      int64     // 消息ID,可以定位消息
-	CreatedAt  time.Time // 创建时间
-	Url        string    // url
-	FileName   string    // file name
-	Refer      bool      // 是否已引用
+	User          User      // 发言人
+	TargetUser    User      // 群内@对方的ID或者是reply的人
+	QuotedUser    User      // 被引用消息的发言人
+	Content       string    // 文字内容
+	QuotedContent string    // 被引用消息的文字内容
+	MsgType       string    // text/image/poke/mixed
+	MsgID         int64     // 消息ID,可以定位消息
+	QuotedMsgID   int64     // 被引用消息ID
+	CreatedAt     time.Time // 创建时间
+	Url           string    // url
+	FileName      string    // file name
+	QuotedURL     string    // 被引用消息中的图片 URL
+	Refer         bool      // 是否已引用
 
 }
 
@@ -140,6 +144,12 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 		MsgType:    msgType,
 		MsgID:      msgId,
 		CreatedAt:  time.Now(),
+	}
+	msg.QuotedMsgID = replyMessageID(segments)
+	msg.QuotedContent = getText(quoted.Elements)
+	msg.QuotedURL = getUrl(quoted.Elements)
+	if quoted.Sender != nil {
+		msg.QuotedUser = User{UserId: quoted.Sender.ID, Nickname: quoted.Sender.Name()}
 	}
 
 	target := getTargetID(ctx)
@@ -264,6 +274,16 @@ func getQuotedMessage(ctx *zero.Ctx, msgs message.Message) zero.Message {
 	return zero.Message{}
 }
 
+func replyMessageID(msgs message.Message) int64 {
+	for _, segment := range msgs {
+		if segment.Type == MsgTypeReply {
+			messageID, _ := strconv.ParseInt(segment.Data["id"], 10, 64)
+			return messageID
+		}
+	}
+	return 0
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -351,6 +371,23 @@ func formatMessage(msg GroupMessage) string {
 	builder.WriteString(fmt.Sprintf("<%d> [%s] %s [%s]", msg.MsgID, formatTime(msg.CreatedAt), u.String(), action))
 	if content != "" {
 		builder.WriteString(fmt.Sprintf(": %s", content))
+	}
+	if msg.QuotedMsgID > 0 || msg.QuotedContent != "" || msg.QuotedURL != "" {
+		quotedUser := msg.QuotedUser
+		if quotedUser.UserId <= 0 {
+			quotedUser = target
+		}
+		quotedContent := msg.QuotedContent
+		if runeLen(quotedContent) > 500 {
+			quotedContent = string([]rune(quotedContent)[:500]) + "..."
+		}
+		builder.WriteString(fmt.Sprintf("\n  └─ 引用 <%d> %s", msg.QuotedMsgID, quotedUser.String()))
+		if quotedContent != "" {
+			builder.WriteString(": " + quotedContent)
+		}
+		if msg.QuotedURL != "" {
+			builder.WriteString(" [图片: " + msg.QuotedURL + "]")
+		}
 	}
 	return builder.String()
 }

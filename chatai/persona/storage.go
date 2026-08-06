@@ -10,19 +10,24 @@ import (
 
 // ChatMessageRecord 持久化群聊上下文；复读窗口不依赖此表。
 type ChatMessageRecord struct {
-	ID             uint  `gorm:"primaryKey"`
-	GroupID        int64 `gorm:"index:idx_chat_group_created"`
-	UserID         int64 `gorm:"index:idx_chat_group_user_created"`
-	UserNickname   string
-	TargetUserID   int64
-	TargetNickname string
-	Content        string
-	MsgType        string
-	MessageID      int64 `gorm:"index"`
-	URL            string
-	FileName       string
-	Referred       bool
-	CreatedAt      time.Time `gorm:"index:idx_chat_group_created;index:idx_chat_group_user_created"`
+	ID              uint  `gorm:"primaryKey"`
+	GroupID         int64 `gorm:"index:idx_chat_group_created"`
+	UserID          int64 `gorm:"index:idx_chat_group_user_created"`
+	UserNickname    string
+	TargetUserID    int64
+	TargetNickname  string
+	QuotedUserID    int64
+	QuotedNickname  string
+	Content         string
+	QuotedContent   string
+	MsgType         string
+	MessageID       int64 `gorm:"index"`
+	URL             string
+	FileName        string
+	QuotedMessageID int64
+	QuotedURL       string
+	Referred        bool
+	CreatedAt       time.Time `gorm:"index:idx_chat_group_created;index:idx_chat_group_user_created"`
 }
 
 type ImpressionCursor struct {
@@ -40,12 +45,16 @@ type MessageTimeRange struct {
 func messageRecord(groupID int64, msg GroupMessage) ChatMessageRecord {
 	return ChatMessageRecord{GroupID: groupID, UserID: msg.User.UserId, UserNickname: msg.User.Nickname,
 		TargetUserID: msg.TargetUser.UserId, TargetNickname: msg.TargetUser.Nickname, Content: msg.Content,
-		MsgType: msg.MsgType, MessageID: msg.MsgID, URL: msg.Url, FileName: msg.FileName, Referred: msg.Refer, CreatedAt: msg.CreatedAt}
+		QuotedUserID: msg.QuotedUser.UserId, QuotedNickname: msg.QuotedUser.Nickname, QuotedContent: msg.QuotedContent,
+		MsgType: msg.MsgType, MessageID: msg.MsgID, QuotedMessageID: msg.QuotedMsgID, URL: msg.Url, FileName: msg.FileName,
+		QuotedURL: msg.QuotedURL, Referred: msg.Refer, CreatedAt: msg.CreatedAt}
 }
 
 func (r ChatMessageRecord) message() GroupMessage {
 	return GroupMessage{User: User{UserId: r.UserID, Nickname: r.UserNickname}, TargetUser: User{UserId: r.TargetUserID, Nickname: r.TargetNickname},
-		Content: r.Content, MsgType: r.MsgType, MsgID: r.MessageID, CreatedAt: r.CreatedAt, Url: r.URL, FileName: r.FileName, Refer: r.Referred}
+		QuotedUser: User{UserId: r.QuotedUserID, Nickname: r.QuotedNickname}, Content: r.Content, QuotedContent: r.QuotedContent,
+		MsgType: r.MsgType, MsgID: r.MessageID, QuotedMsgID: r.QuotedMessageID, CreatedAt: r.CreatedAt, Url: r.URL,
+		FileName: r.FileName, QuotedURL: r.QuotedURL, Refer: r.Referred}
 }
 
 func (p *Persona) saveMessage(msg GroupMessage) error {

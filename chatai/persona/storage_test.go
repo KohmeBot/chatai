@@ -10,15 +10,19 @@ import (
 func TestChatMessageRecordRoundTripPreservesContextFields(t *testing.T) {
 	createdAt := time.Date(2026, 8, 6, 12, 30, 0, 0, time.Local)
 	want := GroupMessage{
-		User:       User{UserId: 10, Nickname: "sender"},
-		TargetUser: User{UserId: 20, Nickname: "target"},
-		Content:    "reply text",
-		MsgType:    MsgTypeReply,
-		MsgID:      30,
-		CreatedAt:  createdAt,
-		Url:        "https://example.com/image.png",
-		FileName:   "image.png",
-		Refer:      true,
+		User:          User{UserId: 10, Nickname: "sender"},
+		TargetUser:    User{UserId: 20, Nickname: "target"},
+		QuotedUser:    User{UserId: 21, Nickname: "quoted"},
+		Content:       "reply text",
+		QuotedContent: "original text",
+		MsgType:       MsgTypeReply,
+		MsgID:         30,
+		QuotedMsgID:   29,
+		CreatedAt:     createdAt,
+		Url:           "https://example.com/image.png",
+		FileName:      "image.png",
+		QuotedURL:     "https://example.com/quoted.png",
+		Refer:         true,
 	}
 	record := messageRecord(40, want)
 	require.Equal(t, int64(40), record.GroupID)

@@ -99,6 +99,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if c.conf.Agent.ProgressAfterSeconds <= 0 {
 		c.conf.Agent.ProgressAfterSeconds = 15
 	}
+	if c.conf.Agent.WebSearchPreferSeconds <= 0 {
+		c.conf.Agent.WebSearchPreferSeconds = 3600
+	}
 	if c.conf.Repeat.TriggerCount < 2 {
 		c.conf.Repeat.TriggerCount = 3
 	}
@@ -126,6 +129,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			VisionModel: vision, ImpressionModel: impression, MaxSteps: c.conf.Agent.MaxSteps,
 			ContextLimit: c.conf.Agent.ContextLimit, WebMaxBytes: c.conf.Agent.WebMaxBytes,
 			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
+			ProgressTips: c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
 			RepeatEnable: c.conf.Repeat.Enable,
 			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionEvery: impressionEvery,
 			ImpressionMin: c.conf.Impression.MinMessages, ExtraTools: c.extraTools,
@@ -142,4 +146,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.5" }
+func (c *ChatPlugin) Version() string      { return "v1.0.10" }

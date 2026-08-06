@@ -474,19 +474,62 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 	if limit <= 0 || limit > 8 {
 		limit = 5
 	}
-	return searchWebWithProviders(rc, query, limit, p.opts.WebMaxBytes, publicHTTPClient(rc), defaultWebSearchProviders)
+	p.searchMu.Lock()
+	preferred := ""
+	if time.Now().Before(p.preferredSearchUntil) {
+		preferred = p.preferredSearchProvider
+	}
+	p.searchMu.Unlock()
+
+	results, provider, err := searchWebWithPreferredProvider(rc, query, limit, p.opts.WebMaxBytes, publicHTTPClient(rc), defaultWebSearchProviders, preferred)
+	if err != nil {
+		return nil, err
+	}
+	p.searchMu.Lock()
+	p.preferredSearchProvider = provider
+	p.preferredSearchUntil = time.Now().Add(p.opts.WebSearchPrefer)
+	p.searchMu.Unlock()
+	return results, nil
 }
 
 func searchWebWithProviders(ctx context.Context, query string, limit, maxBytes int, client *http.Client, providers []webSearchProvider) ([]webSearchResult, error) {
+	results, _, err := searchWebWithPreferredProvider(ctx, query, limit, maxBytes, client, providers, "")
+	return results, err
+}
+
+func searchWebWithPreferredProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
+	providers = preferredProviderFirst(providers, preferred)
 	errs := make([]error, 0, len(providers))
 	for _, provider := range providers {
 		results, err := searchWithProvider(ctx, query, limit, maxBytes, client, provider)
 		if err == nil {
-			return results, nil
+			return results, provider.name, nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", provider.name, err))
 	}
-	return nil, fmt.Errorf("all search providers failed: %w", errors.Join(errs...))
+	return nil, "", fmt.Errorf("all search providers failed: %w", errors.Join(errs...))
+}
+
+func preferredProviderFirst(providers []webSearchProvider, preferred string) []webSearchProvider {
+	if preferred == "" || len(providers) < 2 {
+		return providers
+	}
+	ordered := make([]webSearchProvider, 0, len(providers))
+	for _, provider := range providers {
+		if provider.name == preferred {
+			ordered = append(ordered, provider)
+			break
+		}
+	}
+	if len(ordered) == 0 {
+		return providers
+	}
+	for _, provider := range providers {
+		if provider.name != preferred {
+			ordered = append(ordered, provider)
+		}
+	}
+	return ordered
 }
 
 func searchWithProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, provider webSearchProvider) ([]webSearchResult, error) {

@@ -82,6 +82,13 @@ func TestSearchWebStopsAfterFirstSuccessfulProvider(t *testing.T) {
 	require.Equal(t, 1, requests)
 }
 
+func TestSearchWebMovesPreferredProviderFirst(t *testing.T) {
+	providers := []webSearchProvider{{name: "first"}, {name: "second"}, {name: "third"}}
+	ordered := preferredProviderFirst(providers, "third")
+	require.Equal(t, []string{"third", "first", "second"}, []string{ordered[0].name, ordered[1].name, ordered[2].name})
+	require.Equal(t, []string{"first", "second", "third"}, []string{providers[0].name, providers[1].name, providers[2].name}, "must not mutate the default order")
+}
+
 func searchNames(results []agent.SearchResult) []string {
 	names := make([]string, len(results))
 	for i := range results {
