@@ -1,6 +1,10 @@
 package persona
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -31,6 +35,51 @@ func TestParseToolTimeSupportsLocalAndRFC3339(t *testing.T) {
 	dateEnd, err := parseToolTime("2026-08-06", true)
 	require.NoError(t, err)
 	require.Equal(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.Local), dateEnd)
+}
+
+func TestSearchWebFallsBackInProviderOrder(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/duckduckgo":
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		case "/bing":
+			fmt.Fprint(w, `<html>no parseable results</html>`)
+		case "/baidu":
+			fmt.Fprint(w, `<div class="result c-container"><h3 class="t"><a href="https://example.com/result">备用结果</a></h3><div>摘要</div></div>`)
+		}
+	}))
+	defer server.Close()
+
+	providers := []webSearchProvider{
+		{name: "DuckDuckGo", endpoint: func(string) string { return server.URL + "/duckduckgo" }, parse: parseDuckDuckGoResults},
+		{name: "Bing CN", endpoint: func(string) string { return server.URL + "/bing" }, parse: parseBingResults},
+		{name: "Baidu", endpoint: func(string) string { return server.URL + "/baidu" }, parse: parseBaiduResults},
+	}
+	results, err := searchWebWithProviders(context.Background(), "测试", 5, 1024*1024, server.Client(), providers)
+	require.NoError(t, err)
+	require.Equal(t, []string{"/duckduckgo", "/bing", "/baidu"}, paths)
+	require.Equal(t, []webSearchResult{{Title: "备用结果", URL: "https://example.com/result"}}, results)
+}
+
+func TestSearchWebStopsAfterFirstSuccessfulProvider(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		fmt.Fprint(w, `<li class="b_algo"><h2><a href="https://example.com">标题</a></h2><div><p>搜索摘要</p></div></li>`)
+	}))
+	defer server.Close()
+
+	providers := []webSearchProvider{
+		{name: "Bing CN", endpoint: func(string) string { return server.URL }, parse: parseBingResults},
+		{name: "Baidu", endpoint: func(string) string { return server.URL }, parse: parseBaiduResults},
+	}
+	results, err := searchWebWithProviders(context.Background(), "测试", 5, 1024*1024, server.Client(), providers)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "搜索摘要", results[0].Snippet)
+	require.Equal(t, 1, requests)
 }
 
 func searchNames(results []agent.SearchResult) []string {

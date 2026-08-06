@@ -416,7 +416,7 @@ func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
 }
 
 func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id int64) error {
-	return p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: "你"}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now()})
+	return p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: "你"}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now(), Url: getUrl(segments), FileName: getFileName(segments)})
 }
 
 func (p *Persona) readWeb(rc *agent.RunContext, rawURL string) (string, error) {
@@ -448,6 +448,24 @@ type webSearchResult struct {
 	Snippet string `json:"snippet,omitempty"`
 }
 
+type webSearchProvider struct {
+	name     string
+	endpoint func(string) string
+	parse    func(string, int) []webSearchResult
+}
+
+var defaultWebSearchProviders = []webSearchProvider{
+	{name: "DuckDuckGo", endpoint: func(query string) string {
+		return "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
+	}, parse: parseDuckDuckGoResults},
+	{name: "Bing CN", endpoint: func(query string) string {
+		return "https://cn.bing.com/search?q=" + url.QueryEscape(query) + "&setlang=zh-cn"
+	}, parse: parseBingResults},
+	{name: "Baidu", endpoint: func(query string) string {
+		return "https://www.baidu.com/s?wd=" + url.QueryEscape(query)
+	}, parse: parseBaiduResults},
+}
+
 func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]webSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -456,30 +474,61 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 	if limit <= 0 || limit > 8 {
 		limit = 5
 	}
-	endpoint := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
-	req, _ := http.NewRequestWithContext(rc, http.MethodGet, endpoint, nil)
+	return searchWebWithProviders(rc, query, limit, p.opts.WebMaxBytes, publicHTTPClient(rc), defaultWebSearchProviders)
+}
+
+func searchWebWithProviders(ctx context.Context, query string, limit, maxBytes int, client *http.Client, providers []webSearchProvider) ([]webSearchResult, error) {
+	errs := make([]error, 0, len(providers))
+	for _, provider := range providers {
+		results, err := searchWithProvider(ctx, query, limit, maxBytes, client, provider)
+		if err == nil {
+			return results, nil
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", provider.name, err))
+	}
+	return nil, fmt.Errorf("all search providers failed: %w", errors.Join(errs...))
+}
+
+func searchWithProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, provider webSearchProvider) ([]webSearchResult, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.endpoint(query), nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; kohme-chatai-agent/1.0)")
-	resp, err := publicHTTPClient(rc).Do(req)
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.5")
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("search returned %s", resp.Status)
+		return nil, fmt.Errorf("returned %s", resp.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.opts.WebMaxBytes)))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)))
 	if err != nil {
 		return nil, err
 	}
-	source := string(body)
+	results := provider.parse(string(body), limit)
+	if len(results) == 0 {
+		return nil, errors.New("returned no parseable results")
+	}
+	return results, nil
+}
+
+var stripHTMLRE = regexp.MustCompile(`<[^>]+>`)
+
+func cleanSearchText(raw string) string {
+	return strings.Join(strings.Fields(html.UnescapeString(stripHTMLRE.ReplaceAllString(raw, " "))), " ")
+}
+
+func parseDuckDuckGoResults(source string, limit int) []webSearchResult {
 	anchorRE := regexp.MustCompile(`(?s)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
 	snippetRE := regexp.MustCompile(`(?s)class="result__snippet"[^>]*>(.*?)</(?:a|div)>`)
-	strip := regexp.MustCompile(`<[^>]+>`)
 	anchors := anchorRE.FindAllStringSubmatchIndex(source, limit)
 	results := make([]webSearchResult, 0, len(anchors))
 	for i, match := range anchors {
 		rawLink := html.UnescapeString(source[match[2]:match[3]])
-		title := strings.Join(strings.Fields(html.UnescapeString(strip.ReplaceAllString(source[match[4]:match[5]], " "))), " ")
+		title := cleanSearchText(source[match[4]:match[5]])
 		link := normalizeSearchURL(rawLink)
 		end := len(source)
 		if i+1 < len(anchors) {
@@ -487,14 +536,41 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 		}
 		snippet := ""
 		if found := snippetRE.FindStringSubmatch(source[match[1]:end]); len(found) > 1 {
-			snippet = strings.Join(strings.Fields(html.UnescapeString(strip.ReplaceAllString(found[1], " "))), " ")
+			snippet = cleanSearchText(found[1])
 		}
 		results = append(results, webSearchResult{Title: title, URL: link, Snippet: snippet})
 	}
-	if len(results) == 0 {
-		return nil, errors.New("search provider returned no parseable results")
+	return results
+}
+
+func parseBingResults(source string, limit int) []webSearchResult {
+	itemRE := regexp.MustCompile(`(?s)<li[^>]*class="[^"]*\bb_algo\b[^"]*"[^>]*>(.*?)</li>`)
+	anchorRE := regexp.MustCompile(`(?s)<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
+	snippetRE := regexp.MustCompile(`(?s)<p[^>]*>(.*?)</p>`)
+	items := itemRE.FindAllStringSubmatch(source, limit)
+	results := make([]webSearchResult, 0, len(items))
+	for _, item := range items {
+		anchor := anchorRE.FindStringSubmatch(item[1])
+		if len(anchor) < 3 {
+			continue
+		}
+		snippet := ""
+		if found := snippetRE.FindStringSubmatch(item[1]); len(found) > 1 {
+			snippet = cleanSearchText(found[1])
+		}
+		results = append(results, webSearchResult{Title: cleanSearchText(anchor[2]), URL: html.UnescapeString(anchor[1]), Snippet: snippet})
 	}
-	return results, nil
+	return results
+}
+
+func parseBaiduResults(source string, limit int) []webSearchResult {
+	anchorRE := regexp.MustCompile(`(?s)<h3[^>]*class="[^"]*\bt\b[^"]*"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>`)
+	anchors := anchorRE.FindAllStringSubmatch(source, limit)
+	results := make([]webSearchResult, 0, len(anchors))
+	for _, anchor := range anchors {
+		results = append(results, webSearchResult{Title: cleanSearchText(anchor[2]), URL: html.UnescapeString(anchor[1])})
+	}
+	return results
 }
 
 func normalizeSearchURL(raw string) string {

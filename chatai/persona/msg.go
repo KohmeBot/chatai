@@ -170,10 +170,34 @@ func getMsgType(msgs message.Message) string {
 func getUrl(msgs message.Message) string {
 	for _, m := range msgs {
 		if m.Type == MsgTypeImg {
-			return m.Data["url"]
+			if imageURL := m.Data["url"]; imageURL != "" {
+				return imageURL
+			}
+			if file := m.Data["file"]; strings.HasPrefix(file, "http://") || strings.HasPrefix(file, "https://") {
+				return file
+			}
 		}
 	}
 	return ""
+}
+
+// repeatMessage 将接收事件里的图片转换为可发送的图片段。入站 file 通常是
+// OneBot 实现的临时缓存标识，而 url 才能跨消息重新上传。
+func repeatMessage(msgs message.Message) message.Message {
+	result := make(message.Message, 0, len(msgs))
+	for _, segment := range msgs {
+		if segment.Type != MsgTypeImg {
+			result = append(result, segment)
+			continue
+		}
+		file := firstNonEmpty(segment.Data["url"], segment.Data["file"])
+		image := message.Image(file)
+		if summary := segment.Data["summary"]; summary != "" {
+			image.Data["summary"] = summary
+		}
+		result = append(result, image)
+	}
+	return result
 }
 
 func getText(msgs message.Message) string {

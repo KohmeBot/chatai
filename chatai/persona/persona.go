@@ -94,7 +94,7 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 			return err
 		}
 		if repeat {
-			segments := ctx.Event.Message
+			segments := repeatMessage(ctx.Event.Message)
 			id := ctx.SendGroupMessage(p.groupID, segments)
 			return p.recordBotMessage(ctx, segments, id)
 		}
