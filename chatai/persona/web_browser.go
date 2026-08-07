@@ -13,7 +13,7 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-const webBrowserTimeout = 20 * time.Second
+const webBrowserTimeout = 30 * time.Second
 
 // loadWebPageWithBrowser renders a page in Chrome and returns the resulting DOM.
 // Every HTTP(S) request, including redirects and subresources, is checked before

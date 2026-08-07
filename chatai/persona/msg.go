@@ -215,6 +215,12 @@ func repeatMessage(msgs message.Message) message.Message {
 }
 
 func getText(msgs message.Message) string {
+	if getMsgType(msgs) == MsgTypeJson {
+		for _, sg := range msgs {
+			return sg.Data["data"]
+		}
+	}
+
 	return msgs.ExtractPlainText()
 }
 func getFileName(msgs message.Message) string {

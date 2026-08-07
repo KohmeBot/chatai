@@ -520,7 +520,11 @@ type webPageLoader func(context.Context, string, int) (string, error)
 
 func (p *Persona) loadWebPage(ctx context.Context, rawURL string, maxBytes int) (string, error) {
 	if p.opts.WebBrowserEnable {
-		return loadWebPageWithBrowser(ctx, rawURL, maxBytes, p.opts.WebBrowserAddress)
+		res, err := loadWebPageWithBrowser(ctx, rawURL, maxBytes, p.opts.WebBrowserAddress)
+		if err == nil {
+			return res, err
+		}
+		logrus.Errorf("web browser failed,try get:%v", err)
 	}
 	if _, err := validatePublicURL(ctx, rawURL); err != nil {
 		return "", err
