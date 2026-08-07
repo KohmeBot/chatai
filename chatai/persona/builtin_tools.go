@@ -55,7 +55,7 @@ func (p *Persona) registerBuiltinTools() {
 		{Definition: agent.Function("poke_user", "在当前群戳一戳某人", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"), SearchTerms: []string{"戳一戳", "戳某人", "poke"}, GroupAction: true, Handler: p.handlePokeUser},
 		{Definition: agent.Function("schedule_task", "创建一次性定时任务，到期后由 Agent 再次决定如何执行", map[string]any{"delay_seconds": integerProperty("延迟秒数"), "instruction": stringProperty("到期时交给 Agent 的任务说明")}, "delay_seconds", "instruction"), SearchTerms: []string{"定时任务", "提醒", "稍后执行", "延迟"}, Handler: p.handleScheduleTask},
 		{Definition: agent.Function("search_web", "联网搜索公开网页，返回标题、链接和摘要；遇到不懂或不确定的信息时使用", map[string]any{"query": stringProperty("搜索关键词"), "limit": integerProperty("结果数量，默认5，最大8")}, "query"), SearchTerms: []string{"联网搜索", "搜索", "搜索网页", "查资料", "最新信息", "互联网", "不懂", "不知道", "陌生概念", "事实核实"}, Handler: p.handleSearchWeb},
-		{Definition: agent.Function("browse_web", "读取公开网页正文；搜索结果摘要不足时使用", map[string]any{"url": stringProperty("http 或 https 网页地址")}, "url"), SearchTerms: []string{"浏览网页", "读取网页", "打开链接", "网页正文", "原文", "URL"}, Handler: p.handleBrowseWeb},
+		{Definition: agent.Function("browse_web", "读取公开网页正文；想进一步浏览结果或搜索结果摘要不足时使用", map[string]any{"url": stringProperty("http 或 https 网页地址")}, "url"), SearchTerms: []string{"联网搜索", "搜索", "搜索网页", "查资料", "最新信息", "互联网", "浏览网页", "读取网页", "打开链接", "网页正文", "原文", "URL"}, Handler: p.handleBrowseWeb},
 	}
 	for _, tool := range tools {
 		_ = p.tools.Register(tool)
@@ -513,7 +513,37 @@ func (p *Persona) readWeb(rc *agent.RunContext, rawURL string) (string, error) {
 		return "", err
 	}
 	req, _ := http.NewRequestWithContext(rc, http.MethodGet, u.String(), nil)
-	req.Header.Set("User-Agent", "kohme-chatai-agent/1.0")
+	req.Header.Set(
+		"User-Agent",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+			"AppleWebKit/537.36 (KHTML, like Gecko) "+
+			"Chrome/131.0.0.0 Safari/537.36",
+	)
+
+	req.Header.Set(
+		"Accept",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+	)
+
+	req.Header.Set(
+		"Accept-Language",
+		"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+	)
+
+	req.Header.Set(
+		"Cache-Control",
+		"no-cache",
+	)
+
+	req.Header.Set(
+		"Pragma",
+		"no-cache",
+	)
+
+	req.Header.Set(
+		"Referer",
+		"https://www.cn.bing.com/",
+	)
 	resp, err := publicHTTPClient(rc).Do(req)
 	if err != nil {
 		return "", err
@@ -625,8 +655,37 @@ func searchWithProvider(ctx context.Context, query string, limit, maxBytes int, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; kohme-chatai-agent/1.0)")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.5")
+	req.Header.Set(
+		"User-Agent",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+			"AppleWebKit/537.36 (KHTML, like Gecko) "+
+			"Chrome/131.0.0.0 Safari/537.36",
+	)
+
+	req.Header.Set(
+		"Accept",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+	)
+
+	req.Header.Set(
+		"Accept-Language",
+		"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+	)
+
+	req.Header.Set(
+		"Cache-Control",
+		"no-cache",
+	)
+
+	req.Header.Set(
+		"Pragma",
+		"no-cache",
+	)
+
+	//req.Header.Set(
+	//	"Referer",
+	//	"https://www.bing.com/",
+	//)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
