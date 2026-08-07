@@ -24,7 +24,6 @@ const agentRules = `
 每次执行都必须成功调用 send_message、send_messages、at_user 或 poke_user 至少一次，不能只在最终答案里写准备发送的内容，也不能静默结束。
 不要为了“了解情况”无条件读取全部工具，只读取完成当前请求真正需要的信息。
 发送完成后用简短最终答案结束，不要重复发送。
-现在的时间是 %s
 `
 
 func AgentRules() string { return agentRules }

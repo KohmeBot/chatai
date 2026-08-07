@@ -27,6 +27,31 @@ func TestBuiltinToolSearchFindsWebAndTimeRangeTools(t *testing.T) {
 	require.Contains(t, searchNames(recent), "read_group_context")
 }
 
+func TestBuiltinToolSearchFindsGroupMemberTools(t *testing.T) {
+	p := &Persona{tools: agent.NewRegistry()}
+	p.registerBuiltinTools()
+
+	info := p.tools.Search("查询群成员资料和群名片", 5)
+	require.Contains(t, searchNames(info), "get_group_member_info")
+
+	list := p.tools.Search("获取群成员名单", 5)
+	require.Contains(t, searchNames(list), "get_group_member_list")
+}
+
+func TestGroupMemberToolsValidateCurrentGroupBeforeUsingContext(t *testing.T) {
+	p := &Persona{groupID: 12345}
+	rc := &agent.RunContext{}
+
+	_, err := p.handleGetGroupMemberInfo(rc, []byte(`{"group_id":54321,"user_id":10001}`))
+	require.ErrorContains(t, err, "current group (12345)")
+
+	_, err = p.handleGetGroupMemberList(rc, []byte(`{"group_id":0}`))
+	require.ErrorContains(t, err, "group_id must be positive")
+
+	_, err = p.handleGetGroupMemberInfo(rc, []byte(`{"group_id":12345,"user_id":0}`))
+	require.ErrorContains(t, err, "user_id must be positive")
+}
+
 func TestDecodeContextQuerySupportsRelativeTimeAndPagination(t *testing.T) {
 	p := &Persona{opts: Options{ContextLimit: 50}}
 	before := time.Now()
