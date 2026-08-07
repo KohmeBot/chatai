@@ -18,7 +18,7 @@ const webBrowserTimeout = 30 * time.Second
 // loadWebPageWithBrowser renders a page in Chrome and returns the resulting DOM.
 // Every HTTP(S) request, including redirects and subresources, is checked before
 // Chrome is allowed to issue it so browser mode does not weaken the SSRF guard.
-func loadWebPageWithBrowser(parent context.Context, rawURL string, maxBytes int, address string) (string, error) {
+func loadWebPageWithBrowser(parent context.Context, rawURL string, address string) (string, error) {
 	if _, err := validatePublicURL(parent, rawURL); err != nil {
 		return "", err
 	}
@@ -70,10 +70,25 @@ func loadWebPageWithBrowser(parent context.Context, rawURL string, maxBytes int,
 
 	var source, finalURL string
 	err := chromedp.Run(browserCtx,
-		fetch.Enable(),
+		//fetch.Enable(),
+
+		// 301 / 302 自动跟随
 		chromedp.Navigate(rawURL),
+
+		// 等 html 节点存在
+		chromedp.WaitReady("html", chromedp.ByQuery),
+
+		// 给 SPA / async JS 一个渲染窗口
+		chromedp.Sleep(5*time.Second),
+
+		// 此时再获取 URL，JS redirect 也更有机会完成
 		chromedp.Location(&finalURL),
-		chromedp.OuterHTML("html", &source, chromedp.ByQuery),
+
+		// 拿此刻真正的 DOM
+		chromedp.Evaluate(
+			`document.documentElement.outerHTML`,
+			&source,
+		),
 	)
 	blockedMu.Lock()
 	requestErr := blockedErr
@@ -87,8 +102,6 @@ func loadWebPageWithBrowser(parent context.Context, rawURL string, maxBytes int,
 	if _, err := validatePublicURL(parent, finalURL); err != nil {
 		return "", fmt.Errorf("invalid browser redirect: %w", err)
 	}
-	if maxBytes > 0 && len(source) > maxBytes {
-		source = source[:maxBytes]
-	}
+
 	return source, nil
 }

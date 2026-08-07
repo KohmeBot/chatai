@@ -513,19 +513,55 @@ func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id i
 }
 
 func (p *Persona) readWeb(rc *agent.RunContext, rawURL string) (string, error) {
-	source, err := p.loadWebPage(rc, rawURL, p.opts.WebMaxBytes)
+	source, err := p.loadWebPage(rc, rawURL)
 	if err != nil {
 		return "", err
 	}
-	text := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`).ReplaceAllString(source, " ")
-	return strings.Join(strings.Fields(html.UnescapeString(text)), " "), nil
+	return extractUsefulText(source, p.opts.WebMaxBytes)
+
+	//text := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`).ReplaceAllString(source, " ")
+	//return strings.Join(strings.Fields(html.UnescapeString(text)), " "), nil
 }
 
-type webPageLoader func(context.Context, string, int) (string, error)
+func extractUsefulText(source string, maxBytes int) (string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(source))
+	if err != nil {
+		return "", err
+	}
 
-func (p *Persona) loadWebPage(ctx context.Context, rawURL string, maxBytes int) (string, error) {
+	// 删除明显无用内容
+	doc.Find("script, style, noscript, svg, canvas, iframe").Remove()
+
+	// 可以根据需要继续去掉导航、页脚等噪音
+	doc.Find("nav, footer").Remove()
+
+	text := doc.Find("body").Text()
+
+	// 清理空白，但保留一定可读性
+	lines := strings.Split(text, "\n")
+
+	var result []string
+	for _, line := range lines {
+		line = html.UnescapeString(line)
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+
+	res := strings.Join(result, "\n")
+	if maxBytes > 0 && len(res) > maxBytes {
+		res = res[:maxBytes]
+	}
+	return res, nil
+
+}
+
+type webPageLoader func(context.Context, string) (string, error)
+
+func (p *Persona) loadWebPage(ctx context.Context, rawURL string) (string, error) {
 	if p.opts.WebBrowserEnable {
-		res, err := loadWebPageWithBrowser(ctx, rawURL, maxBytes, p.opts.WebBrowserAddress)
+		res, err := loadWebPageWithBrowser(ctx, rawURL, p.opts.WebBrowserAddress)
 		if err == nil {
 			return res, err
 		}
@@ -534,11 +570,11 @@ func (p *Persona) loadWebPage(ctx context.Context, rawURL string, maxBytes int) 
 	if _, err := validatePublicURL(ctx, rawURL); err != nil {
 		return "", err
 	}
-	return loadWebPageWithHTTP(publicHTTPClient(ctx))(ctx, rawURL, maxBytes)
+	return loadWebPageWithHTTP(publicHTTPClient(ctx))(ctx, rawURL)
 }
 
 func loadWebPageWithHTTP(client *http.Client) webPageLoader {
-	return func(ctx context.Context, rawURL string, maxBytes int) (string, error) {
+	return func(ctx context.Context, rawURL string) (string, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			return "", err
@@ -582,7 +618,7 @@ func loadWebPageWithHTTP(client *http.Client) webPageLoader {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return "", fmt.Errorf("web returned %s", resp.Status)
 		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)))
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
 		}
@@ -653,7 +689,7 @@ func searchWebWithPreferredProviderAndLoader(ctx context.Context, query string, 
 	providers = preferredProviderFirst(providers, preferred)
 	errs := make([]error, 0, len(providers))
 	for _, provider := range providers {
-		results, err := searchWithProviderAndLoader(ctx, query, limit, maxBytes, loader, provider)
+		results, err := searchWithProviderAndLoader(ctx, query, limit, loader, provider)
 		if err == nil {
 			return results, provider.name, nil
 		}
@@ -684,12 +720,12 @@ func preferredProviderFirst(providers []webSearchProvider, preferred string) []w
 	return ordered
 }
 
-func searchWithProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, provider webSearchProvider) ([]webSearchResult, error) {
-	return searchWithProviderAndLoader(ctx, query, limit, maxBytes, loadWebPageWithHTTP(client), provider)
+func searchWithProvider(ctx context.Context, query string, limit int, client *http.Client, provider webSearchProvider) ([]webSearchResult, error) {
+	return searchWithProviderAndLoader(ctx, query, limit, loadWebPageWithHTTP(client), provider)
 }
 
-func searchWithProviderAndLoader(ctx context.Context, query string, limit, maxBytes int, loader webPageLoader, provider webSearchProvider) ([]webSearchResult, error) {
-	body, err := loader(ctx, provider.endpoint(query), maxBytes)
+func searchWithProviderAndLoader(ctx context.Context, query string, limit int, loader webPageLoader, provider webSearchProvider) ([]webSearchResult, error) {
+	body, err := loader(ctx, provider.endpoint(query))
 	if err != nil {
 		return nil, err
 	}

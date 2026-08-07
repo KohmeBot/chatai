@@ -116,13 +116,13 @@ func TestSearchWebMovesPreferredProviderFirst(t *testing.T) {
 }
 
 func TestBrowserLoaderRejectsPrivateURLBeforeStartingChrome(t *testing.T) {
-	_, err := loadWebPageWithBrowser(context.Background(), "http://127.0.0.1/private", 1024, "")
+	_, err := loadWebPageWithBrowser(context.Background(), "http://127.0.0.1/private", "")
 	require.ErrorContains(t, err, "private or local addresses are not allowed")
 }
 
 func TestSearchWebUsesConfiguredPageLoader(t *testing.T) {
 	var loadedURL string
-	loader := func(_ context.Context, rawURL string, _ int) (string, error) {
+	loader := func(_ context.Context, rawURL string) (string, error) {
 		loadedURL = rawURL
 		return `<li class="b_algo"><h2><a href="https://example.com">标题</a></h2><p>摘要</p></li>`, nil
 	}
