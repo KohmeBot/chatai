@@ -79,7 +79,7 @@ func loadWebPageWithBrowser(parent context.Context, rawURL string, address strin
 		chromedp.WaitReady("html", chromedp.ByQuery),
 
 		// 给 SPA / async JS 一个渲染窗口
-		chromedp.Sleep(5*time.Second),
+		chromedp.Sleep(1*time.Second),
 
 		// 此时再获取 URL，JS redirect 也更有机会完成
 		chromedp.Location(&finalURL),

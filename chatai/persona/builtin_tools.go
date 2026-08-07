@@ -529,32 +529,47 @@ func extractUsefulText(source string, maxBytes int) (string, error) {
 		return "", err
 	}
 
-	// 删除明显无用内容
 	doc.Find("script, style, noscript, svg, canvas, iframe").Remove()
-
-	// 可以根据需要继续去掉导航、页脚等噪音
 	doc.Find("nav, footer").Remove()
+
+	// 给链接补充 URL
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		href, exists := s.Attr("href")
+		if exists && href != "" {
+			text := strings.TrimSpace(s.Text())
+
+			if text != "" {
+				s.ReplaceWithHtml(
+					html.EscapeString(text) +
+						" [链接: " +
+						html.EscapeString(href) +
+						"]",
+				)
+			}
+		}
+	})
 
 	text := doc.Find("body").Text()
 
-	// 清理空白，但保留一定可读性
 	lines := strings.Split(text, "\n")
 
 	var result []string
 	for _, line := range lines {
 		line = html.UnescapeString(line)
 		line = strings.Join(strings.Fields(line), " ")
+
 		if line != "" {
 			result = append(result, line)
 		}
 	}
 
 	res := strings.Join(result, "\n")
+
 	if maxBytes > 0 && len(res) > maxBytes {
 		res = res[:maxBytes]
 	}
-	return res, nil
 
+	return res, nil
 }
 
 type webPageLoader func(context.Context, string) (string, error)
