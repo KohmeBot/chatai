@@ -5,8 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/stretchr/testify/require"
 )
+
+type routeTestModel struct{ name string }
+
+func (*routeTestModel) Request(*model.Request, *model.Response) error { return nil }
 
 func TestEventPromptUsesFormattedMessageAndIncludesQuote(t *testing.T) {
 	p := &Persona{groupID: 123}
@@ -23,4 +28,18 @@ func TestEventPromptUsesFormattedMessageAndIncludesQuote(t *testing.T) {
 
 func TestAgentRulesPrioritizeContextBeforeAskingUser(t *testing.T) {
 	require.True(t, strings.Index(agentRules, "第一步是判断是否需要群聊上下文") < strings.Index(agentRules, "不要反问用户"))
+}
+
+func TestModelForMessageRoutesWholeImageRequestToVisionModel(t *testing.T) {
+	textModel := &routeTestModel{name: "text"}
+	visionModel := &routeTestModel{name: "vision"}
+	p := &Persona{opts: Options{AgentModel: textModel, VisionModel: visionModel}}
+
+	selected, imageURL := p.modelForMessage(GroupMessage{Content: "这张图是什么意思？", Url: "https://example.com/image.png"})
+	require.Same(t, visionModel, selected)
+	require.Equal(t, "https://example.com/image.png", imageURL)
+
+	selected, imageURL = p.modelForMessage(GroupMessage{Content: "纯文本问题"})
+	require.Same(t, textModel, selected)
+	require.Empty(t, imageURL)
 }

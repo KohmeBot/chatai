@@ -21,6 +21,31 @@ func TestBuiltinToolSearchFindsWebAndTimeRangeTools(t *testing.T) {
 
 	history := p.tools.Search("查询多个时间段的历史消息", 5)
 	require.Contains(t, searchNames(history), "read_messages_by_time")
+
+	recent := p.tools.Search("总结半小时前到现在的聊天内容", 5)
+	require.Contains(t, searchNames(recent), "read_group_context")
+}
+
+func TestDecodeContextQuerySupportsRelativeTimeAndPagination(t *testing.T) {
+	p := &Persona{opts: Options{ContextLimit: 50}}
+	before := time.Now()
+	query, err := p.decodeContextQuery([]byte(`{"last_minutes":30,"limit":20,"offset":40,"keyword":"发布"}`), 123)
+	after := time.Now()
+	require.NoError(t, err)
+	require.Equal(t, int64(123), query.UserID)
+	require.Equal(t, 20, query.Limit)
+	require.Equal(t, 40, query.Offset)
+	require.Equal(t, "发布", query.Keyword)
+	require.NotNil(t, query.Start)
+	require.NotNil(t, query.End)
+	require.WithinDuration(t, before.Add(-30*time.Minute), *query.Start, after.Sub(before)+time.Second)
+	require.WithinDuration(t, before, *query.End, after.Sub(before)+time.Second)
+}
+
+func TestDecodeContextQueryRejectsConflictingRelativeAndAbsoluteStart(t *testing.T) {
+	p := &Persona{opts: Options{ContextLimit: 50}}
+	_, err := p.decodeContextQuery([]byte(`{"last_minutes":30,"since":"2026-08-07 10:00"}`), 0)
+	require.ErrorContains(t, err, "cannot be used together")
 }
 
 func TestParseToolTimeSupportsLocalAndRFC3339(t *testing.T) {

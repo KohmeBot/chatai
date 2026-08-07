@@ -2,7 +2,6 @@ package persona
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -136,19 +135,12 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 
 func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction string) error {
 	prompt := p.eventPrompt(msg, scheduledInstruction)
-	if msg.Url != "" && p.opts.VisionModel != nil {
-		description, err := p.describeImage(msg.Url)
-		if err != nil {
-			logrus.Warnf("[Agent][group=%d user=%d][图片解析失败] %v", p.groupID, msg.User.UserId, err)
-		} else if description != "" {
-			prompt += "\n图片解析结果：" + description
-		}
-	}
-	runner := agent.Runner{Model: p.opts.AgentModel, Tools: p.tools, MaxSteps: p.opts.MaxSteps, RequireAction: true}
+	agentModel, imageURL := p.modelForMessage(msg)
+	runner := agent.Runner{Model: agentModel, Tools: p.tools, MaxSteps: p.opts.MaxSteps, RequireAction: true}
 	runCtx := &agent.RunContext{Context: context.Background(), GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p}}
 	done := make(chan struct{})
 	go p.reportSlowDecision(ctx, runCtx, done)
-	answer, runErr := runner.Run(runCtx, prompt, "")
+	answer, runErr := runner.Run(runCtx, prompt, imageURL)
 	close(done)
 	if runCtx.ActionPerformed() {
 		return runErr
@@ -174,6 +166,15 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 		return runErr
 	}
 	return recordErr
+}
+
+func (p *Persona) modelForMessage(msg GroupMessage) (model.LargeModel, string) {
+	if msg.Url != "" && p.opts.VisionModel != nil {
+		// 不再先把图片压缩成一段描述再交给文本 Agent。视觉模型直接接收
+		// 完整触发事件和原图，并继续参与后续工具调用轮次。
+		return p.opts.VisionModel, msg.Url
+	}
+	return p.opts.AgentModel, ""
 }
 
 func (p *Persona) reportSlowDecision(ctx *zero.Ctx, runCtx *agent.RunContext, done <-chan struct{}) {
@@ -219,16 +220,4 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string) string {
 		return fmt.Sprintf("定时任务到期。群号：%d。任务内容：%s", p.groupID, scheduled)
 	}
 	return fmt.Sprintf("群号：%d\n当前触发事件：\n%s", p.groupID, formatMessage(msg))
-}
-
-func (p *Persona) describeImage(imageURL string) (string, error) {
-	res := new(model.Response)
-	err := p.opts.VisionModel.Request(&model.Request{Question: "准确描述图片内容；如果是表情包，说明文字和表达的情绪。", ImageURL: imageURL}, res)
-	if err != nil {
-		return "", err
-	}
-	if res.ErrorMsg != "" {
-		return "", errors.New(res.ErrorMsg)
-	}
-	return res.Answer, nil
 }

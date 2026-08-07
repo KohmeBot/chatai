@@ -116,7 +116,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	for group := range env.Groups().RangeGroup() {
 		var vision model.LargeModel
 		if c.conf.Routes.Vision.Configured() {
-			vision = c.routeModel(c.conf.Routes.Vision, "你是图片解析器。", false)
+			// 带图事件由视觉模型直接完成整轮 Agent 决策，因此它需要与文本
+			// Agent 相同的人设、上下文规则和工具调用说明。
+			vision = c.routeModel(c.conf.Routes.Vision, string(c.conf.System)+"\n"+persona.AgentRules(), false)
 		}
 		var impression model.LargeModel
 		var impressionEvery time.Duration
@@ -146,4 +148,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.11" }
+func (c *ChatPlugin) Version() string      { return "v1.0.12" }

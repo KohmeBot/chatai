@@ -42,6 +42,17 @@ type MessageTimeRange struct {
 	End   time.Time
 }
 
+// ContextMessageQuery 描述最近上下文的可选筛选与分页条件。
+// 查询始终从最新消息向前取一页，返回值再恢复为时间正序，便于模型阅读。
+type ContextMessageQuery struct {
+	UserID  int64
+	Start   *time.Time
+	End     *time.Time
+	Keyword string
+	Offset  int
+	Limit   int
+}
+
 func messageRecord(groupID int64, msg GroupMessage) ChatMessageRecord {
 	return ChatMessageRecord{GroupID: groupID, UserID: msg.User.UserId, UserNickname: msg.User.Nickname,
 		TargetUserID: msg.TargetUser.UserId, TargetNickname: msg.TargetUser.Nickname, Content: msg.Content,
@@ -92,6 +103,38 @@ func (p *Persona) recentUserMessages(userID int64, limit int) ([]GroupMessage, e
 		result[len(rows)-1-i] = rows[i].message()
 	}
 	return result, nil
+}
+
+func (p *Persona) queryContextMessages(input ContextMessageQuery) ([]GroupMessage, bool, error) {
+	if input.Limit <= 0 {
+		return nil, false, nil
+	}
+	query := p.db.Where("group_id = ?", p.groupID)
+	if input.UserID > 0 {
+		query = query.Where("user_id = ?", input.UserID)
+	}
+	if input.Start != nil {
+		query = query.Where("created_at >= ?", *input.Start)
+	}
+	if input.End != nil {
+		query = query.Where("created_at < ?", *input.End)
+	}
+	if input.Keyword != "" {
+		query = query.Where("content LIKE ?", "%"+input.Keyword+"%")
+	}
+	var rows []ChatMessageRecord
+	if err := query.Order("id DESC").Offset(input.Offset).Limit(input.Limit + 1).Find(&rows).Error; err != nil {
+		return nil, false, err
+	}
+	hasMore := len(rows) > input.Limit
+	if hasMore {
+		rows = rows[:input.Limit]
+	}
+	result := make([]GroupMessage, len(rows))
+	for i := range rows {
+		result[len(rows)-1-i] = rows[i].message()
+	}
+	return result, hasMore, nil
 }
 
 // messagesInTimeRanges 从持久化消息中查询一个或多个时间段，去重后按时间正序返回。
