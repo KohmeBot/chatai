@@ -116,6 +116,8 @@ chatai:
 | `max_steps` | `8` | 一次对话最多执行多少轮模型决策和工具调用 |
 | `context_limit` | `30` | 上下文工具一次最多返回多少条消息 |
 | `web_max_bytes` | `524288` | 网页工具最多读取多少字节 |
+| `web_browser_enable` | `false` | 网页搜索和读取是否改用 chromedp 驱动 Chrome |
+| `web_browser_address` | 空 | Chrome 远程调试 HTTP/WS 地址；留空时启动本机 Chrome |
 | `schedule_max_seconds` | `86400` | 定时任务允许设置的最大延迟秒数 |
 | `progress_after_seconds` | `15` | 超过该秒数后 @ 触发者发送固定的处理中提示，并按此间隔继续提示 |
 | `progress_tips` | 三条内置文案 | Agent 耗时较久时循环发送的固定提示文案 |
@@ -142,6 +144,16 @@ Agent 每轮起初只看到 `search_tools`，搜索命中的少量工具才会�
 群聊和用户上下文工具支持 `last_minutes`、`since`、`until`、`keyword`、`limit` 与 `offset`。例如“总结半小时前到现在的聊天内容”可直接用 `last_minutes: 30` 查询；结果会返回 `has_more` 和 `next_offset`，消息较多时 Agent 可以继续翻页。
 
 网页搜索默认依次尝试 DuckDuckGo、Bing 中国版和百度，当前提供方不可用或返回结果无法解析时自动降级。fallback 成功后，该可用引擎会在配置的有效期内被优先尝试，避免每次请求重复走完整降级链。网页搜索和读取会拒绝本机、内网和链路本地地址，并限制超时、响应大小和重定向次数。
+
+遇到依赖 JavaScript、校验普通 HTTP 客户端或需要浏览器渲染的页面时，可以启用 chromedp：
+
+```yaml
+agent:
+  web_browser_enable: true
+  web_browser_address: http://127.0.0.1:9222
+```
+
+`web_browser_address` 接受 Chrome DevTools 的 HTTP 地址（如上）或 `ws://`/`wss://` 浏览器 WebSocket 地址。留空时会在插件所在机器启动本机 Chrome。启用后，`search_web` 与 `browse_web` 都通过浏览器加载页面；Chrome 发起的 HTTP(S) 请求仍会经过公网地址校验。远程调试端口能够控制浏览器，请只在受信任网络内开放。
 
 定时任务保存在机器人进程内，重启机器人后未执行的任务不会恢复。
 
@@ -219,4 +231,4 @@ impression:
 
 ### 网页读取失败
 
-网页必须是公开的 HTTP/HTTPS 地址。内网地址、本机地址、响应过大的页面、超时页面或重定向到内网的页面会被拒绝。
+网页必须是公开的 HTTP/HTTPS 地址。内网地址、本机地址、响应过大的页面、超时页面或重定向到内网的页面会被拒绝。启用浏览器模式时，还需要确认本机已安装 Chrome/Chromium，或 `web_browser_address` 指向可访问的 Chrome DevTools 服务。

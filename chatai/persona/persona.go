@@ -24,26 +24,29 @@ const agentRules = `
 每次执行都必须成功调用 send_message、send_messages、at_user 或 poke_user 至少一次，不能只在最终答案里写准备发送的内容，也不能静默结束。
 不要为了“了解情况”无条件读取全部工具，只读取完成当前请求真正需要的信息。
 发送完成后用简短最终答案结束，不要重复发送。
+现在的时间是 %s
 `
 
 func AgentRules() string { return agentRules }
 
 type Options struct {
-	AgentModel      model.LargeModel
-	VisionModel     model.LargeModel
-	ImpressionModel model.LargeModel
-	MaxSteps        int
-	ContextLimit    int
-	WebMaxBytes     int
-	ScheduleMaxSec  int
-	ProgressAfter   time.Duration
-	ProgressTips    []string
-	WebSearchPrefer time.Duration
-	RepeatEnable    bool
-	RepeatCount     int
-	ImpressionEvery time.Duration
-	ImpressionMin   int
-	ExtraTools      []agent.Tool
+	AgentModel        model.LargeModel
+	VisionModel       model.LargeModel
+	ImpressionModel   model.LargeModel
+	MaxSteps          int
+	ContextLimit      int
+	WebMaxBytes       int
+	WebBrowserEnable  bool
+	WebBrowserAddress string
+	ScheduleMaxSec    int
+	ProgressAfter     time.Duration
+	ProgressTips      []string
+	WebSearchPrefer   time.Duration
+	RepeatEnable      bool
+	RepeatCount       int
+	ImpressionEvery   time.Duration
+	ImpressionMin     int
+	ExtraTools        []agent.Tool
 }
 
 type Persona struct {
@@ -217,7 +220,7 @@ func conciseProgress(raw string) string {
 
 func (p *Persona) eventPrompt(msg GroupMessage, scheduled string) string {
 	if scheduled != "" {
-		return fmt.Sprintf("定时任务到期。群号：%d。任务内容：%s", p.groupID, scheduled)
+		return fmt.Sprintf("现在时间是:%s \n定时任务到期。群号：%d。任务内容：%s", time.Now().Format("2006-01-02 15:04:05"), p.groupID, scheduled)
 	}
-	return fmt.Sprintf("群号：%d\n当前触发事件：\n%s", p.groupID, formatMessage(msg))
+	return fmt.Sprintf("现在时间是:%s \n群号：%d\n当前触发事件：\n%s", time.Now().Format("2006-01-02 15:04:05"), p.groupID, formatMessage(msg))
 }

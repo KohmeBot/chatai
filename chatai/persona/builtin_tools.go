@@ -508,56 +508,77 @@ func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id i
 }
 
 func (p *Persona) readWeb(rc *agent.RunContext, rawURL string) (string, error) {
-	u, err := validatePublicURL(rc, rawURL)
+	source, err := p.loadWebPage(rc, rawURL, p.opts.WebMaxBytes)
 	if err != nil {
 		return "", err
 	}
-	req, _ := http.NewRequestWithContext(rc, http.MethodGet, u.String(), nil)
-	req.Header.Set(
-		"User-Agent",
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-			"AppleWebKit/537.36 (KHTML, like Gecko) "+
-			"Chrome/131.0.0.0 Safari/537.36",
-	)
-
-	req.Header.Set(
-		"Accept",
-		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-	)
-
-	req.Header.Set(
-		"Accept-Language",
-		"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-	)
-
-	req.Header.Set(
-		"Cache-Control",
-		"no-cache",
-	)
-
-	req.Header.Set(
-		"Pragma",
-		"no-cache",
-	)
-
-	req.Header.Set(
-		"Referer",
-		"https://www.cn.bing.com/",
-	)
-	resp, err := publicHTTPClient(rc).Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("web returned %s", resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.opts.WebMaxBytes)))
-	if err != nil {
-		return "", err
-	}
-	text := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`).ReplaceAllString(string(body), " ")
+	text := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`).ReplaceAllString(source, " ")
 	return strings.Join(strings.Fields(html.UnescapeString(text)), " "), nil
+}
+
+type webPageLoader func(context.Context, string, int) (string, error)
+
+func (p *Persona) loadWebPage(ctx context.Context, rawURL string, maxBytes int) (string, error) {
+	if p.opts.WebBrowserEnable {
+		return loadWebPageWithBrowser(ctx, rawURL, maxBytes, p.opts.WebBrowserAddress)
+	}
+	if _, err := validatePublicURL(ctx, rawURL); err != nil {
+		return "", err
+	}
+	return loadWebPageWithHTTP(publicHTTPClient(ctx))(ctx, rawURL, maxBytes)
+}
+
+func loadWebPageWithHTTP(client *http.Client) webPageLoader {
+	return func(ctx context.Context, rawURL string, maxBytes int) (string, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set(
+			"User-Agent",
+			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+				"AppleWebKit/537.36 (KHTML, like Gecko) "+
+				"Chrome/131.0.0.0 Safari/537.36",
+		)
+
+		req.Header.Set(
+			"Accept",
+			"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+		)
+
+		req.Header.Set(
+			"Accept-Language",
+			"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+		)
+
+		req.Header.Set(
+			"Cache-Control",
+			"no-cache",
+		)
+
+		req.Header.Set(
+			"Pragma",
+			"no-cache",
+		)
+
+		req.Header.Set(
+			"Referer",
+			"https://www.cn.bing.com/",
+		)
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return "", fmt.Errorf("web returned %s", resp.Status)
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)))
+		if err != nil {
+			return "", err
+		}
+		return string(body), nil
+	}
 }
 
 type webSearchResult struct {
@@ -599,7 +620,7 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 	}
 	p.searchMu.Unlock()
 
-	results, provider, err := searchWebWithPreferredProvider(rc, query, limit, p.opts.WebMaxBytes, publicHTTPClient(rc), defaultWebSearchProviders, preferred)
+	results, provider, err := searchWebWithPreferredProviderAndLoader(rc, query, limit, p.opts.WebMaxBytes, p.loadWebPage, defaultWebSearchProviders, preferred)
 	if err != nil {
 		return nil, err
 	}
@@ -616,10 +637,14 @@ func searchWebWithProviders(ctx context.Context, query string, limit, maxBytes i
 }
 
 func searchWebWithPreferredProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
+	return searchWebWithPreferredProviderAndLoader(ctx, query, limit, maxBytes, loadWebPageWithHTTP(client), providers, preferred)
+}
+
+func searchWebWithPreferredProviderAndLoader(ctx context.Context, query string, limit, maxBytes int, loader webPageLoader, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
 	providers = preferredProviderFirst(providers, preferred)
 	errs := make([]error, 0, len(providers))
 	for _, provider := range providers {
-		results, err := searchWithProvider(ctx, query, limit, maxBytes, client, provider)
+		results, err := searchWithProviderAndLoader(ctx, query, limit, maxBytes, loader, provider)
 		if err == nil {
 			return results, provider.name, nil
 		}
@@ -651,56 +676,17 @@ func preferredProviderFirst(providers []webSearchProvider, preferred string) []w
 }
 
 func searchWithProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, provider webSearchProvider) ([]webSearchResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.endpoint(query), nil)
+	return searchWithProviderAndLoader(ctx, query, limit, maxBytes, loadWebPageWithHTTP(client), provider)
+}
+
+func searchWithProviderAndLoader(ctx context.Context, query string, limit, maxBytes int, loader webPageLoader, provider webSearchProvider) ([]webSearchResult, error) {
+	body, err := loader(ctx, provider.endpoint(query), maxBytes)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set(
-		"User-Agent",
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-			"AppleWebKit/537.36 (KHTML, like Gecko) "+
-			"Chrome/131.0.0.0 Safari/537.36",
-	)
+	logrus.Infof("search results: %s", body)
 
-	req.Header.Set(
-		"Accept",
-		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-	)
-
-	req.Header.Set(
-		"Accept-Language",
-		"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-	)
-
-	req.Header.Set(
-		"Cache-Control",
-		"no-cache",
-	)
-
-	req.Header.Set(
-		"Pragma",
-		"no-cache",
-	)
-
-	//req.Header.Set(
-	//	"Referer",
-	//	"https://www.bing.com/",
-	//)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("returned %s", resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)))
-	if err != nil {
-		return nil, err
-	}
-	logrus.Infof("search results: %s", string(body))
-
-	results := provider.parse(string(body), limit)
+	results := provider.parse(body, limit)
 	if len(results) == 0 {
 		return nil, errors.New("returned no parseable results")
 	}
@@ -840,6 +826,7 @@ func parseBingResults(source string, limit int) []webSearchResult {
 					".b_caption p",
 					".b_snippet",
 					".b_paractl",
+					"p",
 				),
 			}
 
@@ -1219,7 +1206,7 @@ func normalizeSearchURL(raw string) string {
 	return raw
 }
 
-func publicHTTPClient(rc *agent.RunContext) *http.Client {
+func publicHTTPClient(rc context.Context) *http.Client {
 	return &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")

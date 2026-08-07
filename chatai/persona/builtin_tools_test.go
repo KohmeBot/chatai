@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -112,6 +113,30 @@ func TestSearchWebMovesPreferredProviderFirst(t *testing.T) {
 	ordered := preferredProviderFirst(providers, "third")
 	require.Equal(t, []string{"third", "first", "second"}, []string{ordered[0].name, ordered[1].name, ordered[2].name})
 	require.Equal(t, []string{"first", "second", "third"}, []string{providers[0].name, providers[1].name, providers[2].name}, "must not mutate the default order")
+}
+
+func TestBrowserLoaderRejectsPrivateURLBeforeStartingChrome(t *testing.T) {
+	_, err := loadWebPageWithBrowser(context.Background(), "http://127.0.0.1/private", 1024, "")
+	require.ErrorContains(t, err, "private or local addresses are not allowed")
+}
+
+func TestSearchWebUsesConfiguredPageLoader(t *testing.T) {
+	var loadedURL string
+	loader := func(_ context.Context, rawURL string, _ int) (string, error) {
+		loadedURL = rawURL
+		return `<li class="b_algo"><h2><a href="https://example.com">标题</a></h2><p>摘要</p></li>`, nil
+	}
+	providers := []webSearchProvider{{
+		name:     "browser",
+		endpoint: func(query string) string { return "https://search.example/?q=" + url.QueryEscape(query) },
+		parse:    parseBingResults,
+	}}
+
+	results, provider, err := searchWebWithPreferredProviderAndLoader(context.Background(), "浏览器搜索", 5, 1024, loader, providers, "")
+	require.NoError(t, err)
+	require.Equal(t, "browser", provider)
+	require.Equal(t, "https://search.example/?q=%E6%B5%8F%E8%A7%88%E5%99%A8%E6%90%9C%E7%B4%A2", loadedURL)
+	require.Equal(t, []webSearchResult{{Title: "标题", URL: "https://example.com", Snippet: "摘要"}}, results)
 }
 
 func searchNames(results []agent.SearchResult) []string {
