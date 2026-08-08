@@ -67,7 +67,7 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 			return results, nil
 		}
 
-		logrus.Errorf("search api error: %w", err)
+		logrus.Errorf("search api error: %v", err)
 	}
 
 	p.searchMu.Lock()
