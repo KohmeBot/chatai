@@ -14,6 +14,14 @@ import (
 func (p *Persona) groupActionTools() []agent.Tool {
 	return []agent.Tool{
 		{
+			Definition: agent.Function("send_image", "向当前群发送一张图片", map[string]any{
+				"url": stringProperty("发送的图片URL"),
+			}, "url"),
+			SearchTerms: []string{"发送消息", "回复", "图片", "发送图片", "发图"},
+			GroupAction: true,
+			Handler:     p.handleSendImage,
+		},
+		{
 			Definition: agent.Function("send_message", "向当前群发送一句话，可选择引用消息", map[string]any{
 				"text":             stringProperty("要发送的话"),
 				"reply_message_id": integerProperty("可选，引用的消息 ID"),
@@ -30,7 +38,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 				},
 				"interval_ms": integerProperty("消息间隔毫秒，默认500，范围0到3000"),
 			}, "messages"),
-			SearchTerms: []string{"多句话", "分多条回复", "拆分回复", "连续发送", "多段消息"},
+			SearchTerms: []string{"发送消息", "多句话", "分多条回复", "拆分回复", "连续发送", "多段消息"},
 			GroupAction: true,
 			Handler:     p.handleSendMessages,
 		},
@@ -39,17 +47,41 @@ func (p *Persona) groupActionTools() []agent.Tool {
 				"user_id": integerProperty("用户 QQ 号"),
 				"text":    stringProperty("要说的话"),
 			}, "user_id", "text"),
-			SearchTerms: []string{"At某人", "@某人", "提醒某人", "指定用户回复"},
+			SearchTerms: []string{"发送消息", "At某人", "@某人", "提醒某人", "指定用户回复"},
 			GroupAction: true,
 			Handler:     p.handleAtUser,
 		},
 		{
 			Definition:  agent.Function("poke_user", "在当前群戳一戳某人", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"),
-			SearchTerms: []string{"戳一戳", "戳某人", "poke"},
+			SearchTerms: []string{"发送消息", "戳一戳", "戳某人", "poke"},
 			GroupAction: true,
 			Handler:     p.handlePokeUser,
 		},
 	}
+}
+
+func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.URL) == "" {
+		return nil, errors.New("message URL cannot be empty")
+	}
+	ctx, err := zeroContext(rc)
+	if err != nil {
+		return nil, err
+	}
+	segments := message.Message{}
+	segments = append(segments, message.Image(input.URL))
+	id := ctx.SendGroupMessage(p.groupID, segments)
+	rc.MarkActionPerformed()
+	if err := p.recordBotMessage(ctx, segments, id); err != nil {
+		return nil, err
+	}
+	return map[string]any{"message_id": id}, nil
 }
 
 func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (any, error) {

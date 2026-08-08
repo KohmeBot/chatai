@@ -11,6 +11,7 @@ func (p *Persona) registerBuiltinTools() {
 	groups := [][]agent.Tool{
 		p.groupMemberTools(),
 		p.contextTools(),
+		p.imageTools(),
 		p.memoryTools(),
 		p.groupActionTools(),
 		p.scheduleTools(),
