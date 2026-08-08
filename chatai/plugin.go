@@ -2,6 +2,9 @@ package chatai
 
 import (
 	"errors"
+	"github.com/kohmebot/chatai/chatai/pkg/search"
+	factory2 "github.com/kohmebot/chatai/chatai/pkg/search/factory"
+	"github.com/sirupsen/logrus"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -113,6 +116,21 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			// Agent 相同的人设、上下文规则和工具调用说明。
 			vision = c.routeModel(c.conf.Routes.Vision, string(c.conf.System)+"\n"+persona.AgentRules(), false)
 		}
+		var searcher search.Searcher
+		if c.conf.Agent.UseSearchAPI {
+			for _, p := range c.conf.Agent.SearchProviders {
+				if p.Name == c.conf.Agent.SearchProviderName {
+					searcher, err = factory2.NewSearcher(p.Name, string(p.ApiKey))
+					if err != nil {
+						logrus.Errorf("Failed to create searcher: %v", err)
+						searcher = nil
+					}
+					break
+				}
+			}
+
+		}
+
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
 			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
 			VisionModel: vision, MaxSteps: c.conf.Agent.MaxSteps,
@@ -123,6 +141,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			RepeatEnable: c.conf.Repeat.Enable,
 			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionUpdateEnable: c.conf.Impression.Enable,
 			ExtraTools: c.extraTools,
+			SearchAPI:  searcher,
 		})
 	}
 	c.joinGroupModel = c.routeModel(c.conf.Routes.Join, string(c.conf.System), false)
@@ -136,4 +155,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.19" }
+func (c *ChatPlugin) Version() string      { return "v1.0.20" }

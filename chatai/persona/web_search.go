@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/pkg/search"
+	"github.com/sirupsen/logrus"
 	"html"
 	"net/http"
 	"net/url"
@@ -44,9 +46,30 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 	if query == "" {
 		return nil, errors.New("search query cannot be empty")
 	}
-	if limit <= 0 || limit > 8 {
+	if limit <= 0 {
 		limit = 5
 	}
+
+	if p.opts.SearchAPI != nil {
+		rsp, err := p.opts.SearchAPI.DoRequest(rc, search.Request{
+			Query: query,
+			Limit: limit,
+		})
+		if err == nil {
+			results := make([]webSearchResult, 0, len(rsp.Results))
+			for _, r := range rsp.Results {
+				results = append(results, webSearchResult{
+					Title:   r.Title,
+					URL:     r.URL,
+					Snippet: r.Snippet,
+				})
+			}
+			return results, nil
+		}
+
+		logrus.Errorf("search api error: %w", err)
+	}
+
 	p.searchMu.Lock()
 	preferred := ""
 	if time.Now().Before(p.preferredSearchUntil) {

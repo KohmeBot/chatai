@@ -3,6 +3,7 @@ package persona
 import (
 	"context"
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/pkg/search"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,8 @@ type Options struct {
 	RepeatCount            int
 	ImpressionUpdateEnable bool
 	ExtraTools             []agent.Tool
+
+	SearchAPI search.Searcher
 }
 
 type Persona struct {
