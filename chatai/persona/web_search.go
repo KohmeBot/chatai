@@ -13,7 +13,6 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/kohmebot/chatai/chatai/agent"
-	"github.com/sirupsen/logrus"
 )
 
 type webSearchResult struct {
@@ -119,7 +118,7 @@ func searchWithProviderAndLoader(ctx context.Context, query string, limit int, l
 	if err != nil {
 		return nil, err
 	}
-	logrus.Infof("search results: %s", body)
+	//logrus.Infof("search results: %s", body)
 
 	results := provider.parse(body, limit)
 	if len(results) == 0 {

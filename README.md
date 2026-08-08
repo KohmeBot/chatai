@@ -1,15 +1,15 @@
 # chatai
 
-`chatai` 是 kohme 的群聊 AI 插件。机器人被 At、回复或戳一戳时，会根据当前问题自主决定是否读取群聊记录、用户记录和印象，也可以发送消息、At 群友、戳一戳、读取网页或创建定时任务。
+`chatai` 是 kohme 的群聊 AI 插件。机器人被 At、回复或戳一戳时，会根据当前问题自主决定是否读取群聊记录、用户记录和印象，也可以主动维护长期印象、发送消息、At 群友、戳一戳、读取网页或创建定时任务。
 
 ## 功能
 
 - Agent 多轮工具调用，通过 `search_tools` 按需加载少量相关工具，不把全部工具或聊天记录直接发送给模型
 - 群聊上下文持久化到插件数据库，重启后仍可读取
-- Agent、图片解析、印象总结、入群欢迎可以使用不同模型
+- Agent、图片解析、入群欢迎可以使用不同模型
 - 可选图片解析；没有配置图片模型时不会解析图片
 - 回复含图片的历史消息时，也会把被引用图片交给图片模型解析
-- 周期生成用户印象和群聊印象
+- Agent 在对话中按需维护群友印象和群聊印象
 - 可开关的群聊复读，并可设置连续多少条相同消息后触发
 - 日志显示 Agent 调用轮次、模型返回的思考内容、工具参数与工具结果
 - 支持通义千问和 DeepSeek
@@ -49,10 +49,6 @@ chatai:
         provider_name: tongyi
         model_name: qwen-vl-plus
         max_tokens: 1024
-      impression:
-        provider_name: tongyi
-        model_name: qwen-turbo
-        max_tokens: 1200
       join:
         provider_name: tongyi
         model_name: qwen-turbo
@@ -70,8 +66,6 @@ chatai:
 
     impression:
       enable: true
-      interval_minutes: 60
-      min_messages: 20
 
     join_group:
       enable: true
@@ -97,7 +91,6 @@ chatai:
 | --- | --- | --- |
 | `routes.agent` | 对话决策和工具调用 | 使用默认模型 |
 | `routes.vision` | 带图事件的完整 Agent 决策与工具调用 | 带图事件仍由文本 Agent 处理，但无法读取图片 |
-| `routes.impression` | 周期生成印象 | 使用默认模型 |
 | `routes.join` | 生成入群欢迎语 | 使用默认模型 |
 
 图片模型需要支持 OpenAI 兼容的 `image_url` 消息格式和工具调用。带图提问会把完整触发事件与原图直接交给该模型，并由它完成整轮 Agent 决策，不再先生成图片描述交给另一个模型。普通文本模型不要配置到 `routes.vision`，否则请求可能失败。
@@ -128,7 +121,7 @@ Agent 可以使用以下能力：
 - 读取当前群聊上下文，可按最近分钟数、起止时间、关键词筛选并分页
 - 读取指定用户在当前群的上下文，可按最近分钟数、起止时间、关键词筛选并分页
 - 按一个或多个时间区间查询持久化消息，可选限定某个用户
-- 读取用户印象和群聊印象
+- 读取用户印象和群聊印象，并在出现长期有效的新信息时主动融合更新
 - 读取和增量修改用户好感度
 - 发送文字、引用回复，或把回复拆成 2～5 条消息依次发送
 - At 指定群友
@@ -176,15 +169,11 @@ repeat:
 ```yaml
 impression:
   enable: true
-  interval_minutes: 60
-  min_messages: 20
 ```
 
-- `enable`：是否生成用户印象和群聊印象
-- `interval_minutes`：检查并生成印象的周期，默认 `60` 分钟
-- `min_messages`：一个周期至少积累多少条消息才生成，默认 `20`
+- `enable`：是否向 Agent 提供 `update_impression` 工具；读取印象不受此开关影响
 
-消息数不足时不会丢弃，会继续积累到后续周期。群聊上下文、印象处理游标、长期印象和 token 用量均保存在插件数据库中；复读窗口仅保存在内存中。
+启用后，Agent 会在对话中发现稳定偏好、性格特征、边界、重要经历、群氛围或长期规则时，先读取旧印象，再调用 `update_impression` 写入融合后的完整内容。工具使用 `scope: group` 更新当前群印象，使用 `scope: user` 和 `user_id` 更新群友印象，并要求把刚读取的内容通过 `previous_content` 原样带回；旧值已变化时会拒绝覆盖并要求重新读取。一次性事件、闲聊和重复信息不会写入。长期印象、群聊上下文和 token 用量均保存在插件数据库中；复读窗口仅保存在内存中。
 
 ## 日志说明
 
@@ -212,8 +201,9 @@ impression:
 - `threshold`、`speak_groups` 和 `online` 已不再使用，可以删除
 - 原来的自动插话已经移除
 - 复读改为 `repeat.enable` 和 `repeat.trigger_count`
+- 印象不再周期生成；保留 `impression.enable` 作为 Agent 写入工具开关，删除 `interval_minutes`、`min_messages` 和 `routes.impression` 即可
 - 旧配置中的 `providers[].model_name` 仍可作为供应商名称读取，但建议改成 `providers[].provider_name`
-- 原有用户印象、群聊印象和 token 用量数据库表可以继续使用
+- 原有用户印象、群聊印象和 token 用量数据库表可以继续使用；旧印象处理游标会保留在数据库中但不再读取
 
 ## 常见问题
 

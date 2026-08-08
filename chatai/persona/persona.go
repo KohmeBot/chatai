@@ -20,7 +20,7 @@ const agentRules = `
 你是群聊中的一个 Agent。当前输入只包含本次触发事件，不包含历史记录。
 你起初只会看到 search_tools。需要能力时，先搜索少量相关工具再调用，不要无条件读取全部工具。
 若当前消息依赖前文、用户历史或时间范围内的消息，优先查询上下文；能查到的信息不要反问用户重复。
-当具体用户与 Agent 进行实质互动时，优先读取该用户的好感度和印象，并据此调整语气、亲近程度和互动方式。普通聊天通常不修改好感；只有明显正负反馈或关系变化时才调整。出现具有长期价值的新偏好、性格特征、边界或重要经历时，再更新印象，避免记录琐碎或重复信息。
+当具体用户与 Agent 进行实质互动时，优先读取该用户的好感度和印象，并据此调整语气、亲近程度和互动方式。普通聊天通常不修改好感；只有明显正负反馈或关系变化时才调整。出现具有长期价值的新偏好、性格特征、边界或重要经历时，先读取旧印象，再把新旧信息融合成完整内容后更新；观察到稳定的群氛围、共同习惯或长期规则时也按同样方式更新群印象。不要记录琐碎、重复或一次性信息。
 陌生词若可能是群内昵称、人物或内部梗，先查群聊上下文和群聊中群成员信息；无法确认或可能变化的外部事实，再通过 search_tools 找到联网搜索工具求证，需要原文时再 browse_web。
 每次执行必须实际调用 send_message、send_messages、at_user 或 poke_user 至少一次完成响应；文本回复优先 send_message，@ 或 poke 仅在确有需要时使用。
 最后用简短答案结束，不重复已发送内容。
@@ -29,23 +29,21 @@ const agentRules = `
 func AgentRules() string { return agentRules }
 
 type Options struct {
-	AgentModel        model.LargeModel
-	VisionModel       model.LargeModel
-	ImpressionModel   model.LargeModel
-	MaxSteps          int
-	ContextLimit      int
-	WebMaxBytes       int
-	WebBrowserEnable  bool
-	WebBrowserAddress string
-	ScheduleMaxSec    int
-	ProgressAfter     time.Duration
-	ProgressTips      []string
-	WebSearchPrefer   time.Duration
-	RepeatEnable      bool
-	RepeatCount       int
-	ImpressionEvery   time.Duration
-	ImpressionMin     int
-	ExtraTools        []agent.Tool
+	AgentModel             model.LargeModel
+	VisionModel            model.LargeModel
+	MaxSteps               int
+	ContextLimit           int
+	WebMaxBytes            int
+	WebBrowserEnable       bool
+	WebBrowserAddress      string
+	ScheduleMaxSec         int
+	ProgressAfter          time.Duration
+	ProgressTips           []string
+	WebSearchPrefer        time.Duration
+	RepeatEnable           bool
+	RepeatCount            int
+	ImpressionUpdateEnable bool
+	ExtraTools             []agent.Tool
 }
 
 type Persona struct {
@@ -55,7 +53,6 @@ type Persona struct {
 	opts    Options
 	tools   *agent.Registry
 
-	mu                      sync.Mutex
 	repeatMu                sync.Mutex
 	repeatWindow            []GroupMessage
 	repeatTriggered         bool
@@ -91,16 +88,10 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 	if opts.WebSearchPrefer <= 0 {
 		opts.WebSearchPrefer = time.Hour
 	}
-	if opts.ImpressionMin <= 0 {
-		opts.ImpressionMin = 20
-	}
 	p := &Persona{groupID: groupID, env: env, db: db, opts: opts, tools: agent.NewRegistry()}
 	p.registerBuiltinTools()
 	for _, tool := range opts.ExtraTools {
 		_ = p.tools.Register(tool)
-	}
-	if opts.ImpressionModel != nil && opts.ImpressionEvery > 0 {
-		go p.impressionLoop()
 	}
 	return p
 }

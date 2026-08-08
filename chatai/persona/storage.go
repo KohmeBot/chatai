@@ -1,11 +1,8 @@
 package persona
 
 import (
-	"errors"
 	"sort"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // ChatMessageRecord 持久化群聊上下文；复读窗口不依赖此表。
@@ -28,12 +25,6 @@ type ChatMessageRecord struct {
 	QuotedURL       string
 	Referred        bool
 	CreatedAt       time.Time `gorm:"index:idx_chat_group_created;index:idx_chat_group_user_created"`
-}
-
-type ImpressionCursor struct {
-	GroupID       int64 `gorm:"primaryKey"`
-	LastMessageID uint
-	UpdatedAt     time.Time
 }
 
 // MessageTimeRange 使用左闭右开区间 [Start, End)，便于无重叠地组合相邻时间段。
@@ -175,26 +166,6 @@ func (p *Persona) messagesInTimeRanges(ranges []MessageTimeRange, userID int64, 
 		messages[i] = rows[i].message()
 	}
 	return messages, nil
-}
-
-func (p *Persona) impressionMessages(limit int) ([]ChatMessageRecord, ImpressionCursor, error) {
-	var cursor ImpressionCursor
-	err := p.db.Where(ImpressionCursor{GroupID: p.groupID}).First(&cursor).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		cursor = ImpressionCursor{GroupID: p.groupID}
-		err = nil
-	}
-	if err != nil {
-		return nil, cursor, err
-	}
-	var rows []ChatMessageRecord
-	err = p.db.Where("group_id = ? AND id > ?", p.groupID, cursor.LastMessageID).Order("id ASC").Limit(limit).Find(&rows).Error
-	return rows, cursor, err
-}
-
-func (p *Persona) advanceImpressionCursor(cursor ImpressionCursor, lastID uint) error {
-	cursor.LastMessageID = lastID
-	return p.db.Where(ImpressionCursor{GroupID: p.groupID}).Assign(cursor).FirstOrCreate(&cursor).Error
 }
 
 func repeatable(msg GroupMessage) bool {

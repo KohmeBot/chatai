@@ -87,7 +87,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.db = db
 	for _, table := range []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
-		&persona.ChatMessageRecord{}, &persona.ImpressionCursor{}, &model.TokenUsage{},
+		&persona.ChatMessageRecord{}, &model.TokenUsage{},
 	} {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
@@ -105,13 +105,6 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if c.conf.Repeat.TriggerCount < 2 {
 		c.conf.Repeat.TriggerCount = 3
 	}
-	if c.conf.Impression.IntervalMinutes <= 0 {
-		c.conf.Impression.IntervalMinutes = 60
-	}
-	if c.conf.Impression.MinMessages <= 0 {
-		c.conf.Impression.MinMessages = 20
-	}
-
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
 		var vision model.LargeModel
@@ -120,22 +113,16 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			// Agent 相同的人设、上下文规则和工具调用说明。
 			vision = c.routeModel(c.conf.Routes.Vision, string(c.conf.System)+"\n"+persona.AgentRules(), false)
 		}
-		var impression model.LargeModel
-		var impressionEvery time.Duration
-		if c.conf.Impression.Enable {
-			impression = c.routeModel(c.conf.Routes.Impression, "你负责提炼稳定、长期有效的群聊印象。", true)
-			impressionEvery = time.Duration(c.conf.Impression.IntervalMinutes) * time.Minute
-		}
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
 			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
-			VisionModel: vision, ImpressionModel: impression, MaxSteps: c.conf.Agent.MaxSteps,
+			VisionModel: vision, MaxSteps: c.conf.Agent.MaxSteps,
 			ContextLimit: c.conf.Agent.ContextLimit, WebMaxBytes: c.conf.Agent.WebMaxBytes,
 			WebBrowserEnable: c.conf.Agent.WebBrowserEnable, WebBrowserAddress: c.conf.Agent.WebBrowserAddress,
 			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
 			ProgressTips: c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
 			RepeatEnable: c.conf.Repeat.Enable,
-			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionEvery: impressionEvery,
-			ImpressionMin: c.conf.Impression.MinMessages, ExtraTools: c.extraTools,
+			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionUpdateEnable: c.conf.Impression.Enable,
+			ExtraTools: c.extraTools,
 		})
 	}
 	c.joinGroupModel = c.routeModel(c.conf.Routes.Join, string(c.conf.System), false)
@@ -149,4 +136,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.17" }
+func (c *ChatPlugin) Version() string      { return "v1.0.18" }

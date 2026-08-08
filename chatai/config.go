@@ -22,7 +22,7 @@ type Config struct {
 
 	Agent           AgentConfig      `yaml:"agent" jsonschema:"description=Agent 配置"`
 	Repeat          RepeatConfig     `yaml:"repeat" jsonschema:"description=群聊复读配置"`
-	Impression      ImpressionConfig `yaml:"impression" jsonschema:"description=周期印象配置"`
+	Impression      ImpressionConfig `yaml:"impression" jsonschema:"description=Agent 印象工具配置"`
 	JoinGroupConfig `yaml:"join_group" jsonschema:"description=加群配置"`
 }
 
@@ -44,16 +44,20 @@ type RepeatConfig struct {
 }
 
 type ImpressionConfig struct {
-	Enable          bool `yaml:"enable" jsonschema:"description=是否周期生成印象"`
-	IntervalMinutes int  `yaml:"interval_minutes" jsonschema:"description=印象生成周期（分钟）,minimum=1"`
-	MinMessages     int  `yaml:"min_messages" jsonschema:"description=周期内至少多少条消息才生成印象,minimum=1"`
+	Enable bool `yaml:"enable" jsonschema:"description=是否允许 Agent 主动维护群印象和群友印象"`
+
+	// Deprecated: 仅用于兼容旧配置，周期印象功能已移除。
+	LegacyIntervalMinutes int `yaml:"interval_minutes,omitempty" jsonschema:"-"`
+	// Deprecated: 仅用于兼容旧配置，周期印象功能已移除。
+	LegacyMinMessages int `yaml:"min_messages,omitempty" jsonschema:"-"`
 }
 
 type ModelRoutes struct {
-	Agent      ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
-	Vision     ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
-	Impression ModelRouteConfig `yaml:"impression" jsonschema:"description=印象总结模型"`
-	Join       ModelRouteConfig `yaml:"join" jsonschema:"description=入群欢迎模型"`
+	Agent  ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
+	Vision ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
+	// Deprecated: 仅用于兼容旧配置，印象现在由 Agent 模型通过工具维护。
+	LegacyImpression ModelRouteConfig `yaml:"impression,omitempty" jsonschema:"-"`
+	Join             ModelRouteConfig `yaml:"join" jsonschema:"description=入群欢迎模型"`
 }
 
 type ModelRouteConfig struct {

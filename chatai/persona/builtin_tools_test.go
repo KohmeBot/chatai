@@ -38,6 +38,35 @@ func TestBuiltinToolSearchFindsGroupMemberTools(t *testing.T) {
 	require.Contains(t, searchNames(list), "get_group_member_list")
 }
 
+func TestBuiltinToolSearchFindsImpressionUpdateWhenEnabled(t *testing.T) {
+	p := &Persona{opts: Options{ImpressionUpdateEnable: true}, tools: agent.NewRegistry()}
+	p.registerBuiltinTools()
+
+	results := p.tools.Search("记住这位群友并更新长期印象", 5)
+	require.Contains(t, searchNames(results), "update_impression")
+}
+
+func TestBuiltinToolDoesNotRegisterImpressionUpdateWhenDisabled(t *testing.T) {
+	p := &Persona{tools: agent.NewRegistry()}
+	p.registerBuiltinTools()
+
+	results := p.tools.Search("更新印象", 8)
+	require.NotContains(t, searchNames(results), "update_impression")
+}
+
+func TestUpdateImpressionValidatesArgumentsBeforeDatabaseAccess(t *testing.T) {
+	p := &Persona{groupID: 12345}
+
+	_, err := p.handleUpdateImpression(nil, []byte(`{"scope":"user","user_id":0,"content":"长期印象","reason":"用户明确表达"}`))
+	require.ErrorContains(t, err, "user_id must be positive")
+
+	_, err = p.handleUpdateImpression(nil, []byte(`{"scope":"group","content":"   ","reason":"群内长期惯例"}`))
+	require.ErrorContains(t, err, "content must not be empty")
+
+	_, err = p.handleUpdateImpression(nil, []byte(`{"scope":"other","content":"长期印象","reason":"长期事实"}`))
+	require.ErrorContains(t, err, "scope must be group or user")
+}
+
 func TestGroupMemberToolsValidateCurrentGroupBeforeUsingContext(t *testing.T) {
 	p := &Persona{groupID: 12345}
 	rc := &agent.RunContext{}
