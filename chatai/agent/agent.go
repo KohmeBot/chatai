@@ -328,13 +328,12 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 			logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=%t action_done=%t payload=%s", runID, i+1, steps, call.ID, call.Function.Name, callErr == nil, ctx.ActionPerformed(), logValue(string(encoded)))
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)})
 		}
-		if ctx.ActionPerformed() {
-			logrus.Infof("[Agent][run=%d][完成] step=%d/%d 原因=群聊动作已执行", runID, i+1, steps)
-			return response.Answer, nil
-		}
 		if finalActionStep {
-			logrus.Warnf("[Agent][run=%d][未完成] 最后一步未执行群聊动作 answer=%s", runID, logValue(response.Answer))
-			return response.Answer, ErrGroupActionRequired
+			if !ctx.ActionPerformed() {
+				logrus.Warnf("[Agent][run=%d][未完成] 最后一步未执行群聊动作 answer=%s", runID, logValue(response.Answer))
+				return response.Answer, ErrGroupActionRequired
+			}
+			logrus.Warnf("[Agent][run=%d][未完成] 最后一步已执行群聊动作，但模型尚未主动完成决策", runID)
 		}
 	}
 	logrus.Warnf("[Agent][run=%d][未完成] exceeded maximum of %d steps action_done=%t", runID, steps, ctx.ActionPerformed())

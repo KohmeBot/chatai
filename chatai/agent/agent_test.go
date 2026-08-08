@@ -101,12 +101,32 @@ func TestRunnerRequiresSuccessfulGroupAction(t *testing.T) {
 	llm := &scriptedModel{steps: []model.Response{
 		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
 		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
+		{Answer: "decision complete"},
 	}}
 	runCtx := &RunContext{}
 	_, err := (&Runner{Model: llm, Tools: registry, RequireAction: true}).Run(runCtx, "reply", "")
 	require.NoError(t, err)
 	require.True(t, runCtx.ActionPerformed())
-	require.Len(t, llm.requests, 2, "runner should finish immediately after the visible action")
+	require.Len(t, llm.requests, 3, "runner should let the model decide whether to finish after the visible action")
+	require.Contains(t, llm.requests[2].History[len(llm.requests[2].History)-1].Content, "sent")
+}
+
+func TestRunnerDoesNotFinishWhileModelKeepsCallingToolsAfterGroupAction(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "send", map[string]any{}), GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return "sent", nil },
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
+		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
+		{ToolCalls: []model.ToolCall{call("send-again", "send_message", `{}`)}},
+	}}
+	runCtx := &RunContext{}
+	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 3, RequireAction: true}).Run(runCtx, "reply", "")
+	require.EqualError(t, err, "agent exceeded maximum of 3 steps")
+	require.True(t, runCtx.ActionPerformed())
+	require.Len(t, llm.requests, 3)
 }
 
 func TestRunnerRepromptsThenErrorsWhenModelStaysSilent(t *testing.T) {
@@ -138,7 +158,7 @@ func TestRunnerFinalStepOnlyOffersAndExecutesGroupActions(t *testing.T) {
 	}}
 
 	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 3, RequireAction: true}).Run(&RunContext{}, "understand this", "")
-	require.NoError(t, err)
+	require.EqualError(t, err, "agent exceeded maximum of 3 steps")
 	require.True(t, sent)
 	require.Equal(t, []string{"send_message"}, toolNames(llm.requests[2].Tools))
 	require.Contains(t, llm.requests[2].Question, "最后一步")

@@ -127,11 +127,11 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	if !triggered {
 		return nil
 	}
-	go func() {
-		if err := p.run(ctx, msg, ""); err != nil {
-			p.env.Error(ctx, err)
-		}
-	}()
+
+	if err := p.run(ctx, msg, ""); err != nil {
+		p.env.Error(ctx, err)
+	}
+
 	return nil
 }
 
