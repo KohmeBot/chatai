@@ -134,7 +134,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
 			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
 			VisionModel: vision, MaxSteps: c.conf.Agent.MaxSteps,
-			ContextLimit: c.conf.Agent.ContextLimit, WebMaxBytes: c.conf.Agent.WebMaxBytes,
+			ContextLimit:     c.conf.Agent.ContextLimit,
 			WebBrowserEnable: c.conf.Agent.WebBrowserEnable, WebBrowserAddress: c.conf.Agent.WebBrowserAddress,
 			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
 			ProgressTips: c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
@@ -155,4 +155,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.21" }
+func (c *ChatPlugin) Version() string      { return "v1.0.22" }

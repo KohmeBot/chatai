@@ -2,6 +2,8 @@ package persona
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/kohmebot/chatai/chatai/agent"
 )
@@ -17,7 +19,10 @@ func (p *Persona) webTools() []agent.Tool {
 			Handler:     p.handleSearchWeb,
 		},
 		{
-			Definition:  agent.Function("browse_web", "读取公开网页正文；想进一步浏览结果或搜索结果摘要不足时使用", map[string]any{"url": stringProperty("http 或 https 网页地址")}, "url"),
+			Definition: agent.Function("browse_web", "读取公开网页正文；网页较长时根据查询内容返回相关上下文片段", map[string]any{
+				"url":   stringProperty("http 或 https 网页地址"),
+				"query": stringProperty("希望从网页中查找或了解的内容"),
+			}, "url", "query"),
 			SearchTerms: []string{"联网搜索", "搜索", "搜索网页", "查资料", "最新信息", "互联网", "浏览网页", "读取网页", "打开链接", "网页正文", "原文", "URL"},
 			Handler:     p.handleBrowseWeb,
 		},
@@ -37,10 +42,15 @@ func (p *Persona) handleSearchWeb(rc *agent.RunContext, raw json.RawMessage) (an
 
 func (p *Persona) handleBrowseWeb(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
-		URL string `json:"url"`
+		URL   string `json:"url"`
+		Query string `json:"query"`
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
 	}
-	return p.readWeb(rc, input.URL)
+	input.Query = strings.TrimSpace(input.Query)
+	if input.Query == "" {
+		return nil, errors.New("query must not be empty")
+	}
+	return p.readWeb(rc, input.URL, input.Query)
 }

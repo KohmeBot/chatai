@@ -137,7 +137,7 @@ func TestSearchWebFallsBackInProviderOrder(t *testing.T) {
 		{name: "Bing CN", endpoint: func(string) string { return server.URL + "/bing" }, parse: parseBingResults},
 		{name: "Baidu", endpoint: func(string) string { return server.URL + "/baidu" }, parse: parseBaiduResults},
 	}
-	results, err := searchWebWithProviders(context.Background(), "测试", 5, 1024*1024, server.Client(), providers)
+	results, err := searchWebWithProviders(context.Background(), "测试", 5, server.Client(), providers)
 	require.NoError(t, err)
 	require.Equal(t, []string{"/duckduckgo", "/bing", "/baidu"}, paths)
 	require.Equal(t, []webSearchResult{{Title: "备用结果", URL: "https://example.com/result"}}, results)
@@ -155,7 +155,7 @@ func TestSearchWebStopsAfterFirstSuccessfulProvider(t *testing.T) {
 		{name: "Bing CN", endpoint: func(string) string { return server.URL }, parse: parseBingResults},
 		{name: "Baidu", endpoint: func(string) string { return server.URL }, parse: parseBaiduResults},
 	}
-	results, err := searchWebWithProviders(context.Background(), "测试", 5, 1024*1024, server.Client(), providers)
+	results, err := searchWebWithProviders(context.Background(), "测试", 5, server.Client(), providers)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, "搜索摘要", results[0].Snippet)
@@ -186,7 +186,7 @@ func TestSearchWebUsesConfiguredPageLoader(t *testing.T) {
 		parse:    parseBingResults,
 	}}
 
-	results, provider, err := searchWebWithPreferredProviderAndLoader(context.Background(), "浏览器搜索", 5, 1024, loader, providers, "")
+	results, provider, err := searchWebWithPreferredProviderAndLoader(context.Background(), "浏览器搜索", 5, loader, providers, "")
 	require.NoError(t, err)
 	require.Equal(t, "browser", provider)
 	require.Equal(t, "https://search.example/?q=%E6%B5%8F%E8%A7%88%E5%99%A8%E6%90%9C%E7%B4%A2", loadedURL)

@@ -220,13 +220,17 @@ var ErrGroupActionRequired = errors.New("agent finished without a group action")
 var runSequence atomic.Uint64
 
 // Run 驱动标准 function-calling 循环，直到模型不再请求工具。
-func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
+func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (string, error) {
 	if r.Model == nil || r.Tools == nil {
 		return "", errors.New("agent runner is not initialized")
 	}
 	steps := r.MaxSteps
 	if steps <= 0 {
 		steps = 8
+	}
+	toolsDefine := make([]model.Tool, 0, len(tools))
+	for _, tool := range tools {
+		toolsDefine = append(toolsDefine, tool.Definition)
 	}
 	runID := runSequence.Add(1)
 	history := make([]model.Message, 0, steps*2)
@@ -240,6 +244,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string) (string, error) {
 		}
 		requestQuestion, requestImageURL := question, imageURL
 		definitions := r.Tools.Definitions(activeTools)
+		definitions = append(definitions, toolsDefine...)
 		if finalActionStep {
 			definitions = r.Tools.GroupActionDefinitions()
 			for _, definition := range definitions {

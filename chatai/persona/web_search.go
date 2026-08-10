@@ -77,7 +77,7 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 	}
 	p.searchMu.Unlock()
 
-	results, provider, err := searchWebWithPreferredProviderAndLoader(rc, query, limit, p.opts.WebMaxBytes, p.loadWebPage, defaultWebSearchProviders, preferred)
+	results, provider, err := searchWebWithPreferredProviderAndLoader(rc, query, limit, p.loadWebPage, defaultWebSearchProviders, preferred)
 	if err != nil {
 		return nil, err
 	}
@@ -88,16 +88,16 @@ func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]we
 	return results, nil
 }
 
-func searchWebWithProviders(ctx context.Context, query string, limit, maxBytes int, client *http.Client, providers []webSearchProvider) ([]webSearchResult, error) {
-	results, _, err := searchWebWithPreferredProvider(ctx, query, limit, maxBytes, client, providers, "")
+func searchWebWithProviders(ctx context.Context, query string, limit int, client *http.Client, providers []webSearchProvider) ([]webSearchResult, error) {
+	results, _, err := searchWebWithPreferredProvider(ctx, query, limit, client, providers, "")
 	return results, err
 }
 
-func searchWebWithPreferredProvider(ctx context.Context, query string, limit, maxBytes int, client *http.Client, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
-	return searchWebWithPreferredProviderAndLoader(ctx, query, limit, maxBytes, loadWebPageWithHTTP(client), providers, preferred)
+func searchWebWithPreferredProvider(ctx context.Context, query string, limit int, client *http.Client, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
+	return searchWebWithPreferredProviderAndLoader(ctx, query, limit, loadWebPageWithHTTP(client), providers, preferred)
 }
 
-func searchWebWithPreferredProviderAndLoader(ctx context.Context, query string, limit, maxBytes int, loader webPageLoader, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
+func searchWebWithPreferredProviderAndLoader(ctx context.Context, query string, limit int, loader webPageLoader, providers []webSearchProvider, preferred string) ([]webSearchResult, string, error) {
 	providers = preferredProviderFirst(providers, preferred)
 	errs := make([]error, 0, len(providers))
 	for _, provider := range providers {

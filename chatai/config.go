@@ -29,7 +29,6 @@ type Config struct {
 type AgentConfig struct {
 	MaxSteps               int      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大工具调用轮数,minimum=1,maximum=20"`
 	ContextLimit           int      `yaml:"context_limit" jsonschema:"description=上下文工具默认返回的最大消息数,minimum=1,maximum=200"`
-	WebMaxBytes            int      `yaml:"web_max_bytes" jsonschema:"description=网页工具最大读取字节数"`
 	WebBrowserEnable       bool     `yaml:"web_browser_enable" jsonschema:"description=网页搜索和读取是否使用 Chrome 浏览器"`
 	WebBrowserAddress      string   `yaml:"web_browser_address" jsonschema:"description=Chrome 远程调试 HTTP 或 WebSocket 地址；留空时启动本机 Chrome"`
 	ScheduleMaxSec         int      `yaml:"schedule_max_seconds" jsonschema:"description=定时任务允许的最大延迟秒数"`

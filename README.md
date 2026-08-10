@@ -56,7 +56,6 @@ chatai:
     agent:
       max_steps: 8
       context_limit: 30
-      web_max_bytes: 524288
       schedule_max_seconds: 86400
       progress_after_seconds: 15
 
@@ -110,7 +109,6 @@ chatai:
 | --- | ---: | --- |
 | `max_steps` | `8` | 一次对话最多执行多少轮模型决策和工具调用 |
 | `context_limit` | `30` | 上下文工具一次最多返回多少条消息 |
-| `web_max_bytes` | `524288` | 网页工具最多读取多少字节 |
 | `web_browser_enable` | `false` | 网页搜索和读取是否改用 chromedp 驱动 Chrome |
 | `web_browser_address` | 空 | Chrome 远程调试 HTTP/WS 地址；留空时启动本机 Chrome |
 | `schedule_max_seconds` | `86400` | 定时任务允许设置的最大延迟秒数 |
@@ -140,6 +138,8 @@ Agent 每轮起初只看到 `search_tools`，搜索命中的少量工具才会�
 群聊和用户上下文工具支持 `last_minutes`、`since`、`until`、`keyword`、`limit` 与 `offset`。例如“总结半小时前到现在的聊天内容”可直接用 `last_minutes: 30` 查询；结果会返回 `has_more` 和 `next_offset`，消息较多时 Agent 可以继续翻页。
 
 网页搜索默认依次尝试 DuckDuckGo、Bing 中国版和百度，当前提供方不可用或返回结果无法解析时自动降级。fallback 成功后，该可用引擎会在配置的有效期内被优先尝试，避免每次请求重复走完整降级链。网页搜索和读取会拒绝本机、内网和链路本地地址，并限制超时、响应大小和重定向次数。
+
+`browse_web` 需要同时提供网页 URL 和查询内容。较短网页会返回完整的结构化 Markdown；网页超过内置大小上限时，只返回与查询内容最相关的若干上下文片段。该上限由工具内部管理，无需配置。
 
 遇到依赖 JavaScript、校验普通 HTTP 客户端或需要浏览器渲染的页面时，可以启用 chromedp：
 
