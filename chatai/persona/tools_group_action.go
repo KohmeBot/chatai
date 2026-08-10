@@ -14,8 +14,9 @@ import (
 func (p *Persona) groupActionTools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Definition: agent.Function("send_image", "向当前群发送一张图片", map[string]any{
-				"url": stringProperty("发送的图片URL"),
+			Definition: agent.Function("send_image", "向当前群发送一张图片并可以选择带上一句话", map[string]any{
+				"url":  stringProperty("发送的图片URL"),
+				"text": stringProperty("可选，发送的图片附带的文字"),
 			}, "url"),
 			SearchTerms: []string{"发送消息", "回复", "图片", "发送图片", "发图"},
 			GroupAction: true,
@@ -62,7 +63,8 @@ func (p *Persona) groupActionTools() []agent.Tool {
 
 func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
-		URL string `json:"url"`
+		URL  string `json:"url"`
+		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
@@ -76,6 +78,9 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	}
 	segments := message.Message{}
 	segments = append(segments, message.Image(input.URL))
+	if len(strings.TrimSpace(input.Text)) > 0 {
+		segments = append(segments, message.Text(input.Text))
+	}
 	id := ctx.SendGroupMessage(p.groupID, segments)
 	rc.MarkActionPerformed()
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
