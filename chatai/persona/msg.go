@@ -1,9 +1,11 @@
 package persona
 
 import (
+	"encoding/json"
 	"fmt"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
+	"html"
 	"slices"
 	"strconv"
 	"strings"
@@ -217,7 +219,13 @@ func repeatMessage(msgs message.Message) message.Message {
 func getText(msgs message.Message) string {
 	if getMsgType(msgs) == MsgTypeJson {
 		for _, sg := range msgs {
-			return sg.Data["data"]
+			data := sg.Data["data"]
+			parsed := parseQQMiniCard(data)
+			if parsed == "" {
+				return data
+			}
+			return parsed
+
 		}
 	}
 
@@ -399,4 +407,50 @@ func formatMessage(msg GroupMessage) string {
 }
 func runeLen(s string) int {
 	return len([]rune(s))
+}
+
+func parseQQMiniCard(raw string) string {
+	// 1. HTML 实体解码
+	// &#44; -> ,
+	// &#91; -> [
+	// &amp; -> &
+	raw = html.UnescapeString(raw)
+
+	// 2. 直接尝试解析
+	var data struct {
+		Meta struct {
+			Detail struct {
+				Title    string `json:"title"`
+				Desc     string `json:"desc"`
+				URL      string `json:"url"`
+				QQDocURL string `json:"qqdocurl"`
+			} `json:"detail_1"`
+		} `json:"meta"`
+	}
+
+	err := json.Unmarshal([]byte(raw), &data)
+
+	// 如果传入的是 {\"ver\":\"...\"} 这种被额外转义过的 JSON
+	if err != nil {
+		raw = strings.ReplaceAll(raw, `\"`, `"`)
+		err = json.Unmarshal([]byte(raw), &data)
+	}
+
+	if err != nil {
+		return ""
+	}
+
+	detail := data.Meta.Detail
+
+	jumpURL := detail.QQDocURL
+	if jumpURL == "" {
+		jumpURL = detail.URL
+	}
+
+	return fmt.Sprintf(
+		"标题：%s\n描述：%s\n跳转链接：%s",
+		detail.Title,
+		detail.Desc,
+		jumpURL,
+	)
 }
