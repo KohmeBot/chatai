@@ -24,6 +24,8 @@ type RunContext struct {
 
 	actionMu        sync.RWMutex
 	actionPerformed bool
+	waitingMu       sync.RWMutex
+	waitingForUser  bool
 	decisionMu      sync.RWMutex
 	latestDecision  string
 	traceMu         sync.RWMutex
@@ -68,6 +70,22 @@ func (r *RunContext) ActionPerformed() bool {
 	r.actionMu.RLock()
 	defer r.actionMu.RUnlock()
 	return r.actionPerformed
+}
+
+// SetWaitingForUser records whether a tool is currently waiting for a group
+// member's reply. Callers can use this to avoid sending misleading progress
+// messages while the next step depends on user input.
+func (r *RunContext) SetWaitingForUser(waiting bool) {
+	r.waitingMu.Lock()
+	r.waitingForUser = waiting
+	r.waitingMu.Unlock()
+}
+
+// WaitingForUser reports whether the current run is paused for user input.
+func (r *RunContext) WaitingForUser() bool {
+	r.waitingMu.RLock()
+	defer r.waitingMu.RUnlock()
+	return r.waitingForUser
 }
 
 // SetLatestDecision publishes the newest model decision for slow-run progress reporting.
@@ -153,6 +171,9 @@ type Tool struct {
 	SearchTerms []string
 	// GroupAction 表示工具成功后已经完成发送消息、@ 或戳一戳等群聊动作。
 	GroupAction bool
+	// DecisionBoundary 表示该工具的结果必须先交回模型再执行其他工具。
+	// 适用于等待外部输入的工具，避免模型在拿到新信息前执行同轮的预生成动作。
+	DecisionBoundary bool
 }
 
 type Registry struct {
@@ -409,13 +430,22 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 			return response.Answer, nil
 		}
 		history = append(history, model.Message{Role: "assistant", Content: response.Answer, ToolCalls: response.ToolCalls, ReasoningContent: response.Reasoning})
-		for _, call := range response.ToolCalls {
+		boundaryCallIndex, boundaryToolName := -1, ""
+		for callIndex, call := range response.ToolCalls {
+			if r.Tools.isDecisionBoundary(call.Function.Name) {
+				boundaryCallIndex, boundaryToolName = callIndex, call.Function.Name
+				break
+			}
+		}
+		for callIndex, call := range response.ToolCalls {
 			logrus.Infof("[Agent][run=%d][调用工具] step=%d/%d call_id=%s tool=%s args=%s", runID, i+1, steps, call.ID, call.Function.Name, logValue(call.Function.Arguments))
 			var result any
 			var callErr error
 			callStarted := time.Now()
 			groupAction := false
-			if finalActionStep && call.Function.Name == "search_tools" {
+			if boundaryCallIndex >= 0 && callIndex != boundaryCallIndex {
+				callErr = fmt.Errorf("tool call skipped because %q requires a new model decision before other tools run", boundaryToolName)
+			} else if finalActionStep && call.Function.Name == "search_tools" {
 				callErr = errors.New("the final step only allows a group action")
 			} else if call.Function.Name == "search_tools" {
 				var input struct {
@@ -528,6 +558,12 @@ func (r *Registry) isGroupAction(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.tools[name].GroupAction
+}
+
+func (r *Registry) isDecisionBoundary(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tools[name].DecisionBoundary
 }
 
 // Has 判断工具是否已经注册，用于 Skill 白名单激活。

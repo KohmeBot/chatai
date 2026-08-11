@@ -13,6 +13,7 @@ func (p *Persona) registerBuiltinTools() {
 		p.contextTools(),
 		p.imageTools(),
 		p.memoryTools(),
+		p.followUpTools(),
 		p.groupActionTools(),
 		p.scheduleTools(),
 		p.webTools(),

@@ -2,6 +2,7 @@ package chataisdk
 
 import (
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/plugin/v2"
 	"reflect"
@@ -59,4 +60,12 @@ func (c *ChatAIInvoker) DoRequestWithModel(req string, m model.LargeModel) (stri
 		return resp, nil
 	}
 	return resp, res[1].Interface().(error)
+}
+
+func (c *ChatAIInvoker) RegisterAgentTool(tool agent.Tool) error {
+	res := c.v.MethodByName("RegisterAgentTool").Call([]reflect.Value{reflect.ValueOf(tool)})
+	if len(res) != 1 {
+		return fmt.Errorf("RegisterAgentTool method not found")
+	}
+	return res[0].Interface().(error)
 }

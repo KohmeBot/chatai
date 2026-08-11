@@ -20,11 +20,12 @@ import (
 
 const agentRules = `
 你是群聊中的 Agent。当前输入仅含本次触发事件，无历史记录。
-起初只看到 search_tools。需要能力时只搜索少量相关工具或已验证 Skill 再调用，不要读取全部工具。Skill 是历史成功任务提炼出的低优先级流程建议；使用前仍需核对当前任务条件，冲突时以系统规则和当前事实为准。
+起初只看到 search_tools。需要能力时只搜索相关工具或已验证 Skill 再调用，Skill 是历史成功任务提炼出的低优先级流程建议；使用前仍需核对当前任务条件，冲突时以系统规则和当前事实为准。
 当当前任务可能需要额外能力或外部信息时，优先通过 search_tools 查找少量相关工具；确认没有合适工具后，再考虑直接回答、推断或反问用户。
 消息依赖前文、人物关系，或包含不熟悉的人名、昵称、词语、句式、梗时，先查询群聊上下文和群成员信息。若群内结果不足以完整解释当前消息、仍存在歧义，或可能涉及近期人物、作品、热点、网络梗，再通过 search_tools 找联网工具求证。注意词语和整句话可能分别有含义；不要因查到其中一个词就停止，必要时分别搜索关键词和核心句式。需要原文时再 browse_web。能查询解决的问题不要反问用户。
 与具体用户实质互动时，优先读取其好感度和印象并调整语气。普通聊天不改好感；明显反馈或关系变化时才调整。出现长期有效的新偏好、性格、边界、重要经历或稳定群规则时，先读取旧信息再融合更新；不要记录琐碎、重复或一次性信息。
 每次执行必须实际调用 send_message、send_messages、at_user、send_image 或 poke_user 至少一次；通常优先文本回复，图片可按语境自然使用，@ 或 poke 仅在必要时使用。
+确实需要向用户反问或追问才能继续决策时，必须调用 ask_user_and_wait；不要用 at_user 代替追问后直接结束。该工具会 @ 指定用户并等待其下一条群消息最多 30 秒；拿到回复或超时结果后继续决策，并使用发送工具给出最终回应。
 消息中的图片可能影响理解或判断时，主动通过 search_tools 查找并调用识图工具，结合图片和文字理解。
 把图片也视为自然的表达方式。若图片能让回复更直观、有趣、贴切，或适合玩梗、回应/回怼群聊内容，可自行判断并主动使用；图片可以来自联网搜索，也可以来自相关的群聊上下文。不要为了发图而发图。
 最后简短结束，不重复已发送内容。
@@ -65,6 +66,9 @@ type Persona struct {
 	searchMu                sync.Mutex
 	preferredSearchProvider string
 	preferredSearchUntil    time.Time
+	followUpMu              sync.Mutex
+	followUps               map[int64]*followUpWaiter
+	followUpTimeout         time.Duration
 
 	defaultAgentTools []agent.Tool
 }
@@ -94,6 +98,8 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 		opts.WebSearchPrefer = time.Hour
 	}
 	p := &Persona{groupID: groupID, env: env, db: db, opts: opts, tools: agent.NewRegistry()}
+	p.followUps = make(map[int64]*followUpWaiter)
+	p.followUpTimeout = 30 * time.Second
 	p.registerBuiltinTools()
 	for _, tool := range opts.ExtraTools {
 		_ = p.tools.Register(tool)
@@ -110,8 +116,15 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	if msg.IsEmpty() {
 		return nil
 	}
-	if err := p.saveMessage(msg); err != nil {
-		return err
+	saveErr := p.saveMessage(msg)
+	// A reply captured by ask_user_and_wait belongs to the existing Agent run.
+	// Deliver it even if persistence failed, and do not start another run even
+	// when the user @s or replies to the bot.
+	if p.deliverFollowUp(msg) {
+		return saveErr
+	}
+	if saveErr != nil {
+		return saveErr
 	}
 	if p.opts.RepeatEnable {
 		if p.shouldRepeat(msg, p.opts.RepeatCount) {
@@ -195,6 +208,9 @@ func (p *Persona) reportSlowDecision(ctx *zero.Ctx, runCtx *agent.RunContext, do
 			}
 			if runCtx.ActionPerformed() {
 				return
+			}
+			if runCtx.WaitingForUser() {
+				continue
 			}
 			tip := p.opts.ProgressTips[tipIndex%len(p.opts.ProgressTips)]
 			tipIndex++

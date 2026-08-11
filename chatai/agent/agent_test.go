@@ -187,6 +187,41 @@ func TestRunnerDoesNotFinishWhileModelKeepsCallingToolsAfterGroupAction(t *testi
 	require.Len(t, llm.requests, 3)
 }
 
+func TestRunnerDecisionBoundaryForcesNewDecisionBeforeOtherTools(t *testing.T) {
+	registry := NewRegistry()
+	asked := false
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("ask_user", "ask", map[string]any{}), SearchTerms: []string{"ask"}, DecisionBoundary: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+			asked = true
+			return "user reply", nil
+		},
+	}))
+	sendCount := 0
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "send", map[string]any{}), SearchTerms: []string{"send"}, GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+			sendCount++
+			return "sent", nil
+		},
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"ask send"}`)}},
+		// Even when send_message appears first, ask_user must be the only call
+		// executed from this pre-reply model decision.
+		{ToolCalls: []model.ToolCall{call("premature-send", "send_message", `{}`), call("ask", "ask_user", `{}`)}},
+		{ToolCalls: []model.ToolCall{call("final-send", "send_message", `{}`)}},
+		{Answer: "done"},
+	}}
+
+	answer, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 4, RequireAction: true}).Run(&RunContext{}, "reply", "")
+	require.NoError(t, err)
+	require.Equal(t, "done", answer)
+	require.True(t, asked)
+	require.Equal(t, 1, sendCount)
+	require.Contains(t, llm.requests[2].History[4].Content, "requires a new model decision")
+}
+
 func TestRunnerRepromptsThenErrorsWhenModelStaysSilent(t *testing.T) {
 	registry := NewRegistry()
 	llm := &scriptedModel{steps: []model.Response{{}, {}}}
