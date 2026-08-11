@@ -88,6 +88,25 @@ func TestRunnerSearchLoadsSkillAndActivatesRequiredTools(t *testing.T) {
 	require.Equal(t, int64(3), trace.OutputTokens)
 }
 
+func TestRunnerSkipsSkillWhenAnyRequiredToolIsMissing(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("read_context", "read context", map[string]any{}),
+		Handler:    func(_ *RunContext, _ json.RawMessage) (any, error) { return "history", nil },
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"总结群聊"}`)}},
+		{Answer: "done"},
+	}}
+	runCtx := &RunContext{GroupID: 7}
+	_, err := (&Runner{Model: llm, Tools: registry, Skills: scriptedSkillSearcher{matches: []SkillMatch{{
+		ID: 10, Name: "broken_skill", Description: "missing tool", RequiredTools: []string{"read_context", "missing_tool"},
+	}}}}).Run(runCtx, "总结群聊", "")
+	require.NoError(t, err)
+	require.Empty(t, runCtx.Trace().UsedSkillIDs)
+	require.NotContains(t, toolNames(llm.requests[1].Tools), "read_context")
+}
+
 func TestRunnerRejectsUnloadedTool(t *testing.T) {
 	registry := NewRegistry()
 	called := false

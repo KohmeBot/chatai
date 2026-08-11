@@ -28,13 +28,25 @@ type Config struct {
 }
 
 type SkillConfig struct {
-	Enable             bool `yaml:"enable" jsonschema:"description=是否启用自生成 Skill 学习与召回"`
-	CandidateMinSteps  int  `yaml:"candidate_min_steps" jsonschema:"description=至少经过多少轮决策才值得生成候选 Skill,minimum=2,maximum=20"`
-	ActivationEvidence int  `yaml:"activation_evidence" jsonschema:"description=候选 Skill 至少经过多少次成功证据后启用,minimum=2,maximum=10"`
-	DefaultTTLDays     int  `yaml:"default_ttl_days" jsonschema:"description=Skill 默认有效期天数,minimum=1,maximum=90"`
-	MaxActive          int  `yaml:"max_active" jsonschema:"description=每个群最多启用多少个 Skill,minimum=1,maximum=100"`
-	MaxCandidates      int  `yaml:"max_candidates" jsonschema:"description=每个群最多保留多少个候选 Skill,minimum=1,maximum=200"`
-	ReflectionWorkers  int  `yaml:"reflection_workers" jsonschema:"description=后台 Skill 反思并发数,minimum=1,maximum=4"`
+	Enable             bool              `yaml:"enable" jsonschema:"description=是否启用全局 Skill 学习与召回"`
+	CandidateMinSteps  int               `yaml:"candidate_min_steps" jsonschema:"description=至少经过多少轮决策才值得生成候选 Skill,minimum=2,maximum=20"`
+	ActivationEvidence int               `yaml:"activation_evidence" jsonschema:"description=候选 Skill 至少经过多少次成功证据后启用,minimum=2,maximum=10"`
+	GlobalMinGroups    int               `yaml:"global_min_groups" jsonschema:"description=自动生成的全局 Skill 至少需要多少个不同群的证据,minimum=1,maximum=10"`
+	DefaultTTLDays     int               `yaml:"default_ttl_days" jsonschema:"description=Skill 默认有效期天数,minimum=1,maximum=90"`
+	MaxActive          int               `yaml:"max_active" jsonschema:"description=全局最多启用多少个自动生成 Skill,minimum=1,maximum=100"`
+	MaxCandidates      int               `yaml:"max_candidates" jsonschema:"description=全局最多保留多少个自动生成候选 Skill,minimum=1,maximum=200"`
+	ReflectionWorkers  int               `yaml:"reflection_workers" jsonschema:"description=后台 Skill 反思并发数,minimum=1,maximum=4"`
+	Global             []ConfiguredSkill `yaml:"global" jsonschema:"description=配置声明的全局 Skill"`
+}
+
+type ConfiguredSkill struct {
+	Name          string   `yaml:"name" jsonschema:"description=全局 Skill 唯一名称"`
+	Description   string   `yaml:"description" jsonschema:"description=使用范围和边界"`
+	Triggers      []string `yaml:"triggers" jsonschema:"description=触发表达"`
+	NonTriggers   []string `yaml:"non_triggers" jsonschema:"description=不应触发的表达"`
+	Instructions  []string `yaml:"instructions" jsonschema:"description=执行步骤"`
+	RequiredTools []string `yaml:"required_tools" jsonschema:"description=需要激活的已注册工具"`
+	SuccessChecks []string `yaml:"success_checks" jsonschema:"description=成功检查项"`
 }
 
 type AgentConfig struct {

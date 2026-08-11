@@ -436,13 +436,24 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%q error=%v", runID, input.Query, skillErr)
 						} else {
 							for _, item := range skills {
-								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
-									Instructions: item.Instructions, SuccessChecks: item.SuccessChecks, RequiredTools: item.RequiredTools})
-								ctx.markSkillUsed(item.ID)
+								validTools := make([]string, 0, len(item.RequiredTools))
+								allToolsAvailable := true
 								for _, toolName := range item.RequiredTools {
 									if r.Tools.Has(toolName) {
-										activeTools[toolName] = true
+										validTools = append(validTools, toolName)
+									} else {
+										allToolsAvailable = false
 									}
+								}
+								if !allToolsAvailable || len(validTools) == 0 {
+									logrus.Warnf("[Agent][run=%d][Skill 跳过] skill=%s 原因=存在未注册的所需工具", runID, item.Name)
+									continue
+								}
+								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
+									Instructions: item.Instructions, SuccessChecks: item.SuccessChecks, RequiredTools: validTools})
+								ctx.markSkillUsed(item.ID)
+								for _, toolName := range validTools {
+									activeTools[toolName] = true
 								}
 							}
 						}

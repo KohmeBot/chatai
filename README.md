@@ -5,7 +5,7 @@
 ## 功能
 
 - Agent 多轮工具调用，通过 `search_tools` 按需加载少量相关工具，不把全部工具或聊天记录直接发送给模型
-- 可选的自生成 Skill：从多次成功任务中提炼群级工作流，经候选和影子验证后自动启用、续期或淘汰
+- 全局 Skill：既可从不同群的成功任务中自动合并生成，也可直接通过配置声明
 - 群聊上下文持久化到插件数据库，重启后仍可读取
 - Agent、图片解析、入群欢迎可以使用不同模型
 - 可选图片解析；没有配置图片模型时不会解析图片
@@ -69,6 +69,7 @@ chatai:
       enable: true
       candidate_min_steps: 4
       activation_evidence: 3
+      global_min_groups: 2
       default_ttl_days: 30
       max_active: 20
       max_candidates: 50
@@ -176,10 +177,33 @@ skills:
   enable: true
   candidate_min_steps: 4
   activation_evidence: 3
+  global_min_groups: 2
   default_ttl_days: 30
   max_active: 20
   max_candidates: 50
   reflection_workers: 1
+
+  # 配置 Skill 当前只支持全局作用域；启动后立即 Active
+  global:
+    - name: search_and_send_images
+      description: 当用户请求特定角色或主题的网络图片时搜索并发送，不用于资料查询或生成式绘图
+      triggers:
+        - 我要看某个角色的图
+        - 找张某个主题的图片
+        - 发一张图片
+      non_triggers:
+        - 搜索相关资料
+        - 生成一张图片
+      instructions:
+        - 使用 search_web 搜索目标图片
+        - 使用 browse_web 打开结果页并提取有效图片地址
+        - 使用 send_image 发送相关图片
+      required_tools:
+        - search_web
+        - browse_web
+        - send_image
+      success_checks:
+        - 至少找到并成功发送一张相关图片
 ```
 
 | 配置 | 默认值 | 说明 |
@@ -187,14 +211,20 @@ skills:
 | `enable` | `false` | 是否启用成功轨迹学习和 Active Skill 召回 |
 | `candidate_min_steps` | `4` | 一次成功运行至少经过多少轮决策才值得反思；使用两个以上不同非发送工具时也可触发 |
 | `activation_evidence` | `3` | 候选至少积累多少次证据后才可能启用，最小为 `2` |
+| `global_min_groups` | `2` | 自动生成的全局 Skill 至少需要多少个不同群提供成功证据 |
 | `default_ttl_days` | `30` | 模型未给出有效期限时使用的默认天数；服务端始终限制在 `1`～`90` 天 |
-| `max_active` | `20` | 每个群最多同时启用多少个 Skill |
-| `max_candidates` | `50` | 每个群最多保留多少个 Candidate/Shadow Skill |
+| `max_active` | `20` | 全局最多同时启用多少个自动生成 Skill；配置 Skill 不占用该额度 |
+| `max_candidates` | `50` | 全局最多保留多少个自动生成 Candidate/Shadow Skill |
 | `reflection_workers` | `1` | 后台反思 Worker 数量；反思不会阻塞群聊回复 |
+| `global` | 空 | 管理员声明的全局 Skill 列表，启动后立即启用 |
 
-Skill 完全由成功运行轨迹生成，默认按群隔离，不读取外部 Skill 文件，也不生成或执行脚本。一次成功只会产生 `candidate`；候选在后续相似任务中进行影子验证，达到配置的证据数且成功率不低于 80% 后才转为 `active`。Active Skill 被 `search_tools` 命中时会返回经过验证的流程，并自动暴露它实际使用过的已注册工具，从而减少重复的工具发现步骤。
+自动生成的 Skill 使用 `global/generated` 作用域。不同群产生相似描述和相同工具组合时，会合并到同一个记录并累计各群证据；达到 `activation_evidence`、`global_min_groups` 且成功率不低于 80% 后才转为 `active`。升级后的第一次启动会把旧版群级记录迁移为全局记录并合并重复项。
 
-Skill 使用成功会续期并提高置信度；连续两次失败会转为 `stale`，随后通过相似任务重新验证，验证继续失败时退休。过期 Candidate 会退休，过期 Active Skill 会进入 `stale` 并等待相似任务重新验证。数据库只持久化 Skill、不可逆任务指纹和工具名，不保存原始聊天、工具参数或工具结果。
+`skills.global` 声明的是 `global/config` Skill。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。当前不支持配置群级 Skill、外部 Skill 文件或 Skill 脚本。
+
+Active Skill 被 `search_tools` 命中时会返回流程，并自动暴露 `required_tools` 中的已注册工具；只要其中任一工具未注册，该 Skill 就不会加载。
+
+自动生成 Skill 使用成功会续期并提高置信度；连续两次失败会转为 `stale`，随后通过相似任务重新验证，验证继续失败时退休。过期 Candidate 会退休，过期 Active Skill 会进入 `stale` 并等待相似任务重新验证。数据库只持久化 Skill、不可逆任务指纹和工具名，不保存原始聊天、工具参数或工具结果。
 
 ## 复读配置
 

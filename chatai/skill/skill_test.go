@@ -38,3 +38,36 @@ func TestTechnicalSuccessRequiresCleanCompletedRun(t *testing.T) {
 	require.False(t, technicalSuccess(agent.RunTrace{ActionPerformed: true, Error: "step limit"}))
 	require.False(t, technicalSuccess(agent.RunTrace{ActionPerformed: true, ToolCalls: []agent.ToolTrace{{Name: "read", OK: false}}}))
 }
+
+func TestSameWorkflowMergesEquivalentGlobalSkills(t *testing.T) {
+	first := Record{Name: "search_and_send_images", Description: "当用户请求查看特定角色或主题的图片时搜索并发送",
+		TriggersJSON:      encodeStrings([]string{"我要看角色的图", "发张主题图片"}),
+		RequiredToolsJSON: encodeStrings([]string{"browse_web", "search_web", "send_image"})}
+	second := Record{Name: "web_image_search_and_send", Description: "当用户请求特定主题图片时通过网络搜索找到图片并发送",
+		TriggersJSON:      encodeStrings([]string{"给我一张图片", "找张主题的图"}),
+		RequiredToolsJSON: encodeStrings([]string{"browse_web", "search_web", "send_image"})}
+	require.True(t, sameWorkflow(first, second))
+
+	second.RequiredToolsJSON = encodeStrings([]string{"image_generation", "send_image"})
+	require.False(t, sameWorkflow(first, second))
+}
+
+func TestValidateConfiguredGlobalSkill(t *testing.T) {
+	proposal, err := validateConfiguredDefinition(Definition{
+		Name: "web_image_search", Description: "当用户明确请求网络图片时搜索并发送，不用于生成式绘图",
+		Triggers: []string{"找张图片"}, NonTriggers: []string{"画一张图片"},
+		Instructions:  []string{"先搜索合适图片", "确认图片地址后发送"},
+		RequiredTools: []string{"search_web", "send_image"}, SuccessChecks: []string{"图片成功发送"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"search_web", "send_image"}, proposal.RequiredTools)
+	require.Equal(t, float64(1), proposal.Confidence)
+}
+
+func TestConfiguredGlobalSkillRejectsMissingTools(t *testing.T) {
+	_, err := validateConfiguredDefinition(Definition{
+		Name: "invalid_global", Description: "这是一个用于测试的完整全局技能描述",
+		Triggers: []string{"测试技能"}, Instructions: []string{"执行测试流程"}, SuccessChecks: []string{"流程完成"},
+	})
+	require.ErrorContains(t, err, "required tools")
+}

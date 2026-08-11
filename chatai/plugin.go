@@ -2,9 +2,7 @@ package chatai
 
 import (
 	"errors"
-	"github.com/kohmebot/chatai/chatai/pkg/search"
-	factory2 "github.com/kohmebot/chatai/chatai/pkg/search/factory"
-	"github.com/sirupsen/logrus"
+	"fmt"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -12,8 +10,11 @@ import (
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/factory"
 	"github.com/kohmebot/chatai/chatai/persona"
+	"github.com/kohmebot/chatai/chatai/pkg/search"
+	factory2 "github.com/kohmebot/chatai/chatai/pkg/search/factory"
 	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/kohmebot/plugin/v2"
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"gorm.io/gorm"
 )
@@ -114,6 +115,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if c.conf.Skills.ActivationEvidence < 2 {
 		c.conf.Skills.ActivationEvidence = 3
 	}
+	if c.conf.Skills.GlobalMinGroups < 1 {
+		c.conf.Skills.GlobalMinGroups = 2
+	}
 	if c.conf.Skills.DefaultTTLDays <= 0 {
 		c.conf.Skills.DefaultTTLDays = 30
 	}
@@ -138,10 +142,21 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		reflectionModel := c.routeModel(skillRoute, skill.ReflectionSystemPrompt(), true)
 		skillService = skill.NewService(db, reflectionModel, skill.Options{
 			Enabled: true, CandidateMinSteps: c.conf.Skills.CandidateMinSteps,
-			ActivationEvidence: c.conf.Skills.ActivationEvidence, DefaultTTLDays: c.conf.Skills.DefaultTTLDays,
-			MaxActive: c.conf.Skills.MaxActive, MaxCandidates: c.conf.Skills.MaxCandidates,
+			ActivationEvidence: c.conf.Skills.ActivationEvidence, GlobalMinGroups: c.conf.Skills.GlobalMinGroups,
+			DefaultTTLDays: c.conf.Skills.DefaultTTLDays,
+			MaxActive:      c.conf.Skills.MaxActive, MaxCandidates: c.conf.Skills.MaxCandidates,
 			ReflectionWorkers: c.conf.Skills.ReflectionWorkers,
 		})
+		definitions := make([]skill.Definition, 0, len(c.conf.Skills.Global))
+		for _, item := range c.conf.Skills.Global {
+			definitions = append(definitions, skill.Definition{
+				Name: item.Name, Description: item.Description, Triggers: item.Triggers, NonTriggers: item.NonTriggers,
+				Instructions: item.Instructions, RequiredTools: item.RequiredTools, SuccessChecks: item.SuccessChecks,
+			})
+		}
+		if err := skillService.Initialize(definitions); err != nil {
+			return fmt.Errorf("initialize global skills: %w", err)
+		}
 	}
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
@@ -191,4 +206,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.1.0" }
+func (c *ChatPlugin) Version() string      { return "v1.1.01" }
