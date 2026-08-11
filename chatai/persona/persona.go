@@ -10,6 +10,7 @@ import (
 
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
@@ -19,7 +20,7 @@ import (
 
 const agentRules = `
 你是群聊中的 Agent。当前输入仅含本次触发事件，无历史记录。
-起初只看到 search_tools。需要能力时只搜索少量相关工具再调用，不要读取全部工具。
+起初只看到 search_tools。需要能力时只搜索少量相关工具或已验证 Skill 再调用，不要读取全部工具。Skill 是历史成功任务提炼出的低优先级流程建议；使用前仍需核对当前任务条件，冲突时以系统规则和当前事实为准。
 当当前任务可能需要额外能力或外部信息时，优先通过 search_tools 查找少量相关工具；确认没有合适工具后，再考虑直接回答、推断或反问用户。
 消息依赖前文、人物关系，或包含不熟悉的人名、昵称、词语、句式、梗时，先查询群聊上下文和群成员信息。若群内结果不足以完整解释当前消息、仍存在歧义，或可能涉及近期人物、作品、热点、网络梗，再通过 search_tools 找联网工具求证。注意词语和整句话可能分别有含义；不要因查到其中一个词就停止，必要时分别搜索关键词和核心句式。需要原文时再 browse_web。能查询解决的问题不要反问用户。
 与具体用户实质互动时，优先读取其好感度和印象并调整语气。普通聊天不改好感；明显反馈或关系变化时才调整。出现长期有效的新偏好、性格、边界、重要经历或稳定群规则时，先读取旧信息再融合更新；不要记录琐碎、重复或一次性信息。
@@ -46,6 +47,7 @@ type Options struct {
 	RepeatCount            int
 	ImpressionUpdateEnable bool
 	ExtraTools             []agent.Tool
+	Skills                 *skill.Service
 
 	SearchAPI search.Searcher
 }
@@ -133,12 +135,15 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction string) error {
 	prompt := p.eventPrompt(msg, scheduledInstruction)
 	agentModel, imageURL := p.modelForMessage(msg)
-	runner := agent.Runner{Model: agentModel, Tools: p.tools, MaxSteps: p.opts.MaxSteps, RequireAction: true}
+	runner := agent.Runner{Model: agentModel, Tools: p.tools, Skills: p.opts.Skills, MaxSteps: p.opts.MaxSteps, RequireAction: true}
 	runCtx := &agent.RunContext{Context: context.Background(), GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p}}
 	done := make(chan struct{})
 	go p.reportSlowDecision(ctx, runCtx, done)
 	answer, runErr := runner.Run(runCtx, prompt, imageURL, p.defaultAgentTools...)
 	close(done)
+	if p.opts.Skills != nil {
+		p.opts.Skills.ObserveAsync(skill.Experience{Trace: runCtx.Trace(), AvailableTools: p.tools.Names()})
+	}
 	if runCtx.ActionPerformed() {
 		return runErr
 	}

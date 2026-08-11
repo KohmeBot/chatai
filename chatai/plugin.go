@@ -12,6 +12,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/factory"
 	"github.com/kohmebot/chatai/chatai/persona"
+	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/kohmebot/plugin/v2"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"gorm.io/gorm"
@@ -88,10 +89,12 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		return err
 	}
 	c.db = db
-	for _, table := range []any{
+	tables := []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
 		&persona.ChatMessageRecord{}, &model.TokenUsage{},
-	} {
+	}
+	tables = append(tables, skill.Models()...)
+	for _, table := range tables {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
 		}
@@ -105,8 +108,40 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if c.conf.Agent.WebSearchPreferSeconds <= 0 {
 		c.conf.Agent.WebSearchPreferSeconds = 3600
 	}
+	if c.conf.Skills.CandidateMinSteps <= 0 {
+		c.conf.Skills.CandidateMinSteps = 4
+	}
+	if c.conf.Skills.ActivationEvidence < 2 {
+		c.conf.Skills.ActivationEvidence = 3
+	}
+	if c.conf.Skills.DefaultTTLDays <= 0 {
+		c.conf.Skills.DefaultTTLDays = 30
+	}
+	if c.conf.Skills.MaxActive <= 0 {
+		c.conf.Skills.MaxActive = 20
+	}
+	if c.conf.Skills.MaxCandidates <= 0 {
+		c.conf.Skills.MaxCandidates = 50
+	}
+	if c.conf.Skills.ReflectionWorkers <= 0 {
+		c.conf.Skills.ReflectionWorkers = 1
+	}
 	if c.conf.Repeat.TriggerCount < 2 {
 		c.conf.Repeat.TriggerCount = 3
+	}
+	var skillService *skill.Service
+	if c.conf.Skills.Enable {
+		skillRoute := c.conf.Routes.Skill
+		if !skillRoute.Configured() {
+			skillRoute = c.conf.Routes.Agent
+		}
+		reflectionModel := c.routeModel(skillRoute, skill.ReflectionSystemPrompt(), true)
+		skillService = skill.NewService(db, reflectionModel, skill.Options{
+			Enabled: true, CandidateMinSteps: c.conf.Skills.CandidateMinSteps,
+			ActivationEvidence: c.conf.Skills.ActivationEvidence, DefaultTTLDays: c.conf.Skills.DefaultTTLDays,
+			MaxActive: c.conf.Skills.MaxActive, MaxCandidates: c.conf.Skills.MaxCandidates,
+			ReflectionWorkers: c.conf.Skills.ReflectionWorkers,
+		})
 	}
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
@@ -141,6 +176,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			RepeatEnable: c.conf.Repeat.Enable,
 			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionUpdateEnable: c.conf.Impression.Enable,
 			ExtraTools: c.extraTools,
+			Skills:     skillService,
 			SearchAPI:  searcher,
 		})
 	}
@@ -155,4 +191,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.0.23" }
+func (c *ChatPlugin) Version() string      { return "v1.1.0" }

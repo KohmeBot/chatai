@@ -13,6 +13,14 @@ type scriptedModel struct {
 	steps    []model.Response
 }
 
+type scriptedSkillSearcher struct {
+	matches []SkillMatch
+}
+
+func (s scriptedSkillSearcher) SearchActiveSkills(_ int64, _ string, _ int) ([]SkillMatch, error) {
+	return s.matches, nil
+}
+
 func (m *scriptedModel) Request(req *model.Request, res *model.Response) error {
 	m.requests = append(m.requests, *req)
 	*res = m.steps[len(m.requests)-1]
@@ -47,6 +55,37 @@ func TestRunnerSearchesBeforeLoadingAndCallingTool(t *testing.T) {
 	require.Equal(t, "current event", llm.requests[1].History[0].Content)
 	require.Len(t, llm.requests[2].History, 5)
 	require.Equal(t, "tool", llm.requests[2].History[4].Role)
+}
+
+func TestRunnerSearchLoadsSkillAndActivatesRequiredTools(t *testing.T) {
+	registry := NewRegistry()
+	called := false
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("read_context", "read context", map[string]any{}),
+		Handler:    func(_ *RunContext, _ json.RawMessage) (any, error) { called = true; return "history", nil },
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"总结最近群聊"}`)}},
+		{ToolCalls: []model.ToolCall{call("read", "read_context", `{}`)}},
+		{Answer: "done", InputToken: 12, OutToken: 3},
+	}}
+	runCtx := &RunContext{GroupID: 7, UserID: 8}
+	runner := &Runner{Model: llm, Tools: registry, Skills: scriptedSkillSearcher{matches: []SkillMatch{{
+		ID: 9, Name: "summarize_chat", Description: "总结群聊", Instructions: []string{"读取上下文", "按主题总结"},
+		RequiredTools: []string{"read_context"}, SuccessChecks: []string{"覆盖时间范围"},
+	}}}}
+	answer, err := runner.Run(runCtx, "总结一下", "")
+	require.NoError(t, err)
+	require.Equal(t, "done", answer)
+	require.True(t, called)
+	require.Contains(t, toolNames(llm.requests[1].Tools), "read_context")
+	require.Contains(t, llm.requests[1].History[2].Content, `"kind":"skill"`)
+	trace := runCtx.Trace()
+	require.Equal(t, uint64(1), uint64(len(trace.UsedSkillIDs)))
+	require.Equal(t, uint(9), trace.UsedSkillIDs[0])
+	require.Equal(t, 3, trace.DecisionSteps)
+	require.Equal(t, int64(12), trace.InputTokens)
+	require.Equal(t, int64(3), trace.OutputTokens)
 }
 
 func TestRunnerRejectsUnloadedTool(t *testing.T) {

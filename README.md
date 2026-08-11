@@ -5,6 +5,7 @@
 ## 功能
 
 - Agent 多轮工具调用，通过 `search_tools` 按需加载少量相关工具，不把全部工具或聊天记录直接发送给模型
+- 可选的自生成 Skill：从多次成功任务中提炼群级工作流，经候选和影子验证后自动启用、续期或淘汰
 - 群聊上下文持久化到插件数据库，重启后仍可读取
 - Agent、图片解析、入群欢迎可以使用不同模型
 - 可选图片解析；没有配置图片模型时不会解析图片
@@ -49,6 +50,11 @@ chatai:
         provider_name: tongyi
         model_name: qwen-vl-plus
         max_tokens: 1024
+      # 可选；不配置时使用 routes.agent
+      skill:
+        provider_name: deepseek
+        model_name: deepseek-chat
+        max_tokens: 1024
       join:
         provider_name: tongyi
         model_name: qwen-turbo
@@ -58,6 +64,15 @@ chatai:
       context_limit: 30
       schedule_max_seconds: 86400
       progress_after_seconds: 15
+
+    skills:
+      enable: true
+      candidate_min_steps: 4
+      activation_evidence: 3
+      default_ttl_days: 30
+      max_active: 20
+      max_candidates: 50
+      reflection_workers: 1
 
     repeat:
       enable: true
@@ -90,6 +105,7 @@ chatai:
 | --- | --- | --- |
 | `routes.agent` | 对话决策和工具调用 | 使用默认模型 |
 | `routes.vision` | 带图事件的完整 Agent 决策与工具调用 | 带图事件仍由文本 Agent 处理，但无法读取图片 |
+| `routes.skill` | 成功任务的后台反思和 Skill 候选生成 | 使用 `routes.agent` |
 | `routes.join` | 生成入群欢迎语 | 使用默认模型 |
 
 图片模型需要支持 OpenAI 兼容的 `image_url` 消息格式和工具调用。带图提问会把完整触发事件与原图直接交给该模型，并由它完成整轮 Agent 决策，不再先生成图片描述交给另一个模型。普通文本模型不要配置到 `routes.vision`，否则请求可能失败。
@@ -152,6 +168,33 @@ agent:
 `web_browser_address` 接受 Chrome DevTools 的 HTTP 地址（如上）或 `ws://`/`wss://` 浏览器 WebSocket 地址。留空时会在插件所在机器启动本机 Chrome。启用后，`search_web` 与 `browse_web` 都通过浏览器加载页面；Chrome 发起的 HTTP(S) 请求仍会经过公网地址校验。远程调试端口能够控制浏览器，请只在受信任网络内开放。
 
 定时任务保存在机器人进程内，重启机器人后未执行的任务不会恢复。
+
+## 自生成 Skill 配置
+
+```yaml
+skills:
+  enable: true
+  candidate_min_steps: 4
+  activation_evidence: 3
+  default_ttl_days: 30
+  max_active: 20
+  max_candidates: 50
+  reflection_workers: 1
+```
+
+| 配置 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `enable` | `false` | 是否启用成功轨迹学习和 Active Skill 召回 |
+| `candidate_min_steps` | `4` | 一次成功运行至少经过多少轮决策才值得反思；使用两个以上不同非发送工具时也可触发 |
+| `activation_evidence` | `3` | 候选至少积累多少次证据后才可能启用，最小为 `2` |
+| `default_ttl_days` | `30` | 模型未给出有效期限时使用的默认天数；服务端始终限制在 `1`～`90` 天 |
+| `max_active` | `20` | 每个群最多同时启用多少个 Skill |
+| `max_candidates` | `50` | 每个群最多保留多少个 Candidate/Shadow Skill |
+| `reflection_workers` | `1` | 后台反思 Worker 数量；反思不会阻塞群聊回复 |
+
+Skill 完全由成功运行轨迹生成，默认按群隔离，不读取外部 Skill 文件，也不生成或执行脚本。一次成功只会产生 `candidate`；候选在后续相似任务中进行影子验证，达到配置的证据数且成功率不低于 80% 后才转为 `active`。Active Skill 被 `search_tools` 命中时会返回经过验证的流程，并自动暴露它实际使用过的已注册工具，从而减少重复的工具发现步骤。
+
+Skill 使用成功会续期并提高置信度；连续两次失败会转为 `stale`，随后通过相似任务重新验证，验证继续失败时退休。过期 Candidate 会退休，过期 Active Skill 会进入 `stale` 并等待相似任务重新验证。数据库只持久化 Skill、不可逆任务指纹和工具名，不保存原始聊天、工具参数或工具结果。
 
 ## 复读配置
 

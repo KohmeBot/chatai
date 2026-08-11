@@ -21,9 +21,20 @@ type Config struct {
 	Thinking    bool        `yaml:"thinking" jsonschema:"description=默认是否启用深度思考"`
 
 	Agent           AgentConfig      `yaml:"agent" jsonschema:"description=Agent 配置"`
+	Skills          SkillConfig      `yaml:"skills" jsonschema:"description=Agent 自生成 Skill 配置"`
 	Repeat          RepeatConfig     `yaml:"repeat" jsonschema:"description=群聊复读配置"`
 	Impression      ImpressionConfig `yaml:"impression" jsonschema:"description=Agent 印象工具配置"`
 	JoinGroupConfig `yaml:"join_group" jsonschema:"description=加群配置"`
+}
+
+type SkillConfig struct {
+	Enable             bool `yaml:"enable" jsonschema:"description=是否启用自生成 Skill 学习与召回"`
+	CandidateMinSteps  int  `yaml:"candidate_min_steps" jsonschema:"description=至少经过多少轮决策才值得生成候选 Skill,minimum=2,maximum=20"`
+	ActivationEvidence int  `yaml:"activation_evidence" jsonschema:"description=候选 Skill 至少经过多少次成功证据后启用,minimum=2,maximum=10"`
+	DefaultTTLDays     int  `yaml:"default_ttl_days" jsonschema:"description=Skill 默认有效期天数,minimum=1,maximum=90"`
+	MaxActive          int  `yaml:"max_active" jsonschema:"description=每个群最多启用多少个 Skill,minimum=1,maximum=100"`
+	MaxCandidates      int  `yaml:"max_candidates" jsonschema:"description=每个群最多保留多少个候选 Skill,minimum=1,maximum=200"`
+	ReflectionWorkers  int  `yaml:"reflection_workers" jsonschema:"description=后台 Skill 反思并发数,minimum=1,maximum=4"`
 }
 
 type AgentConfig struct {
@@ -58,6 +69,7 @@ type ImpressionConfig struct {
 type ModelRoutes struct {
 	Agent  ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
 	Vision ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
+	Skill  ModelRouteConfig `yaml:"skill" jsonschema:"description=自生成 Skill 反思模型；不配置时使用 Agent 模型"`
 	// Deprecated: 仅用于兼容旧配置，印象现在由 Agent 模型通过工具维护。
 	LegacyImpression ModelRouteConfig `yaml:"impression,omitempty" jsonschema:"-"`
 	Join             ModelRouteConfig `yaml:"join" jsonschema:"description=入群欢迎模型"`

@@ -46,13 +46,19 @@ type groupMemberInfo struct {
 
 func (p *Persona) handleGetGroupMemberInfo(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
-		UserID  int64 `json:"user_id"`
-		NoCache bool  `json:"no_cache"`
+		GroupID *int64 `json:"group_id"`
+		UserID  int64  `json:"user_id"`
+		NoCache bool   `json:"no_cache"`
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
 	}
 
+	if input.GroupID != nil {
+		if err := p.validateCurrentGroupID(*input.GroupID); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateUserID(input.UserID); err != nil {
 		return nil, err
 	}
@@ -68,6 +74,17 @@ func (p *Persona) handleGetGroupMemberInfo(rc *agent.RunContext, raw json.RawMes
 }
 
 func (p *Persona) handleGetGroupMemberList(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	var input struct {
+		GroupID *int64 `json:"group_id"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if input.GroupID != nil {
+		if err := p.validateCurrentGroupID(*input.GroupID); err != nil {
+			return nil, err
+		}
+	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
 		return nil, err

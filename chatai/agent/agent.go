@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/sirupsen/logrus"
@@ -25,6 +26,34 @@ type RunContext struct {
 	actionPerformed bool
 	decisionMu      sync.RWMutex
 	latestDecision  string
+	traceMu         sync.RWMutex
+	trace           RunTrace
+}
+
+// ToolTrace 是供 Skill 学习使用的脱敏工具执行记录。它不保存原始参数和结果。
+type ToolTrace struct {
+	Name        string
+	OK          bool
+	Duration    time.Duration
+	GroupAction bool
+}
+
+// RunTrace 汇总一次 Agent 运行。Prompt 只在内存中交给反思模型，不直接持久化。
+type RunTrace struct {
+	RunID           uint64
+	GroupID         int64
+	UserID          int64
+	Prompt          string
+	StartedAt       time.Time
+	Duration        time.Duration
+	DecisionSteps   int
+	InputTokens     int64
+	OutputTokens    int64
+	ToolCalls       []ToolTrace
+	UsedSkillIDs    []uint
+	ActionPerformed bool
+	FinalAnswer     string
+	Error           string
 }
 
 // MarkActionPerformed records that this run has completed a visible group action.
@@ -57,6 +86,62 @@ func (r *RunContext) LatestDecision() string {
 	r.decisionMu.RLock()
 	defer r.decisionMu.RUnlock()
 	return r.latestDecision
+}
+
+func (r *RunContext) startTrace(runID uint64, prompt string) {
+	r.traceMu.Lock()
+	r.trace = RunTrace{RunID: runID, GroupID: r.GroupID, UserID: r.UserID, Prompt: prompt, StartedAt: time.Now()}
+	r.traceMu.Unlock()
+}
+
+func (r *RunContext) recordModelStep(response *model.Response) {
+	r.traceMu.Lock()
+	r.trace.DecisionSteps++
+	r.trace.InputTokens += response.InputToken
+	r.trace.OutputTokens += response.OutToken
+	r.traceMu.Unlock()
+}
+
+func (r *RunContext) recordToolCall(name string, ok, groupAction bool, duration time.Duration) {
+	r.traceMu.Lock()
+	r.trace.ToolCalls = append(r.trace.ToolCalls, ToolTrace{Name: name, OK: ok, GroupAction: groupAction, Duration: duration})
+	r.traceMu.Unlock()
+}
+
+func (r *RunContext) markSkillUsed(id uint) {
+	if id == 0 {
+		return
+	}
+	r.traceMu.Lock()
+	for _, existing := range r.trace.UsedSkillIDs {
+		if existing == id {
+			r.traceMu.Unlock()
+			return
+		}
+	}
+	r.trace.UsedSkillIDs = append(r.trace.UsedSkillIDs, id)
+	r.traceMu.Unlock()
+}
+
+func (r *RunContext) finishTrace(answer string, err error) {
+	r.traceMu.Lock()
+	r.trace.Duration = time.Since(r.trace.StartedAt)
+	r.trace.ActionPerformed = r.ActionPerformed()
+	r.trace.FinalAnswer = answer
+	if err != nil {
+		r.trace.Error = err.Error()
+	}
+	r.traceMu.Unlock()
+}
+
+// Trace 返回当前运行轨迹的副本。
+func (r *RunContext) Trace() RunTrace {
+	r.traceMu.RLock()
+	defer r.traceMu.RUnlock()
+	result := r.trace
+	result.ToolCalls = append([]ToolTrace(nil), r.trace.ToolCalls...)
+	result.UsedSkillIDs = append([]uint(nil), r.trace.UsedSkillIDs...)
+	return result
 }
 
 type Handler func(*RunContext, json.RawMessage) (any, error)
@@ -130,8 +215,28 @@ func (r *Registry) GroupActionDefinitions() []model.Tool {
 }
 
 type SearchResult struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	Kind          string   `json:"kind,omitempty"`
+	SkillID       uint     `json:"skill_id,omitempty"`
+	Instructions  []string `json:"instructions,omitempty"`
+	SuccessChecks []string `json:"success_checks,omitempty"`
+	RequiredTools []string `json:"required_tools,omitempty"`
+}
+
+// SkillMatch 是 Skill 系统向 Runner 暴露的只读、已验证能力说明。
+type SkillMatch struct {
+	ID            uint
+	Name          string
+	Description   string
+	Instructions  []string
+	SuccessChecks []string
+	RequiredTools []string
+}
+
+// SkillSearcher 由 Skill 服务实现。Runner 只检索 Active 且未过期的 Skill。
+type SkillSearcher interface {
+	SearchActiveSkills(groupID int64, query string, limit int) ([]SkillMatch, error)
 }
 
 func (r *Registry) Search(query string, limit int) []SearchResult {
@@ -192,8 +297,8 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 }
 
 func searchToolDefinition() model.Tool {
-	return Function("search_tools", "按当前任务搜索并加载少量相关工具；需要执行能力或遇到不懂、不确定的信息时先调用", map[string]any{
-		"query": map[string]any{"type": "string", "description": "需要完成的能力，例如：读取群聊上下文、联网搜索不确定的信息、发送回复"},
+	return Function("search_tools", "按当前任务搜索并加载少量相关工具或已验证 Skill；需要执行能力或遇到不懂、不确定的信息时先调用", map[string]any{
+		"query": map[string]any{"type": "string", "description": "完整任务目标或所需能力，例如：总结最近群聊、联网搜索不确定的信息、发送回复"},
 		"limit": map[string]any{"type": "integer", "description": "最多加载几个工具，默认5，最大8"},
 	}, "query")
 }
@@ -211,6 +316,7 @@ func (r *Registry) execute(ctx *RunContext, call model.ToolCall) (any, error) {
 type Runner struct {
 	Model         model.LargeModel
 	Tools         *Registry
+	Skills        SkillSearcher
 	MaxSteps      int
 	RequireAction bool
 }
@@ -233,6 +339,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 		toolsDefine = append(toolsDefine, tool.Definition)
 	}
 	runID := runSequence.Add(1)
+	ctx.startTrace(runID, prompt)
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
 	question := prompt
@@ -260,13 +367,17 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 			ImageURL: imageURL,
 		}, response)
 		if err != nil {
+			ctx.finishTrace("", err)
 			logrus.Errorf("[Agent][run=%d][模型请求失败] step=%d/%d error=%v", runID, i+1, steps, err)
 			return "", err
 		}
 		if response.ErrorMsg != "" {
+			responseErr := errors.New(response.ErrorMsg)
+			ctx.finishTrace("", responseErr)
 			logrus.Errorf("[Agent][run=%d][模型返回错误] step=%d/%d error=%s", runID, i+1, steps, response.ErrorMsg)
-			return "", errors.New(response.ErrorMsg)
+			return "", responseErr
 		}
+		ctx.recordModelStep(response)
 		logrus.Infof("[Agent][run=%d][模型决策] step=%d/%d tool_calls=%d answer=%s", runID, i+1, steps, len(response.ToolCalls), logValue(response.Answer))
 		if response.Reasoning != "" {
 			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=%s", runID, i+1, steps, logValue(response.Reasoning))
@@ -285,6 +396,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 			if r.RequireAction && !ctx.ActionPerformed() {
 				if i+1 == steps {
 					logrus.Warnf("[Agent][run=%d][未完成] 已用完 %d 轮，但模型没有完成群聊动作", runID, steps)
+					ctx.finishTrace(response.Answer, ErrGroupActionRequired)
 					return response.Answer, ErrGroupActionRequired
 				}
 				history = append(history, model.Message{Role: "assistant", Content: response.Answer})
@@ -293,6 +405,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 				continue
 			}
 			logrus.Infof("[Agent][run=%d][完成] step=%d/%d action_done=%t final_answer=%s", runID, i+1, steps, ctx.ActionPerformed(), logValue(response.Answer))
+			ctx.finishTrace(response.Answer, nil)
 			return response.Answer, nil
 		}
 		history = append(history, model.Message{Role: "assistant", Content: response.Answer, ToolCalls: response.ToolCalls, ReasoningContent: response.Reasoning})
@@ -300,6 +413,8 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 			logrus.Infof("[Agent][run=%d][调用工具] step=%d/%d call_id=%s tool=%s args=%s", runID, i+1, steps, call.ID, call.Function.Name, logValue(call.Function.Arguments))
 			var result any
 			var callErr error
+			callStarted := time.Now()
+			groupAction := false
 			if finalActionStep && call.Function.Name == "search_tools" {
 				callErr = errors.New("the final step only allows a group action")
 			} else if call.Function.Name == "search_tools" {
@@ -311,9 +426,32 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 					callErr = err
 				} else {
 					found := r.Tools.Search(input.Query, input.Limit)
+					for i := range found {
+						found[i].Kind = "tool"
+					}
+					if r.Skills != nil {
+						const skillLimit = 1
+						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query+"\n"+prompt, skillLimit)
+						if skillErr != nil {
+							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%q error=%v", runID, input.Query, skillErr)
+						} else {
+							for _, item := range skills {
+								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
+									Instructions: item.Instructions, SuccessChecks: item.SuccessChecks, RequiredTools: item.RequiredTools})
+								ctx.markSkillUsed(item.ID)
+								for _, toolName := range item.RequiredTools {
+									if r.Tools.Has(toolName) {
+										activeTools[toolName] = true
+									}
+								}
+							}
+						}
+					}
 					result = found
 					for _, item := range found {
-						activeTools[item.Name] = true
+						if item.Kind == "tool" {
+							activeTools[item.Name] = true
+						}
 					}
 					logrus.Infof("[Agent][run=%d][工具搜索] step=%d/%d query=%q hits=%v active_tools=%v", runID, i+1, steps, input.Query, searchResultNames(found), sortedActiveToolNames(activeTools))
 				}
@@ -321,10 +459,12 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 				callErr = fmt.Errorf("tool %q is not active; call search_tools first", call.Function.Name)
 			} else {
 				result, callErr = r.Tools.execute(ctx, call)
-				if callErr == nil && r.Tools.isGroupAction(call.Function.Name) {
+				groupAction = r.Tools.isGroupAction(call.Function.Name)
+				if callErr == nil && groupAction {
 					ctx.MarkActionPerformed()
 				}
 			}
+			ctx.recordToolCall(call.Function.Name, callErr == nil, groupAction, time.Since(callStarted))
 			payload := map[string]any{"ok": callErr == nil, "result": result}
 			if callErr != nil {
 				payload["error"] = callErr.Error()
@@ -336,13 +476,16 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 		if finalActionStep {
 			if !ctx.ActionPerformed() {
 				logrus.Warnf("[Agent][run=%d][未完成] 最后一步未执行群聊动作 answer=%s", runID, logValue(response.Answer))
+				ctx.finishTrace(response.Answer, ErrGroupActionRequired)
 				return response.Answer, ErrGroupActionRequired
 			}
 			logrus.Warnf("[Agent][run=%d][未完成] 最后一步已执行群聊动作，但模型尚未主动完成决策", runID)
 		}
 	}
 	logrus.Warnf("[Agent][run=%d][未完成] exceeded maximum of %d steps action_done=%t", runID, steps, ctx.ActionPerformed())
-	return "", fmt.Errorf("agent exceeded maximum of %d steps", steps)
+	err := fmt.Errorf("agent exceeded maximum of %d steps", steps)
+	ctx.finishTrace("", err)
+	return "", err
 }
 
 func finalActionPrompt(question string) string {
@@ -374,6 +517,26 @@ func (r *Registry) isGroupAction(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.tools[name].GroupAction
+}
+
+// Has 判断工具是否已经注册，用于 Skill 白名单激活。
+func (r *Registry) Has(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.tools[name]
+	return ok
+}
+
+// Names 返回所有已注册工具名的稳定排序副本。
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func definitionNames(definitions []model.Tool) []string {
