@@ -17,12 +17,12 @@ func (p *Persona) contextTools() []agent.Tool {
 
 	return []agent.Tool{
 		{
-			Definition:  agent.Function("read_group_context", "按最近时段、绝对时间、关键词和分页读取当前群聊天上下文；总结‘半小时前到现在’时使用 last_minutes=30", properties),
+			Definition:  agent.Function("read_group_context", "按最近时段、绝对时间、关键词和分页读取当前群聊天上下文；self_user_id 和消息的 is_self/target_is_self/quoted_is_self 用于识别 Agent 自己；总结‘半小时前到现在’时使用 last_minutes=30", properties),
 			SearchTerms: []string{"群聊上下文", "聊天记录", "历史消息", "最近消息", "上下文", "总结聊天", "半小时前", "过去几分钟", "时间范围"},
 			Handler:     p.handleReadGroupContext,
 		},
 		{
-			Definition:  agent.Function("read_user_context", "按最近时段、绝对时间、关键词和分页读取某个用户在当前群的发言", userProperties, "user_id"),
+			Definition:  agent.Function("read_user_context", "按最近时段、绝对时间、关键词和分页读取某个用户在当前群的发言；self_user_id 和消息的 is_self/target_is_self/quoted_is_self 用于识别 Agent 自己", userProperties, "user_id"),
 			SearchTerms: []string{"用户上下文", "某人发言", "用户记录", "历史消息", "总结发言", "半小时前", "过去几分钟", "时间范围"},
 			Handler:     p.handleReadUserContext,
 		},
@@ -68,15 +68,19 @@ func cloneProperties(source map[string]any) map[string]any {
 	return clone
 }
 
-func (p *Persona) handleReadGroupContext(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+func (p *Persona) handleReadGroupContext(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	input, err := p.decodeContextQuery(raw, 0)
 	if err != nil {
 		return nil, err
 	}
-	return p.readContext(input)
+	selfUserID, err := runSelfUserID(rc)
+	if err != nil {
+		return nil, err
+	}
+	return p.readContext(input, selfUserID)
 }
 
-func (p *Persona) handleReadUserContext(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+func (p *Persona) handleReadUserContext(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
 		UserID int64 `json:"user_id"`
 	}
@@ -90,7 +94,11 @@ func (p *Persona) handleReadUserContext(_ *agent.RunContext, raw json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	return p.readContext(query)
+	selfUserID, err := runSelfUserID(rc)
+	if err != nil {
+		return nil, err
+	}
+	return p.readContext(query, selfUserID)
 }
 
 type contextQueryInput struct {
@@ -104,6 +112,7 @@ type contextQueryInput struct {
 
 type contextQueryResult struct {
 	CurrentTime string              `json:"current_time"`
+	SelfUserID  int64               `json:"self_user_id"`
 	Count       int                 `json:"count"`
 	HasMore     bool                `json:"has_more"`
 	NextOffset  int                 `json:"next_offset,omitempty"`
@@ -151,12 +160,12 @@ func (p *Persona) decodeContextQuery(raw json.RawMessage, userID int64) (Context
 	return query, nil
 }
 
-func (p *Persona) readContext(query ContextMessageQuery) (contextQueryResult, error) {
+func (p *Persona) readContext(query ContextMessageQuery, selfUserID int64) (contextQueryResult, error) {
 	messages, hasMore, err := p.queryContextMessages(query)
 	if err != nil {
 		return contextQueryResult{}, err
 	}
-	result := contextQueryResult{CurrentTime: time.Now().Format(time.RFC3339), Count: len(messages), HasMore: hasMore, Messages: timeMessageResults(messages)}
+	result := contextQueryResult{CurrentTime: time.Now().Format(time.RFC3339), SelfUserID: selfUserID, Count: len(messages), HasMore: hasMore, Messages: timeMessageResults(messages, selfUserID)}
 	if hasMore {
 		result.NextOffset = query.Offset + len(messages)
 	}
@@ -168,7 +177,7 @@ type messageTimeRangeInput struct {
 	End   string `json:"end"`
 }
 
-func (p *Persona) handleReadMessagesByTime(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+func (p *Persona) handleReadMessagesByTime(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
 		Ranges []messageTimeRangeInput `json:"ranges"`
 		UserID int64                   `json:"user_id"`
@@ -202,7 +211,16 @@ func (p *Persona) handleReadMessagesByTime(_ *agent.RunContext, raw json.RawMess
 	if err != nil {
 		return nil, err
 	}
-	return timeMessageResults(messages), nil
+	selfUserID, err := runSelfUserID(rc)
+	if err != nil {
+		return nil, err
+	}
+	return contextQueryResult{
+		CurrentTime: time.Now().Format(time.RFC3339),
+		SelfUserID:  selfUserID,
+		Count:       len(messages),
+		Messages:    timeMessageResults(messages, selfUserID),
+	}, nil
 }
 
 func (p *Persona) contextLimit(limit int) int {
@@ -239,8 +257,10 @@ type timeMessageResult struct {
 	CreatedAt       string `json:"created_at"`
 	UserID          int64  `json:"user_id"`
 	Nickname        string `json:"nickname"`
+	IsSelf          bool   `json:"is_self"`
 	TargetUserID    int64  `json:"target_user_id,omitempty"`
 	TargetNickname  string `json:"target_nickname,omitempty"`
+	TargetIsSelf    bool   `json:"target_is_self,omitempty"`
 	Type            string `json:"type"`
 	Content         string `json:"content,omitempty"`
 	ImageURL        string `json:"image_url,omitempty"`
@@ -248,20 +268,42 @@ type timeMessageResult struct {
 	QuotedMessageID int64  `json:"quoted_message_id,omitempty"`
 	QuotedUserID    int64  `json:"quoted_user_id,omitempty"`
 	QuotedNickname  string `json:"quoted_nickname,omitempty"`
+	QuotedIsSelf    bool   `json:"quoted_is_self,omitempty"`
 	QuotedContent   string `json:"quoted_content,omitempty"`
 	QuotedImageURL  string `json:"quoted_image_url,omitempty"`
 	Referred        bool   `json:"referred,omitempty"`
 }
 
-func timeMessageResults(messages []GroupMessage) []timeMessageResult {
+func timeMessageResults(messages []GroupMessage, selfUserID int64) []timeMessageResult {
 	results := make([]timeMessageResult, len(messages))
 	for i, item := range messages {
+		isSelf := selfUserID > 0 && item.User.UserId == selfUserID
+		targetIsSelf := selfUserID > 0 && item.TargetUser.UserId == selfUserID
+		quotedIsSelf := selfUserID > 0 && item.QuotedUser.UserId == selfUserID
 		results[i] = timeMessageResult{
-			MessageID: item.MsgID, CreatedAt: item.CreatedAt.Format(time.RFC3339), UserID: item.User.UserId, Nickname: item.User.Nickname,
-			TargetUserID: item.TargetUser.UserId, TargetNickname: item.TargetUser.Nickname, Type: item.MsgType, Content: item.Content,
+			MessageID: item.MsgID, CreatedAt: item.CreatedAt.Format(time.RFC3339), UserID: item.User.UserId, Nickname: contextNickname(item.User, isSelf), IsSelf: isSelf,
+			TargetUserID: item.TargetUser.UserId, TargetNickname: contextNickname(item.TargetUser, targetIsSelf), TargetIsSelf: targetIsSelf, Type: item.MsgType, Content: item.Content,
 			ImageURL: item.Url, FileName: item.FileName, QuotedMessageID: item.QuotedMsgID, QuotedUserID: item.QuotedUser.UserId,
-			QuotedNickname: item.QuotedUser.Nickname, QuotedContent: item.QuotedContent, QuotedImageURL: item.QuotedURL, Referred: item.Refer,
+			QuotedNickname: contextNickname(item.QuotedUser, quotedIsSelf), QuotedIsSelf: quotedIsSelf, QuotedContent: item.QuotedContent, QuotedImageURL: item.QuotedURL, Referred: item.Refer,
 		}
 	}
 	return results
+}
+
+func runSelfUserID(rc *agent.RunContext) (int64, error) {
+	if rc == nil || rc.Values == nil {
+		return 0, errors.New("self user ID unavailable")
+	}
+	selfUserID, ok := rc.Values["self_user_id"].(int64)
+	if !ok || selfUserID <= 0 {
+		return 0, errors.New("self user ID unavailable")
+	}
+	return selfUserID, nil
+}
+
+func contextNickname(user User, isSelf bool) string {
+	if isSelf {
+		return selfNickname
+	}
+	return user.Nickname
 }

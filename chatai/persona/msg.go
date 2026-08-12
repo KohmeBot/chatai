@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	selfNickname   = "Agent自己"
 	MsgTypeText    = "text"
 	MsgTypeImg     = "image"
 	MsgTypeAt      = "at"
@@ -164,7 +165,7 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 
 	if ctx.Event.IsToMe {
 		msg.TargetUser = User{
-			Nickname: "你",
+			Nickname: selfNickname,
 			UserId:   ctx.Event.SelfID,
 		}
 	}

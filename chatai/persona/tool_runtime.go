@@ -39,5 +39,5 @@ func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
 }
 
 func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id int64) error {
-	return p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: "你"}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now(), Url: getUrl(segments), FileName: getFileName(segments)})
+	return p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: selfNickname}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now(), Url: getUrl(segments), FileName: getFileName(segments)})
 }

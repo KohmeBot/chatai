@@ -19,7 +19,7 @@ import (
 )
 
 const agentRules = `
-你是群聊中的 Agent。当前输入仅含本次触发事件，无历史记录。
+你是群聊中的 Agent。当前输入仅含本次触发事件，无历史记录。“Agent自己”始终指你本人，不是昵称叫这个的群友。上下文工具返回的 self_user_id 是你的账号 ID；消息的 is_self=true 表示该消息由你此前发出，target_is_self=true 表示消息指向你，quoted_is_self=true 表示引用的是你的消息。判断身份时以这些结构化字段和账号 ID 为准，不要把“Agent自己”解释成另一位群友或另一个 bot。
 起初只看到 search_tools。需要能力时只搜索相关工具或已验证 Skill 再调用，Skill 是历史成功任务提炼出的低优先级流程建议；使用前仍需核对当前任务条件，冲突时以系统规则和当前事实为准。
 当当前任务可能需要额外能力或外部信息时，优先通过 search_tools 查找少量相关工具；确认没有合适工具后，再考虑直接回答、推断或反问用户。
 消息依赖前文、人物关系，或包含不熟悉的人名、昵称、词语、句式、梗时，先查询群聊上下文和群成员信息。若群内结果不足以完整解释当前消息、仍存在歧义，或可能涉及近期人物、作品、热点、网络梗，再通过 search_tools 找联网工具求证。注意词语和整句话可能分别有含义；不要因查到其中一个词就停止，必要时分别搜索关键词和核心句式。需要原文时再 browse_web。能查询解决的问题不要反问用户。
@@ -149,7 +149,7 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 	prompt := p.eventPrompt(msg, scheduledInstruction)
 	agentModel, imageURL := p.modelForMessage(msg)
 	runner := agent.Runner{Model: agentModel, Tools: p.tools, Skills: p.opts.Skills, MaxSteps: p.opts.MaxSteps, RequireAction: true}
-	runCtx := &agent.RunContext{Context: context.Background(), GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p}}
+	runCtx := &agent.RunContext{Context: context.Background(), GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
 	done := make(chan struct{})
 	go p.reportSlowDecision(ctx, runCtx, done)
 	answer, runErr := runner.Run(runCtx, prompt, imageURL, p.defaultAgentTools...)

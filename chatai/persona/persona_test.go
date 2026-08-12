@@ -30,6 +30,12 @@ func TestAgentRulesPrioritizeContextBeforeAskingUser(t *testing.T) {
 	require.True(t, strings.Index(agentRules, "第一步是判断是否需要群聊上下文") < strings.Index(agentRules, "不要反问用户"))
 }
 
+func TestAgentRulesDefineStructuredSelfIdentity(t *testing.T) {
+	require.Contains(t, agentRules, "“Agent自己”始终指你本人")
+	require.Contains(t, agentRules, "is_self=true")
+	require.Contains(t, agentRules, "self_user_id")
+}
+
 func TestModelForMessageRoutesWholeImageRequestToVisionModel(t *testing.T) {
 	textModel := &routeTestModel{name: "text"}
 	visionModel := &routeTestModel{name: "vision"}
