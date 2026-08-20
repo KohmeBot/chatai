@@ -236,13 +236,11 @@ func (r *Registry) GroupActionDefinitions() []model.Tool {
 }
 
 type SearchResult struct {
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Kind          string   `json:"kind,omitempty"`
-	SkillID       uint     `json:"skill_id,omitempty"`
-	Instructions  []string `json:"instructions,omitempty"`
-	SuccessChecks []string `json:"success_checks,omitempty"`
-	RequiredTools []string `json:"required_tools,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Kind        string `json:"kind,omitempty"`
+	SkillID     uint   `json:"skill_id,omitempty"`
+	Markdown    string `json:"markdown,omitempty"`
 }
 
 // SkillMatch 是 Skill 系统向 Runner 暴露的只读、已验证能力说明。
@@ -250,8 +248,7 @@ type SkillMatch struct {
 	ID            uint
 	Name          string
 	Description   string
-	Instructions  []string
-	SuccessChecks []string
+	Markdown      string
 	RequiredTools []string
 }
 
@@ -475,12 +472,12 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 										allToolsAvailable = false
 									}
 								}
-								if !allToolsAvailable || len(validTools) == 0 {
+								if !allToolsAvailable {
 									logrus.Warnf("[Agent][run=%d][Skill 跳过] skill=%s 原因=存在未注册的所需工具", runID, item.Name)
 									continue
 								}
 								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
-									Instructions: item.Instructions, SuccessChecks: item.SuccessChecks, RequiredTools: validTools})
+									Markdown: item.Markdown})
 								ctx.markSkillUsed(item.ID)
 								for _, toolName := range validTools {
 									activeTools[toolName] = true

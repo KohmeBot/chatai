@@ -195,16 +195,14 @@ skills:
       non_triggers:
         - 搜索相关资料
         - 生成一张图片
-      instructions:
-        - 使用 search_web 搜索目标图片
-        - 使用 browse_web 打开结果页并提取有效图片地址
-        - 使用 send_image 发送相关图片
-      required_tools:
-        - search_web
-        - browse_web
-        - send_image
-      success_checks:
-        - 至少找到并成功发送一张相关图片
+      markdown: |
+        # 搜索并发送网络图片
+
+        在用户明确想查看某个角色或主题的现有网络图片时，寻找内容相关、地址有效的图片并发送。
+
+        根据请求选择合适的搜索词。检查候选结果与主题是否一致，并确认最终图片地址可以直接访问；不要把网页缩略图、失效地址或无关图片当作结果。需要执行能力时，通过 `search_tools` 加载相关搜索、网页读取和图片发送工具。
+
+        如果没有找到能够验证的图片，应如实说明，不要为了完成发送动作而发送低相关内容。
 ```
 
 | 配置 | 默认值 | 说明 |
@@ -221,11 +219,13 @@ skills:
 
 自动生成的 Skill 使用 `global/generated` 作用域。不同群产生相似描述和相同工具组合时，会合并到同一个记录并累计各群证据；达到 `activation_evidence`、`global_min_groups` 且成功率不低于 80% 后才转为 `active`。升级后的第一次启动会把旧版群级记录迁移为全局记录并合并重复项。
 
-`skills.global` 声明的是 `global/config` Skill。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。当前不支持配置群级 Skill、外部 Skill 文件或 Skill 脚本。
+`skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。当前不支持配置群级 Skill、外部 Skill 文件或 Skill 脚本。
 
-Active Skill 被 `search_tools` 命中时会返回流程，并自动暴露 `required_tools` 中的已注册工具；只要其中任一工具未注册，该 Skill 就不会加载。
+Active Skill 被 `search_tools` 命中时会返回完整 Markdown。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。
 
-自动生成 Skill 使用成功会续期并提高置信度；连续两次失败会转为 `stale`，随后通过相似任务重新验证，验证继续失败时退休。过期 Candidate 会退休，过期 Active Skill 会进入 `stale` 并等待相似任务重新验证。数据库只持久化 Skill、不可逆任务指纹和工具名，不保存原始聊天、工具参数或工具结果。
+旧版 `instructions`、`required_tools`、`success_checks` 配置仍可读取，并会在启动时转换为 Markdown；新配置应只使用 `markdown`。
+
+自动生成 Skill 使用成功会续期并提高置信度；连续两次失败会转为 `stale`，随后通过相似任务重新验证，验证继续失败时退休。过期 Candidate 会退休，过期 Active Skill 会进入 `stale` 并等待相似任务重新验证。反思模型生成的是一段完整 Markdown 经验说明，而不是固定的步骤、工具和检查项数组。数据库只持久化 Skill Markdown、触发条件、学习状态、不可逆任务指纹和内部工具索引，不保存原始聊天、工具参数或工具结果。
 
 ## 复读配置
 

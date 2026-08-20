@@ -71,8 +71,9 @@ func TestRunnerSearchLoadsSkillAndActivatesRequiredTools(t *testing.T) {
 	}}
 	runCtx := &RunContext{GroupID: 7, UserID: 8}
 	runner := &Runner{Model: llm, Tools: registry, Skills: scriptedSkillSearcher{matches: []SkillMatch{{
-		ID: 9, Name: "summarize_chat", Description: "总结群聊", Instructions: []string{"读取上下文", "按主题总结"},
-		RequiredTools: []string{"read_context"}, SuccessChecks: []string{"覆盖时间范围"},
+		ID: 9, Name: "summarize_chat", Description: "总结群聊",
+		Markdown:      "# 群聊总结\n\n读取相关上下文，按主题总结，并确认覆盖用户指定的时间范围。",
+		RequiredTools: []string{"read_context"},
 	}}}}
 	answer, err := runner.Run(runCtx, "总结一下", "")
 	require.NoError(t, err)
@@ -80,12 +81,30 @@ func TestRunnerSearchLoadsSkillAndActivatesRequiredTools(t *testing.T) {
 	require.True(t, called)
 	require.Contains(t, toolNames(llm.requests[1].Tools), "read_context")
 	require.Contains(t, llm.requests[1].History[2].Content, `"kind":"skill"`)
+	require.Contains(t, llm.requests[1].History[2].Content, `"markdown":"# 群聊总结`)
+	require.NotContains(t, llm.requests[1].History[2].Content, "required_tools")
 	trace := runCtx.Trace()
 	require.Equal(t, uint64(1), uint64(len(trace.UsedSkillIDs)))
 	require.Equal(t, uint(9), trace.UsedSkillIDs[0])
 	require.Equal(t, 3, trace.DecisionSteps)
 	require.Equal(t, int64(12), trace.InputTokens)
 	require.Equal(t, int64(3), trace.OutputTokens)
+}
+
+func TestRunnerLoadsInstructionOnlyMarkdownSkill(t *testing.T) {
+	registry := NewRegistry()
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"组织讨论结论"}`)}},
+		{Answer: "done"},
+	}}
+	runCtx := &RunContext{GroupID: 7}
+	_, err := (&Runner{Model: llm, Tools: registry, Skills: scriptedSkillSearcher{matches: []SkillMatch{{
+		ID: 11, Name: "organize_discussion", Description: "组织群聊讨论结论",
+		Markdown: "先区分已达成共识、仍有分歧和待确认事项，再形成简洁结论。",
+	}}}}).Run(runCtx, "整理讨论结论", "")
+	require.NoError(t, err)
+	require.Equal(t, []uint{11}, runCtx.Trace().UsedSkillIDs)
+	require.Contains(t, llm.requests[1].History[2].Content, "待确认事项")
 }
 
 func TestRunnerSkipsSkillWhenAnyRequiredToolIsMissing(t *testing.T) {

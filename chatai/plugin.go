@@ -151,7 +151,8 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		for _, item := range c.conf.Skills.Global {
 			definitions = append(definitions, skill.Definition{
 				Name: item.Name, Description: item.Description, Triggers: item.Triggers, NonTriggers: item.NonTriggers,
-				Instructions: item.Instructions, RequiredTools: item.RequiredTools, SuccessChecks: item.SuccessChecks,
+				Markdown: string(item.Markdown), LegacyInstructions: item.LegacyInstructions,
+				LegacyRequiredTools: item.LegacyRequiredTools, LegacySuccessChecks: item.LegacySuccessChecks,
 			})
 		}
 		if err := skillService.Initialize(definitions); err != nil {
@@ -206,4 +207,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.1.3" }
+func (c *ChatPlugin) Version() string      { return "v1.1.5" }

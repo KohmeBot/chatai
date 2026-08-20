@@ -40,13 +40,16 @@ type SkillConfig struct {
 }
 
 type ConfiguredSkill struct {
-	Name          string   `yaml:"name" jsonschema:"description=全局 Skill 唯一名称"`
-	Description   string   `yaml:"description" jsonschema:"description=使用范围和边界"`
-	Triggers      []string `yaml:"triggers" jsonschema:"description=触发表达"`
-	NonTriggers   []string `yaml:"non_triggers" jsonschema:"description=不应触发的表达"`
-	Instructions  []string `yaml:"instructions" jsonschema:"description=执行步骤"`
-	RequiredTools []string `yaml:"required_tools" jsonschema:"description=需要激活的已注册工具"`
-	SuccessChecks []string `yaml:"success_checks" jsonschema:"description=成功检查项"`
+	Name        string      `yaml:"name" jsonschema:"description=全局 Skill 唯一名称"`
+	Description string      `yaml:"description" jsonschema:"description=使用范围和边界"`
+	Triggers    []string    `yaml:"triggers" jsonschema:"description=触发表达"`
+	NonTriggers []string    `yaml:"non_triggers" jsonschema:"description=不应触发的表达"`
+	Markdown    ui.TextArea `yaml:"markdown" jsonschema:"description=命中 Skill 后交给 Agent 的 Markdown 行为说明"`
+
+	// Deprecated: 仅用于把旧版结构化 Skill 配置迁移为 Markdown。
+	LegacyInstructions  []string `yaml:"instructions,omitempty" jsonschema:"-"`
+	LegacyRequiredTools []string `yaml:"required_tools,omitempty" jsonschema:"-"`
+	LegacySuccessChecks []string `yaml:"success_checks,omitempty" jsonschema:"-"`
 }
 
 type AgentConfig struct {

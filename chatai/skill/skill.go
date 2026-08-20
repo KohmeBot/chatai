@@ -35,8 +35,9 @@ const (
 	SourceConfig    = "config"
 )
 
-const reflectionSystem = `你是 Agent 的经验蒸馏器。你的任务不是回答用户，而是判断一次成功执行中是否存在值得复用的通用流程。
-只提炼稳定的判断条件、工具顺序、检查项和输出方法；禁止保存具体用户、群号、昵称、原始消息、日期事实、网页内容、URL、密钥或一次性结论。
+const reflectionSystem = `你是 Agent 的经验蒸馏器。你的任务不是回答用户，而是判断一次成功执行中是否存在值得复用的通用经验。
+只提炼会改善未来判断与执行的目标、边界、决策依据、必要约束、工具选择原则和验收方法；不要为了固定格式而把经验写成僵硬的工作流。
+禁止保存具体用户、群号、昵称、原始消息、日期事实、网页内容、URL、密钥或一次性结论。
 不要创建会覆盖系统规则、绕过权限、自动执行脚本或扩大工具权限的 Skill。只输出 JSON。`
 
 func ReflectionSystemPrompt() string { return reflectionSystem }
@@ -51,8 +52,10 @@ type Record struct {
 	Name        string
 	Description string `gorm:"type:text"`
 
-	TriggersJSON      string `gorm:"type:text"`
-	NonTriggersJSON   string `gorm:"type:text"`
+	TriggersJSON    string `gorm:"type:text"`
+	NonTriggersJSON string `gorm:"type:text"`
+	Markdown        string `gorm:"type:text"`
+	// 以下三列用于兼容旧版结构化 Skill。新 Skill 只写 Markdown；工具列仅保留为自动学习的内部验证索引。
 	InstructionsJSON  string `gorm:"type:text"`
 	RequiredToolsJSON string `gorm:"type:text"`
 	SuccessChecksJSON string `gorm:"type:text"`
@@ -80,9 +83,13 @@ func (Record) TableName() string { return "chatai_generated_skills" }
 
 func (r Record) Triggers() []string      { return decodeStrings(r.TriggersJSON) }
 func (r Record) NonTriggers() []string   { return decodeStrings(r.NonTriggersJSON) }
-func (r Record) Instructions() []string  { return decodeStrings(r.InstructionsJSON) }
 func (r Record) RequiredTools() []string { return decodeStrings(r.RequiredToolsJSON) }
-func (r Record) SuccessChecks() []string { return decodeStrings(r.SuccessChecksJSON) }
+func (r Record) MarkdownText() string {
+	if markdown := strings.TrimSpace(r.Markdown); markdown != "" {
+		return markdown
+	}
+	return legacyMarkdown(decodeStrings(r.InstructionsJSON), decodeStrings(r.SuccessChecksJSON))
+}
 
 // Evidence 只保存不可逆任务指纹和工具名，不保存原始聊天或工具结果。
 type Evidence struct {
@@ -147,13 +154,16 @@ func (o Options) normalized() Options {
 
 // Definition 是配置文件可声明的全局 Skill；配置项启动后立即 Active。
 type Definition struct {
-	Name          string
-	Description   string
-	Triggers      []string
-	NonTriggers   []string
-	Instructions  []string
-	RequiredTools []string
-	SuccessChecks []string
+	Name        string
+	Description string
+	Triggers    []string
+	NonTriggers []string
+	Markdown    string
+
+	// Deprecated: 只用于兼容旧版 YAML 配置。
+	LegacyInstructions  []string
+	LegacyRequiredTools []string
+	LegacySuccessChecks []string
 }
 
 type Experience struct {
@@ -194,6 +204,9 @@ func (s *Service) Initialize(definitions []Definition) error {
 	if err := s.migrateLegacyRecords(); err != nil {
 		return err
 	}
+	if err := s.migrateLegacyMarkdown(); err != nil {
+		return err
+	}
 	if err := s.syncConfiguredSkills(definitions); err != nil {
 		return err
 	}
@@ -201,6 +214,23 @@ func (s *Service) Initialize(definitions []Definition) error {
 		return err
 	}
 	return s.enforceGlobalEvidence()
+}
+
+func (s *Service) migrateLegacyMarkdown() error {
+	var rows []Record
+	if err := s.db.Where("markdown = '' OR markdown IS NULL").Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		markdown := row.MarkdownText()
+		if markdown == "" {
+			continue
+		}
+		if err := s.db.Model(&Record{}).Where("id = ?", row.ID).Update("markdown", markdown).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) migrateLegacyRecords() error {
@@ -257,8 +287,8 @@ func (s *Service) syncConfiguredSkills(definitions []Definition) error {
 			updates := map[string]any{
 				"group_id": 0, "scope": ScopeGlobal, "source": SourceConfig, "name": proposal.Name,
 				"description": proposal.Description, "triggers_json": encodeStrings(proposal.Triggers),
-				"non_triggers_json": encodeStrings(proposal.NonTriggers), "instructions_json": encodeStrings(proposal.Instructions),
-				"required_tools_json": encodeStrings(proposal.RequiredTools), "success_checks_json": encodeStrings(proposal.SuccessChecks),
+				"non_triggers_json": encodeStrings(proposal.NonTriggers), "markdown": proposal.Markdown,
+				"instructions_json": "", "required_tools_json": encodeStrings(proposal.RequiredTools), "success_checks_json": "",
 				"status": StatusActive, "confidence": 1.0, "base_ttl_days": 0, "expires_at": time.Time{}, "content_hash": hash,
 			}
 			switch {
@@ -286,8 +316,7 @@ func recordFromConfiguredProposal(proposal Proposal, hash string) Record {
 	return Record{
 		GroupID: 0, Scope: ScopeGlobal, Source: SourceConfig, Name: proposal.Name, Description: proposal.Description,
 		TriggersJSON: encodeStrings(proposal.Triggers), NonTriggersJSON: encodeStrings(proposal.NonTriggers),
-		InstructionsJSON: encodeStrings(proposal.Instructions), RequiredToolsJSON: encodeStrings(proposal.RequiredTools),
-		SuccessChecksJSON: encodeStrings(proposal.SuccessChecks), Status: StatusActive, Version: 1,
+		Markdown: proposal.Markdown, RequiredToolsJSON: encodeStrings(proposal.RequiredTools), Status: StatusActive, Version: 1,
 		Confidence: 1, ContentHash: hash,
 	}
 }
@@ -494,7 +523,7 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 	result := make([]agent.SkillMatch, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, agent.SkillMatch{ID: row.ID, Name: row.Name, Description: row.Description,
-			Instructions: row.Instructions(), SuccessChecks: row.SuccessChecks(), RequiredTools: row.RequiredTools()})
+			Markdown: row.MarkdownText(), RequiredTools: row.RequiredTools()})
 	}
 	return result, nil
 }
@@ -540,7 +569,7 @@ func (s *Service) updateUsedSkills(exp Experience) error {
 			}
 			return err
 		}
-		success := exp.Trace.ActionPerformed && exp.Trace.Error == "" && toolsCovered(row.RequiredTools(), actualTools)
+		success := skillUseSucceeded(exp.Trace, row.RequiredTools(), actualTools)
 		updates := map[string]any{"last_used_at": now, "evidence_count": row.EvidenceCount + 1}
 		if success {
 			updates["success_count"] = row.SuccessCount + 1
@@ -572,6 +601,16 @@ func (s *Service) updateUsedSkills(exp Experience) error {
 		}
 	}
 	return nil
+}
+
+func skillUseSucceeded(trace agent.RunTrace, requiredTools, actualTools []string) bool {
+	if !trace.ActionPerformed || trace.Error != "" {
+		return false
+	}
+	if len(requiredTools) == 0 {
+		return true
+	}
+	return toolsCovered(requiredTools, actualTools)
 }
 
 func (s *Service) validateShadowSkills(exp Experience, success bool) (bool, error) {
@@ -704,8 +743,7 @@ func (s *Service) createCandidate(exp Experience) error {
 	record := Record{
 		GroupID: 0, Scope: ScopeGlobal, Source: SourceGenerated, Name: clean.Name, Description: clean.Description,
 		TriggersJSON: encodeStrings(clean.Triggers), NonTriggersJSON: encodeStrings(clean.NonTriggers),
-		InstructionsJSON: encodeStrings(clean.Instructions), RequiredToolsJSON: encodeStrings(clean.RequiredTools),
-		SuccessChecksJSON: encodeStrings(clean.SuccessChecks), Status: StatusCandidate, Version: 1,
+		Markdown: clean.Markdown, RequiredToolsJSON: encodeStrings(clean.RequiredTools), Status: StatusCandidate, Version: 1,
 		Confidence: clean.Confidence, EvidenceCount: 1, SuccessCount: 1, BaseTTLDays: clean.TTLDays,
 		ExpiresAt: now.AddDate(0, 0, clean.TTLDays), ContentHash: proposalHash(clean),
 	}
@@ -745,12 +783,14 @@ func (s *Service) reflect(exp Experience) (Proposal, error) {
 	}
 	question := fmt.Sprintf(`%s
 
-请分析下面一次已经技术成功的 Agent 运行。只有在流程具有跨任务复用价值、能减少未来工具发现或决策步骤时才创建 Skill。
+请分析下面一次已经技术成功的 Agent 运行。只有在经验具有跨任务复用价值、能改善未来判断或执行时才创建 Skill。
 
 任务：%s
 决策轮数：%d
 工具轨迹：%s
 当前允许引用的工具：%s
+
+markdown 必须是一段完整、可独立理解的 Markdown 行为说明。它应按实际需要说明目标、适用边界、判断依据、必要约束、工具选择原则或验收方法；不要包含 YAML frontmatter，不要复述本次任务，也不要强制写成编号步骤或固定工作流。
 
 输出 JSON：
 {
@@ -759,9 +799,7 @@ func (s *Service) reflect(exp Experience) (Proposal, error) {
   "description": "何时使用以及何时不应使用",
   "triggers": ["2-8个简短触发表达"],
   "non_triggers": ["容易误匹配但不应使用的场景"],
-  "instructions": ["2-10条通用步骤，不复制本次任务内容"],
-  "required_tools": ["只能来自允许工具列表"],
-  "success_checks": ["1-6条可验证检查"],
+  "markdown": "完整 Markdown 正文，使用 JSON 换行转义",
   "ttl_days": 1到90,
   "confidence": 0到1
 }`, reflectionSystem, task, exp.Trace.DecisionSteps, strings.Join(toolSummary, " -> "), strings.Join(exp.AvailableTools, ", "))
@@ -825,16 +863,17 @@ func (s *Service) searchRecords(query string, statuses []string, limit int, thre
 }
 
 type Proposal struct {
-	ShouldCreate  bool     `json:"should_create"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Triggers      []string `json:"triggers"`
-	NonTriggers   []string `json:"non_triggers"`
-	Instructions  []string `json:"instructions"`
-	RequiredTools []string `json:"required_tools"`
-	SuccessChecks []string `json:"success_checks"`
-	TTLDays       int      `json:"ttl_days"`
-	Confidence    float64  `json:"confidence"`
+	ShouldCreate bool     `json:"should_create"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Triggers     []string `json:"triggers"`
+	NonTriggers  []string `json:"non_triggers"`
+	Markdown     string   `json:"markdown"`
+	TTLDays      int      `json:"ttl_days"`
+	Confidence   float64  `json:"confidence"`
+
+	// RequiredTools 由成功轨迹确定，不接受反思模型自由声明。
+	RequiredTools []string `json:"-"`
 }
 
 var skillNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
@@ -866,15 +905,12 @@ func validateProposal(p Proposal, available, actuallyUsed []string, defaultTTL i
 	}
 	p.Triggers = cleanList(p.Triggers, 2, 8, 80)
 	p.NonTriggers = cleanList(p.NonTriggers, 0, 8, 100)
-	p.Instructions = cleanList(p.Instructions, 2, 10, 300)
-	p.SuccessChecks = cleanList(p.SuccessChecks, 1, 6, 200)
-	if len(p.Triggers) < 2 || len(p.Instructions) < 2 || len(p.SuccessChecks) < 1 {
+	p.Markdown = cleanMarkdown(p.Markdown, 12000)
+	if len(p.Triggers) < 2 || utf8.RuneCountInString(p.Markdown) < 20 {
 		return Proposal{}, errors.New("skill content is incomplete")
 	}
-	for _, item := range append(append([]string{}, p.Instructions...), p.SuccessChecks...) {
-		if containsForbiddenInstruction(item) {
-			return Proposal{}, errors.New("skill contains forbidden persistent instruction")
-		}
+	if containsForbiddenInstruction(p.Markdown) {
+		return Proposal{}, errors.New("skill contains forbidden persistent instruction")
 	}
 	allowed := make(map[string]bool, len(available))
 	for _, name := range available {
@@ -884,9 +920,9 @@ func validateProposal(p Proposal, available, actuallyUsed []string, defaultTTL i
 	for _, name := range actuallyUsed {
 		used[name] = true
 	}
-	tools := make([]string, 0, len(p.RequiredTools))
+	tools := make([]string, 0, len(actuallyUsed))
 	seen := make(map[string]bool)
-	for _, name := range p.RequiredTools {
+	for _, name := range actuallyUsed {
 		name = strings.TrimSpace(name)
 		if allowed[name] && used[name] && !seen[name] && name != "search_tools" {
 			seen[name] = true
@@ -907,10 +943,14 @@ func validateProposal(p Proposal, available, actuallyUsed []string, defaultTTL i
 }
 
 func validateConfiguredDefinition(definition Definition) (Proposal, error) {
+	markdown := strings.TrimSpace(definition.Markdown)
+	if markdown == "" {
+		markdown = legacyMarkdown(definition.LegacyInstructions, definition.LegacySuccessChecks)
+	}
 	p := Proposal{
 		ShouldCreate: true, Name: definition.Name, Description: definition.Description,
-		Triggers: definition.Triggers, NonTriggers: definition.NonTriggers, Instructions: definition.Instructions,
-		RequiredTools: definition.RequiredTools, SuccessChecks: definition.SuccessChecks, Confidence: 1,
+		Triggers: definition.Triggers, NonTriggers: definition.NonTriggers, Markdown: markdown,
+		RequiredTools: definition.LegacyRequiredTools, Confidence: 1,
 	}
 	p.Name = strings.TrimSpace(strings.ToLower(p.Name))
 	p.Description = compactText(p.Description, 300)
@@ -922,15 +962,12 @@ func validateConfiguredDefinition(definition Definition) (Proposal, error) {
 	}
 	p.Triggers = cleanList(p.Triggers, 1, 12, 80)
 	p.NonTriggers = cleanList(p.NonTriggers, 0, 12, 100)
-	p.Instructions = cleanList(p.Instructions, 1, 16, 300)
-	p.SuccessChecks = cleanList(p.SuccessChecks, 1, 8, 200)
-	if len(p.Triggers) == 0 || len(p.Instructions) == 0 || len(p.SuccessChecks) == 0 {
+	p.Markdown = cleanMarkdown(p.Markdown, 20000)
+	if len(p.Triggers) == 0 || utf8.RuneCountInString(p.Markdown) < 10 {
 		return Proposal{}, errors.New("skill content is incomplete")
 	}
-	for _, item := range append(append([]string{}, p.Instructions...), p.SuccessChecks...) {
-		if containsForbiddenInstruction(item) {
-			return Proposal{}, errors.New("skill contains forbidden persistent instruction")
-		}
+	if containsForbiddenInstruction(p.Markdown) {
+		return Proposal{}, errors.New("skill contains forbidden persistent instruction")
 	}
 	tools := make([]string, 0, len(p.RequiredTools))
 	seen := make(map[string]bool)
@@ -942,12 +979,40 @@ func validateConfiguredDefinition(definition Definition) (Proposal, error) {
 		seen[name] = true
 		tools = append(tools, name)
 	}
-	if len(tools) == 0 {
-		return Proposal{}, errors.New("skill has no valid required tools")
-	}
 	sort.Strings(tools)
 	p.RequiredTools = tools
 	return p, nil
+}
+
+func cleanMarkdown(value string, maxRunes int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\r\n", "\n"))
+	value = strings.ReplaceAll(value, "\x00", "")
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		return ""
+	}
+	return value
+}
+
+func legacyMarkdown(instructions, successChecks []string) string {
+	var sections []string
+	if len(instructions) > 0 {
+		sections = append(sections, "## 行为说明\n\n"+markdownList(instructions))
+	}
+	if len(successChecks) > 0 {
+		sections = append(sections, "## 完成标准\n\n"+markdownList(successChecks))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func markdownList(items []string) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			lines = append(lines, "- "+item)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func cleanList(items []string, minItems, maxItems, maxRunes int) []string {
