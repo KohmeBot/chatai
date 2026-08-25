@@ -20,10 +20,12 @@ type followUpWaiter struct {
 
 func (p *Persona) followUpTools() []agent.Tool {
 	return []agent.Tool{{
-		Definition: agent.Function("ask_user_and_wait", "需要用户补充信息时，在当前群 @ 指定用户并发送追问，然后监听该用户接下来 30 秒内的第一条群消息；收到回复或超时后将结果交回当前决策链。仅在缺少的信息无法通过已有上下文或其他工具获得时使用", map[string]any{
+		Definition: agent.Function("ask_user_and_wait", "需要关键补充信息时，在当前群 @ 指定用户并发送追问，然后监听该用户接下来30秒内的第一条群消息；这是可见且会阻塞当前决策链的副作用，仅在上下文和其他只读工具都无法补足信息时使用", map[string]any{
 			"user_id":  integerProperty("要追问的用户 QQ 号；通常是触发当前对话的用户"),
 			"question": stringProperty("紧跟在 @ 后发送的明确、简短追问"),
 		}, "user_id", "question"),
+		Namespace:   "chat",
+		Risk:        agent.ToolRiskMedium,
 		SearchTerms: []string{"反问用户", "追问用户", "询问用户", "等待用户回复", "补充信息", "澄清问题", "ask user", "follow up"},
 		// This intentionally is not a completed GroupAction: after the reply is
 		// returned, the Agent must still send its final response to the group.

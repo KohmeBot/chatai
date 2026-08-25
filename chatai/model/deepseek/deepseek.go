@@ -2,12 +2,14 @@ package deepseek
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"github.com/kohmebot/chatai/chatai/model"
-	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/sirupsen/logrus"
 )
 
 type deepSeekModel struct {
@@ -67,9 +69,13 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 		return err
 	}
 
-	logrus.Infof("do request: %s", string(jsonData))
+	logrus.Infof("model request provider=deepseek model=%s messages=%d tools=%d image=%t", m.Name, len(msg), len(request.Tools), request.ImageURL != "")
 
-	req, err := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(jsonData))
+	requestContext := request.Context
+	if requestContext == nil {
+		requestContext = context.Background()
+	}
+	req, err := http.NewRequestWithContext(requestContext, "POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -86,7 +92,7 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 	}
 	responseBody := respBody{}
 	err = json.Unmarshal(buf, &responseBody)
-	logrus.Infof("get response: %s", string(buf))
+	logrus.Infof("model response provider=deepseek model=%s status=%d bytes=%d", m.Name, resp.StatusCode, len(buf))
 	if err != nil {
 		return err
 	}

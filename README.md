@@ -12,7 +12,7 @@
 - 回复含图片的历史消息时，也会把被引用图片交给图片模型解析
 - Agent 在对话中按需维护群友印象和群聊印象
 - 可开关的群聊复读，并可设置连续多少条相同消息后触发
-- 日志显示 Agent 调用轮次、模型返回的思考内容、工具参数与工具结果
+- 日志显示 Agent 调用轮次、工具名称与执行状态；提示词、思考内容、工具参数和结果正文默认脱敏
 - 支持通义千问和 DeepSeek
 
 机器人不会根据群聊活跃度主动插话。普通消息只用于积累短期上下文，明确触发机器人后才会调用 Agent。复读功能不受这一限制，但必须由配置单独开启。
@@ -61,12 +61,15 @@ chatai:
 
     agent:
       max_steps: 8
+      max_tool_calls: 16
+      run_timeout_seconds: 180
       context_limit: 30
       schedule_max_seconds: 86400
       progress_after_seconds: 15
 
     skills:
       enable: true
+      auto_activate_generated: false
       candidate_min_steps: 4
       activation_evidence: 3
       global_min_groups: 2
@@ -125,6 +128,8 @@ chatai:
 | 配置 | 默认值 | 说明 |
 | --- | ---: | --- |
 | `max_steps` | `8` | 一次对话最多执行多少轮模型决策和工具调用 |
+| `max_tool_calls` | `16` | 一次对话最多接受多少个工具调用请求；包括搜索、失败和被策略跳过的调用 |
+| `run_timeout_seconds` | `180` | 一次对话的总超时；会传递到模型 HTTP 请求、等待用户和支持取消的工具 |
 | `context_limit` | `30` | 上下文工具一次最多返回多少条消息 |
 | `web_browser_enable` | `false` | 网页搜索和读取是否改用 chromedp 驱动 Chrome |
 | `web_browser_address` | 空 | Chrome 远程调试 HTTP/WS 地址；留空时启动本机 Chrome |
@@ -149,7 +154,11 @@ Agent 可以使用以下能力：
 - 读取公开 HTTP/HTTPS 网页
 - 使用视觉模型理解 HTTP/HTTPS 图片 URL（仅在配置 `routes.vision` 后提供）
 
-Agent 每轮起初只看到 `search_tools`，搜索命中的少量工具才会在后续轮次暴露。执行发送消息、At 或戳一戳等群聊动作后，Agent 仍会把动作结果交给模型继续决策，直到模型主动停止调用工具；整个决策链必须至少成功执行一次群聊动作。最后一个决策步在尚未执行群聊动作时只提供群聊动作工具，模型必须基于已有信息立即回复，不能继续搜索；如果最后只生成了文本而没有调用动作工具，该文本会被直接发送。模型接口失败或没有产生任何可发送内容时才会发送兜底消息。
+触发事件会以结构化 `EventEnvelope` 交给模型，身份、目标用户、引用消息与正文彼此分离；消息、网页、图片文字、工具结果和 Skill Markdown 都按不可信数据处理。Agent 起初只看到 `search_tools`，搜索命中的少量能力才会在后续轮次暴露。搜索结果同时给出命名空间、只读性、幂等性、副作用和风险等级，中文任务会使用本地字符语义匹配补充精确关键词匹配。
+
+普通最终文本由宿主直接发送，不再强迫模型先搜索并调用 `send_message`。只有引用回复、拆成多条、发送图片、@ 或戳一戳等特殊交互才使用群聊动作工具；任一可见动作成功后，本轮立即结束，同批剩余调用会被跳过，防止重复发送或事后继续执行副作用。模型轮数、工具调用总数和整轮超时分别受独立预算约束；模型接口失败或没有产生任何可发送内容时才发送兜底消息。
+
+内置 Agent Prompt 按“角色与目标、群聊个性、上下文与信任边界、决策与证据、工具规则、完成与停止”组织。它保留接梗、吐槽、卖萌、发图和戳一戳等群聊娱乐空间，但要求严肃场景收住玩笑，并把事实、权限边界和用户目标放在表演人格之前。
 
 时间区间查询接受 RFC3339、`YYYY-MM-DD HH:MM[:SS]` 或日期格式。区间为左闭右开；仅填写日期作为结束时间时，会自动包含该日期全天。多个区间的重复消息会自动去重，结果按时间排序。
 
@@ -176,6 +185,7 @@ agent:
 ```yaml
 skills:
   enable: true
+  auto_activate_generated: false
   candidate_min_steps: 4
   activation_evidence: 3
   global_min_groups: 2
@@ -208,6 +218,7 @@ skills:
 | 配置 | 默认值 | 说明 |
 | --- | ---: | --- |
 | `enable` | `false` | 是否启用成功轨迹学习和 Active Skill 召回 |
+| `auto_activate_generated` | `false` | 是否允许自动生成的候选在证据达标后自动启用；关闭时仍会生成和验证候选，便于先人工观察 |
 | `candidate_min_steps` | `4` | 一次成功运行至少经过多少轮决策才值得反思；使用两个以上不同非发送工具时也可触发 |
 | `activation_evidence` | `3` | 候选至少积累多少次证据后才可能启用，最小为 `2` |
 | `global_min_groups` | `2` | 自动生成的全局 Skill 至少需要多少个不同群提供成功证据 |
@@ -217,11 +228,11 @@ skills:
 | `reflection_workers` | `1` | 后台反思 Worker 数量；反思不会阻塞群聊回复 |
 | `global` | 空 | 管理员声明的全局 Skill 列表，启动后立即启用 |
 
-自动生成的 Skill 使用 `global/generated` 作用域。不同群产生相似描述和相同工具组合时，会合并到同一个记录并累计各群证据；达到 `activation_evidence`、`global_min_groups` 且成功率不低于 80% 后才转为 `active`。升级后的第一次启动会把旧版群级记录迁移为全局记录并合并重复项。
+自动生成的 Skill 使用 `global/generated` 作用域。不同群产生相似描述和相同工具组合时，会合并到同一个记录并累计各群证据。默认只生成和影子验证候选；启用 `auto_activate_generated` 后，候选达到 `activation_evidence`、`global_min_groups` 且成功率不低于 80% 才转为 `active`。关闭该开关不会自动停用数据库中已经 Active 的 Skill。升级后的第一次启动会把旧版群级记录迁移为全局记录并合并重复项。
 
 `skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。当前不支持配置群级 Skill、外部 Skill 文件或 Skill 脚本。
 
-Active Skill 被 `search_tools` 命中时会返回完整 Markdown。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。
+Active Skill 被 `search_tools` 命中时会返回完整 Markdown。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和可选的自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。Skill 的技术成功以“用户可见回复确实送达且整轮无终止错误”为准，不再要求一定调用发送工具；某个可选只读工具失败后若仍正确完成回复，也不会误判整轮失败。
 
 旧版 `instructions`、`required_tools`、`success_checks` 配置仍可读取，并会在启动时转换为 Markdown；新配置应只使用 `markdown`。
 
@@ -252,26 +263,28 @@ impression:
 
 启用后，Agent 会在对话中发现稳定偏好、性格特征、边界、重要经历、群氛围或长期规则时，先读取旧印象，再调用 `update_impression` 写入融合后的完整内容。工具使用 `scope: group` 更新当前群印象，使用 `scope: user` 和 `user_id` 更新群友印象，并要求把刚读取的内容通过 `previous_content` 原样带回；旧值已变化时会拒绝覆盖并要求重新读取。一次性事件、闲聊和重复信息不会写入。长期印象、群聊上下文和 token 用量均保存在插件数据库中；复读窗口仅保存在内存中。
 
+用户印象继续按 `user_id` 跨群共享；本次 Agent/Harness 改造没有改变这一作用域设计。
+
 ## 日志说明
 
 每次 Agent 对话会出现带有以下标记的日志：
 
 ```text
-[Agent][run=7][开始] group=123 user=456 max_steps=8 ... prompt=...
-[Agent][run=7][请求模型] step=1/8 history=0 active_tools=[] exposed_tools=[search_tools] ...
-[Agent][run=7][模型决策] step=1/8 tool_calls=1 answer=...
-[Agent][run=7][模型推理] step=1/8 reasoning=...
-[Agent][run=7][工具搜索] step=1/8 query="联网搜索" hits=[search_web] ...
-[Agent][run=7][调用工具] step=2/8 call_id=... tool=search_web args=...
-[Agent][run=7][工具结果] step=2/8 tool=search_web ok=true action_done=false payload=...
-[Agent][run=7][完成] step=4/8 action_done=true final_answer=...
+[Agent][run=7][开始] group=123 user=456 max_steps=8 max_tool_calls=16 ... prompt=<redacted chars=320>
+[Agent][run=7][请求模型] step=1/8 history=0 active_tools=[] exposed_tools=[search_tools] question=<redacted chars=320>
+[Agent][run=7][模型决策] step=1/8 tool_calls=1 answer=<redacted chars=0>
+[Agent][run=7][模型推理] step=1/8 reasoning=<redacted chars=42>
+[Agent][run=7][工具搜索] step=1/8 query=<redacted chars=4> hits=[search_web] ...
+[Agent][run=7][调用工具] step=2/8 call_id=... tool=search_web args=<redacted chars=24>
+[Agent][run=7][工具结果] step=2/8 tool=search_web ok=true action_done=false payload=<redacted chars=860>
+[Agent][run=7][完成] step=4/8 action_done=false final_answer=<redacted chars=38>
 ```
 
-每次执行都有独立的 `run` 编号，可用它串起并发场景下的完整决策链。日志会显示当前历史条数、已加载和暴露的工具、工具搜索命中、调用参数、结果以及群聊动作是否完成。只有模型接口实际返回 `reasoning_content` 时才会打印推理内容；工具结果过长时会在 6000 个字符处截断。
+每次执行都有独立的 `run` 编号，可用它串起并发场景下的完整决策链。日志显示当前历史条数、已加载和暴露的工具、工具搜索命中、调用状态以及群聊动作是否完成；提示词、模型回复、`reasoning_content`、工具查询、参数和结果只记录字符数，不记录正文。供应商请求与响应日志也只保留模型名、消息/工具数量、HTTP 状态和字节数。
 
 内置工具集中定义在 `chatai/persona/builtin_tools.go`。注册函数只维护工具元数据和处理器映射，每个工具使用独立的 `handle...` 函数，便于单独维护。
 
-工具日志可能包含群聊上下文、用户印象或网页内容，请注意日志文件的访问权限和保存周期。
+错误信息和部分业务日志仍可能包含外部服务或数据库返回的细节，请注意日志文件的访问权限和保存周期。
 
 ## 从旧配置升级
 

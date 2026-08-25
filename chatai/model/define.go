@@ -1,6 +1,10 @@
 package model
 
-import "gorm.io/gorm"
+import (
+	"context"
+
+	"gorm.io/gorm"
+)
 
 type Key struct {
 	GroupId int64
@@ -49,6 +53,8 @@ type ToolCallFunction struct {
 }
 
 type Request struct {
+	// Context 控制整次模型请求的取消和超时；nil 表示不额外限制。
+	Context context.Context
 	// 输入的问题
 	Question string
 	// 历史记录

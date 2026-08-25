@@ -35,15 +35,17 @@ func TestMatchScoreUsesChineseTriggersAndNegativeBoundaries(t *testing.T) {
 }
 
 func TestTechnicalSuccessRequiresCleanCompletedRun(t *testing.T) {
-	require.True(t, technicalSuccess(agent.RunTrace{ActionPerformed: true, ToolCalls: []agent.ToolTrace{{Name: "send_message", OK: true}}}))
-	require.False(t, technicalSuccess(agent.RunTrace{ActionPerformed: true, Error: "step limit"}))
-	require.False(t, technicalSuccess(agent.RunTrace{ActionPerformed: true, ToolCalls: []agent.ToolTrace{{Name: "read", OK: false}}}))
+	require.True(t, technicalSuccess(agent.RunTrace{ResponseDelivered: true}))
+	require.True(t, technicalSuccess(agent.RunTrace{ResponseDelivered: true, ToolCalls: []agent.ToolTrace{{Name: "optional_read", OK: false}}}))
+	require.False(t, technicalSuccess(agent.RunTrace{ResponseDelivered: true, Error: "step limit"}))
+	require.False(t, technicalSuccess(agent.RunTrace{ActionPerformed: true, ResponseDelivered: false}))
 }
 
 func TestInstructionOnlySkillCanSucceedWithoutRequiredTools(t *testing.T) {
-	trace := agent.RunTrace{ActionPerformed: true, ToolCalls: []agent.ToolTrace{{Name: "send_message", OK: true}}}
+	trace := agent.RunTrace{ResponseDelivered: true}
 	require.True(t, skillUseSucceeded(trace, nil, []string{"send_message"}))
-	require.False(t, skillUseSucceeded(agent.RunTrace{ActionPerformed: false}, nil, nil))
+	require.False(t, skillUseSucceeded(agent.RunTrace{ResponseDelivered: false}, nil, nil))
+	require.False(t, skillUseSucceeded(trace, []string{"read_context"}, nil))
 }
 
 func TestSameWorkflowMergesEquivalentGlobalSkills(t *testing.T) {

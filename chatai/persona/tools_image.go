@@ -22,13 +22,17 @@ func (p *Persona) imageTools() []agent.Tool {
 				"url":    stringProperty("要理解的图片 HTTP/HTTPS URL"),
 				"prompt": stringProperty("可选的分析要求或关于图片的问题；不填则全面描述图片"),
 			}, "url"),
+			Namespace:   "vision",
+			ReadOnly:    true,
+			Idempotent:  true,
+			Risk:        agent.ToolRiskMedium,
 			SearchTerms: []string{"图片理解", "分析图片", "识别图片", "识图", "看图", "视觉模型", "图片URL", "image", "vision", "OCR", "截图"},
 			Handler:     p.handleAnalyzeImage,
 		},
 	}
 }
 
-func (p *Persona) handleAnalyzeImage(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+func (p *Persona) handleAnalyzeImage(runCtx *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
 		URL    string `json:"url"`
 		Prompt string `json:"prompt"`
@@ -50,7 +54,11 @@ func (p *Persona) handleAnalyzeImage(_ *agent.RunContext, raw json.RawMessage) (
 	}
 
 	response := new(model.Response)
-	if err := p.opts.VisionModel.Request(&model.Request{Question: prompt, ImageURL: imageURL}, response); err != nil {
+	request := &model.Request{Question: prompt, ImageURL: imageURL}
+	if runCtx != nil {
+		request.Context = runCtx.Context
+	}
+	if err := p.opts.VisionModel.Request(request, response); err != nil {
 		return nil, err
 	}
 	if response.ErrorMsg != "" {

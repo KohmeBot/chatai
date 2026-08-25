@@ -103,6 +103,12 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if c.conf.Agent.MaxSteps <= 0 {
 		c.conf.Agent.MaxSteps = 8
 	}
+	if c.conf.Agent.MaxToolCalls <= 0 {
+		c.conf.Agent.MaxToolCalls = 16
+	}
+	if c.conf.Agent.RunTimeoutSeconds <= 0 {
+		c.conf.Agent.RunTimeoutSeconds = 180
+	}
 	if c.conf.Agent.ProgressAfterSeconds <= 0 {
 		c.conf.Agent.ProgressAfterSeconds = 15
 	}
@@ -141,7 +147,8 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 		reflectionModel := c.routeModel(skillRoute, skill.ReflectionSystemPrompt(), true)
 		skillService = skill.NewService(db, reflectionModel, skill.Options{
-			Enabled: true, CandidateMinSteps: c.conf.Skills.CandidateMinSteps,
+			Enabled: true, AutoActivateGenerated: c.conf.Skills.AutoActivateGenerated,
+			CandidateMinSteps:  c.conf.Skills.CandidateMinSteps,
 			ActivationEvidence: c.conf.Skills.ActivationEvidence, GlobalMinGroups: c.conf.Skills.GlobalMinGroups,
 			DefaultTTLDays: c.conf.Skills.DefaultTTLDays,
 			MaxActive:      c.conf.Skills.MaxActive, MaxCandidates: c.conf.Skills.MaxCandidates,
@@ -185,6 +192,8 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
 			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
 			VisionModel: vision, MaxSteps: c.conf.Agent.MaxSteps,
+			MaxToolCalls:     c.conf.Agent.MaxToolCalls,
+			RunTimeout:       time.Duration(c.conf.Agent.RunTimeoutSeconds) * time.Second,
 			ContextLimit:     c.conf.Agent.ContextLimit,
 			WebBrowserEnable: c.conf.Agent.WebBrowserEnable, WebBrowserAddress: c.conf.Agent.WebBrowserAddress,
 			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,

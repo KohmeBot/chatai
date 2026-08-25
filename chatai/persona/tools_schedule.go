@@ -12,10 +12,12 @@ import (
 func (p *Persona) scheduleTools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Definition: agent.Function("schedule_task", "创建一次性定时任务，到期后由 Agent 再次决定如何执行", map[string]any{
+			Definition: agent.Function("schedule_task", "创建进程内一次性定时任务，到期后由 Agent 再次决定如何执行；仅在用户明确要求提醒或延迟执行时使用，机器人重启后任务不会恢复", map[string]any{
 				"delay_seconds": integerProperty("延迟秒数"),
 				"instruction":   stringProperty("到期时交给 Agent 的任务说明"),
 			}, "delay_seconds", "instruction"),
+			Namespace:   "schedule",
+			Risk:        agent.ToolRiskHigh,
 			SearchTerms: []string{"定时任务", "提醒", "稍后执行", "延迟"},
 			Handler:     p.handleScheduleTask,
 		},

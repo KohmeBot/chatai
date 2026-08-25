@@ -108,14 +108,15 @@ type Evidence struct {
 func (Evidence) TableName() string { return "chatai_generated_skill_evidence" }
 
 type Options struct {
-	Enabled            bool
-	CandidateMinSteps  int
-	ActivationEvidence int
-	GlobalMinGroups    int
-	DefaultTTLDays     int
-	MaxActive          int
-	MaxCandidates      int
-	ReflectionWorkers  int
+	Enabled               bool
+	AutoActivateGenerated bool
+	CandidateMinSteps     int
+	ActivationEvidence    int
+	GlobalMinGroups       int
+	DefaultTTLDays        int
+	MaxActive             int
+	MaxCandidates         int
+	ReflectionWorkers     int
 }
 
 func (o Options) normalized() Options {
@@ -544,15 +545,7 @@ func (s *Service) worthReflecting(trace agent.RunTrace) bool {
 }
 
 func technicalSuccess(trace agent.RunTrace) bool {
-	if !trace.ActionPerformed || trace.Error != "" {
-		return false
-	}
-	for _, call := range trace.ToolCalls {
-		if !call.OK {
-			return false
-		}
-	}
-	return true
+	return trace.ResponseDelivered && trace.Error == ""
 }
 
 func (s *Service) updateUsedSkills(exp Experience) error {
@@ -604,7 +597,7 @@ func (s *Service) updateUsedSkills(exp Experience) error {
 }
 
 func skillUseSucceeded(trace agent.RunTrace, requiredTools, actualTools []string) bool {
-	if !trace.ActionPerformed || trace.Error != "" {
+	if !trace.ResponseDelivered || trace.Error != "" {
 		return false
 	}
 	if len(requiredTools) == 0 {
@@ -657,7 +650,7 @@ func (s *Service) applyShadowEvidence(row Record, exp Experience, covered bool) 
 	if err != nil {
 		return err
 	}
-	if covered && newEvidence >= s.opts.ActivationEvidence && groupCount >= s.opts.GlobalMinGroups && float64(newSuccess)/float64(newEvidence) >= 0.8 {
+	if s.opts.AutoActivateGenerated && covered && newEvidence >= s.opts.ActivationEvidence && groupCount >= s.opts.GlobalMinGroups && float64(newSuccess)/float64(newEvidence) >= 0.8 {
 		var activeCount int64
 		if err := s.db.Model(&Record{}).Where("scope = ? AND source = ? AND status = ?", ScopeGlobal, SourceGenerated, StatusActive).Count(&activeCount).Error; err != nil {
 			return err

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -167,6 +168,26 @@ func TestRegistryRejectsReservedSearchToolName(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRegistryValidatesAndNormalizesToolContract(t *testing.T) {
+	registry := NewRegistry()
+	require.Error(t, registry.Register(Tool{
+		Definition: Function("invalid_risk", "invalid", map[string]any{}), Risk: ToolRisk("critical"),
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return nil, nil },
+	}))
+	require.Error(t, registry.Register(Tool{
+		Definition: Function("contradictory", "invalid", map[string]any{}), ReadOnly: true, GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return nil, nil },
+	}))
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("legacy_side_effect", "legacy", map[string]any{}), SearchTerms: []string{"legacy"},
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return nil, nil },
+	}))
+	result := registry.Search("legacy", 1)
+	require.Len(t, result, 1)
+	require.Equal(t, "uncategorized", result[0].Namespace)
+	require.Equal(t, "medium", result[0].Risk)
+}
+
 func TestRunnerRequiresSuccessfulGroupAction(t *testing.T) {
 	registry := NewRegistry()
 	require.NoError(t, registry.Register(Tool{
@@ -186,6 +207,125 @@ func TestRunnerRequiresSuccessfulGroupAction(t *testing.T) {
 	require.True(t, runCtx.ActionPerformed())
 	require.Len(t, llm.requests, 3, "runner should let the model decide whether to finish after the visible action")
 	require.Contains(t, llm.requests[2].History[len(llm.requests[2].History)-1].Content, "sent")
+}
+
+func TestRunnerStopsAfterDeliveredGroupActionWhenConfigured(t *testing.T) {
+	registry := NewRegistry()
+	sendCount := 0
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "send", map[string]any{}), SearchTerms: []string{"send"}, GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+			sendCount++
+			return "sent", nil
+		},
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
+		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
+		{Answer: "this must not become a duplicate reply"},
+	}}
+	runCtx := new(RunContext)
+	_, err := (&Runner{Model: llm, Tools: registry, StopAfterGroupAction: true}).Run(runCtx, "reply", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, sendCount)
+	require.Len(t, llm.requests, 2)
+	require.True(t, runCtx.ResponseDelivered())
+	require.Equal(t, "tool:send_message", runCtx.Trace().DeliveryKind)
+}
+
+func TestRunnerRejectsDuplicateGroupActionsInOneDecision(t *testing.T) {
+	registry := NewRegistry()
+	sendCount := 0
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "send", map[string]any{}), SearchTerms: []string{"send"}, GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+			sendCount++
+			return "sent", nil
+		},
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
+		{ToolCalls: []model.ToolCall{call("first", "send_message", `{}`), call("duplicate", "send_message", `{}`)}},
+	}}
+	runCtx := new(RunContext)
+	_, err := (&Runner{Model: llm, Tools: registry, StopAfterGroupAction: true}).Run(runCtx, "reply", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, sendCount)
+	trace := runCtx.Trace()
+	require.Len(t, trace.ToolCalls, 3)
+	require.True(t, trace.ToolCalls[1].OK)
+	require.False(t, trace.ToolCalls[2].OK)
+}
+
+func TestRunnerSkipsRemainingSideEffectsAfterDeliveredAction(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "send", map[string]any{}), SearchTerms: []string{"send update"}, GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return "sent", nil },
+	}))
+	updated := false
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("update_memory", "update memory", map[string]any{}), SearchTerms: []string{"send update"}, Risk: ToolRiskHigh,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+			updated = true
+			return "updated", nil
+		},
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send update"}`)}},
+		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`), call("update", "update_memory", `{}`)}},
+	}}
+	_, err := (&Runner{Model: llm, Tools: registry, StopAfterGroupAction: true}).Run(new(RunContext), "reply", "")
+	require.NoError(t, err)
+	require.False(t, updated)
+}
+
+func TestRunnerEnforcesToolCallBudget(t *testing.T) {
+	registry := NewRegistry()
+	called := false
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("read_context", "read context", map[string]any{}), SearchTerms: []string{"context"},
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+			called = true
+			return "history", nil
+		},
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"context"}`)}},
+		{ToolCalls: []model.ToolCall{call("read", "read_context", `{}`)}},
+		{Answer: "budget exhausted, answer with what is known"},
+	}}
+	answer, err := (&Runner{Model: llm, Tools: registry, MaxToolCalls: 1}).Run(new(RunContext), "reply", "")
+	require.NoError(t, err)
+	require.False(t, called)
+	require.Contains(t, answer, "budget exhausted")
+	require.Contains(t, llm.requests[2].History[len(llm.requests[2].History)-1].Content, ErrToolBudgetExceeded.Error())
+}
+
+func TestRunnerHonorsCancelledContextBeforeModelRequest(t *testing.T) {
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	llm := &scriptedModel{steps: []model.Response{{Answer: "must not run"}}}
+	_, err := (&Runner{Model: llm, Tools: NewRegistry()}).Run(&RunContext{Context: requestContext}, "reply", "")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, llm.requests)
+}
+
+func TestRegistrySearchUsesChineseSemanticMatchingAndReturnsContracts(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("get_member_profile", "查询成员资料和群名片", map[string]any{}),
+		Namespace:  "members", ReadOnly: true, Idempotent: true, Risk: ToolRiskLow,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return nil, nil },
+	}))
+	results := registry.Search("想看看这个成员的群名片信息", 5)
+	require.NotEmpty(t, results)
+	require.Equal(t, "get_member_profile", results[0].Name)
+	require.Equal(t, "members", results[0].Namespace)
+	require.True(t, results[0].ReadOnly)
+	require.True(t, results[0].Idempotent)
+	require.False(t, results[0].SideEffect)
+	require.Equal(t, "low", results[0].Risk)
 }
 
 func TestRunnerDoesNotFinishWhileModelKeepsCallingToolsAfterGroupAction(t *testing.T) {

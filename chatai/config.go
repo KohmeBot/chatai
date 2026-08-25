@@ -28,15 +28,16 @@ type Config struct {
 }
 
 type SkillConfig struct {
-	Enable             bool              `yaml:"enable" jsonschema:"description=是否启用全局 Skill 学习与召回"`
-	CandidateMinSteps  int               `yaml:"candidate_min_steps" jsonschema:"description=至少经过多少轮决策才值得生成候选 Skill,minimum=2,maximum=20"`
-	ActivationEvidence int               `yaml:"activation_evidence" jsonschema:"description=候选 Skill 至少经过多少次成功证据后启用,minimum=2,maximum=10"`
-	GlobalMinGroups    int               `yaml:"global_min_groups" jsonschema:"description=自动生成的全局 Skill 至少需要多少个不同群的证据,minimum=1,maximum=10"`
-	DefaultTTLDays     int               `yaml:"default_ttl_days" jsonschema:"description=Skill 默认有效期天数,minimum=1,maximum=90"`
-	MaxActive          int               `yaml:"max_active" jsonschema:"description=全局最多启用多少个自动生成 Skill,minimum=1,maximum=100"`
-	MaxCandidates      int               `yaml:"max_candidates" jsonschema:"description=全局最多保留多少个自动生成候选 Skill,minimum=1,maximum=200"`
-	ReflectionWorkers  int               `yaml:"reflection_workers" jsonschema:"description=后台 Skill 反思并发数,minimum=1,maximum=4"`
-	Global             []ConfiguredSkill `yaml:"global" jsonschema:"description=配置声明的全局 Skill"`
+	Enable                bool              `yaml:"enable" jsonschema:"description=是否启用全局 Skill 学习与召回"`
+	AutoActivateGenerated bool              `yaml:"auto_activate_generated" jsonschema:"description=是否允许自动学习的候选 Skill 在证据达标后自动启用；默认关闭"`
+	CandidateMinSteps     int               `yaml:"candidate_min_steps" jsonschema:"description=至少经过多少轮决策才值得生成候选 Skill,minimum=2,maximum=20"`
+	ActivationEvidence    int               `yaml:"activation_evidence" jsonschema:"description=候选 Skill 至少经过多少次成功证据后启用,minimum=2,maximum=10"`
+	GlobalMinGroups       int               `yaml:"global_min_groups" jsonschema:"description=自动生成的全局 Skill 至少需要多少个不同群的证据,minimum=1,maximum=10"`
+	DefaultTTLDays        int               `yaml:"default_ttl_days" jsonschema:"description=Skill 默认有效期天数,minimum=1,maximum=90"`
+	MaxActive             int               `yaml:"max_active" jsonschema:"description=全局最多启用多少个自动生成 Skill,minimum=1,maximum=100"`
+	MaxCandidates         int               `yaml:"max_candidates" jsonschema:"description=全局最多保留多少个自动生成候选 Skill,minimum=1,maximum=200"`
+	ReflectionWorkers     int               `yaml:"reflection_workers" jsonschema:"description=后台 Skill 反思并发数,minimum=1,maximum=4"`
+	Global                []ConfiguredSkill `yaml:"global" jsonschema:"description=配置声明的全局 Skill"`
 }
 
 type ConfiguredSkill struct {
@@ -53,7 +54,9 @@ type ConfiguredSkill struct {
 }
 
 type AgentConfig struct {
-	MaxSteps               int      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大工具调用轮数,minimum=1,maximum=20"`
+	MaxSteps               int      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大模型决策轮数,minimum=1,maximum=20"`
+	MaxToolCalls           int      `yaml:"max_tool_calls" jsonschema:"description=单次 Agent 最大工具调用总数,minimum=1,maximum=100"`
+	RunTimeoutSeconds      int      `yaml:"run_timeout_seconds" jsonschema:"description=单次 Agent 执行超时秒数,minimum=30,maximum=900"`
 	ContextLimit           int      `yaml:"context_limit" jsonschema:"description=上下文工具默认返回的最大消息数,minimum=1,maximum=200"`
 	WebBrowserEnable       bool     `yaml:"web_browser_enable" jsonschema:"description=网页搜索和读取是否使用 Chrome 浏览器"`
 	WebBrowserAddress      string   `yaml:"web_browser_address" jsonschema:"description=Chrome 远程调试 HTTP 或 WebSocket 地址；留空时启动本机 Chrome"`

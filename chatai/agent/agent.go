@@ -22,14 +22,17 @@ type RunContext struct {
 	UserID  int64
 	Values  map[string]any
 
-	actionMu        sync.RWMutex
-	actionPerformed bool
-	waitingMu       sync.RWMutex
-	waitingForUser  bool
-	decisionMu      sync.RWMutex
-	latestDecision  string
-	traceMu         sync.RWMutex
-	trace           RunTrace
+	actionMu          sync.RWMutex
+	actionPerformed   bool
+	deliveryMu        sync.RWMutex
+	responseDelivered bool
+	deliveryKind      string
+	waitingMu         sync.RWMutex
+	waitingForUser    bool
+	decisionMu        sync.RWMutex
+	latestDecision    string
+	traceMu           sync.RWMutex
+	trace             RunTrace
 }
 
 // ToolTrace 是供 Skill 学习使用的脱敏工具执行记录。它不保存原始参数和结果。
@@ -42,20 +45,22 @@ type ToolTrace struct {
 
 // RunTrace 汇总一次 Agent 运行。Prompt 只在内存中交给反思模型，不直接持久化。
 type RunTrace struct {
-	RunID           uint64
-	GroupID         int64
-	UserID          int64
-	Prompt          string
-	StartedAt       time.Time
-	Duration        time.Duration
-	DecisionSteps   int
-	InputTokens     int64
-	OutputTokens    int64
-	ToolCalls       []ToolTrace
-	UsedSkillIDs    []uint
-	ActionPerformed bool
-	FinalAnswer     string
-	Error           string
+	RunID             uint64
+	GroupID           int64
+	UserID            int64
+	Prompt            string
+	StartedAt         time.Time
+	Duration          time.Duration
+	DecisionSteps     int
+	InputTokens       int64
+	OutputTokens      int64
+	ToolCalls         []ToolTrace
+	UsedSkillIDs      []uint
+	ActionPerformed   bool
+	ResponseDelivered bool
+	DeliveryKind      string
+	FinalAnswer       string
+	Error             string
 }
 
 // MarkActionPerformed records that this run has completed a visible group action.
@@ -70,6 +75,28 @@ func (r *RunContext) ActionPerformed() bool {
 	r.actionMu.RLock()
 	defer r.actionMu.RUnlock()
 	return r.actionPerformed
+}
+
+// MarkResponseDelivered records that the user-visible response was successfully
+// delivered either by the host or by a group-action tool.
+func (r *RunContext) MarkResponseDelivered(kind string) {
+	r.deliveryMu.Lock()
+	r.responseDelivered = true
+	r.deliveryKind = strings.TrimSpace(kind)
+	r.deliveryMu.Unlock()
+}
+
+// ResponseDelivered reports whether this run produced a visible response.
+func (r *RunContext) ResponseDelivered() bool {
+	r.deliveryMu.RLock()
+	defer r.deliveryMu.RUnlock()
+	return r.responseDelivered
+}
+
+func (r *RunContext) delivery() (bool, string) {
+	r.deliveryMu.RLock()
+	defer r.deliveryMu.RUnlock()
+	return r.responseDelivered, r.deliveryKind
 }
 
 // SetWaitingForUser records whether a tool is currently waiting for a group
@@ -145,10 +172,20 @@ func (r *RunContext) finishTrace(answer string, err error) {
 	r.traceMu.Lock()
 	r.trace.Duration = time.Since(r.trace.StartedAt)
 	r.trace.ActionPerformed = r.ActionPerformed()
+	r.trace.ResponseDelivered, r.trace.DeliveryKind = r.delivery()
 	r.trace.FinalAnswer = answer
 	if err != nil {
 		r.trace.Error = err.Error()
 	}
+	r.traceMu.Unlock()
+}
+
+// RefreshTraceOutcome synchronizes delivery state that may be completed by the
+// host after the model loop has already returned.
+func (r *RunContext) RefreshTraceOutcome() {
+	r.traceMu.Lock()
+	r.trace.ActionPerformed = r.ActionPerformed()
+	r.trace.ResponseDelivered, r.trace.DeliveryKind = r.delivery()
 	r.traceMu.Unlock()
 }
 
@@ -164,9 +201,25 @@ func (r *RunContext) Trace() RunTrace {
 
 type Handler func(*RunContext, json.RawMessage) (any, error)
 
+type ToolRisk string
+
+const (
+	ToolRiskLow    ToolRisk = "low"
+	ToolRiskMedium ToolRisk = "medium"
+	ToolRiskHigh   ToolRisk = "high"
+)
+
 type Tool struct {
 	Definition model.Tool
 	Handler    Handler
+	// Namespace groups tools by capability so search results expose a legible
+	// high-level surface without renaming the stable function identifiers.
+	Namespace string
+	// ReadOnly and Idempotent document the execution contract used by the
+	// harness, logs, tests and future policy gates.
+	ReadOnly   bool
+	Idempotent bool
+	Risk       ToolRisk
 	// SearchTerms 用于分层工具搜索，模型初始不会直接看到该工具。
 	SearchTerms []string
 	// GroupAction 表示工具成功后已经完成发送消息、@ 或戳一戳等群聊动作。
@@ -190,6 +243,24 @@ func (r *Registry) Register(tool Tool) error {
 	}
 	if name == "search_tools" {
 		return errors.New("agent tool name search_tools is reserved")
+	}
+	if tool.Namespace == "" {
+		tool.Namespace = "uncategorized"
+	}
+	if tool.Risk == "" {
+		if tool.ReadOnly {
+			tool.Risk = ToolRiskLow
+		} else {
+			tool.Risk = ToolRiskMedium
+		}
+	}
+	switch tool.Risk {
+	case ToolRiskLow, ToolRiskMedium, ToolRiskHigh:
+	default:
+		return fmt.Errorf("agent tool %q has invalid risk %q", name, tool.Risk)
+	}
+	if tool.GroupAction && tool.ReadOnly {
+		return fmt.Errorf("agent tool %q cannot be both read-only and a group action", name)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -238,6 +309,11 @@ func (r *Registry) GroupActionDefinitions() []model.Tool {
 type SearchResult struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Namespace   string `json:"namespace,omitempty"`
+	ReadOnly    bool   `json:"read_only"`
+	Idempotent  bool   `json:"idempotent"`
+	SideEffect  bool   `json:"side_effect"`
+	Risk        string `json:"risk"`
 	Kind        string `json:"kind,omitempty"`
 	SkillID     uint   `json:"skill_id,omitempty"`
 	Markdown    string `json:"markdown,omitempty"`
@@ -294,8 +370,19 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 				score += 3
 			}
 		}
+		if semantic := toolSemanticScore(query, haystack); semantic > score {
+			score = semantic
+		}
 		if score > 0 {
-			matches = append(matches, scored{SearchResult{Name: name, Description: description}, score})
+			risk := tool.Risk
+			if risk == "" {
+				risk = ToolRiskLow
+			}
+			matches = append(matches, scored{SearchResult{
+				Name: name, Description: description, Namespace: tool.Namespace,
+				ReadOnly: tool.ReadOnly, Idempotent: tool.Idempotent,
+				SideEffect: !tool.ReadOnly, Risk: string(risk),
+			}, score})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
@@ -312,6 +399,60 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 		result[i] = matches[i].result
 	}
 	return result
+}
+
+// toolSemanticScore supplements exact substring matching for Chinese and other
+// languages where strings.Fields does not provide useful word segmentation.
+// It deliberately remains local and deterministic so tool discovery is cheap.
+func toolSemanticScore(query, haystack string) int {
+	queryRunes := normalizedRunes(query)
+	haystackRunes := normalizedRunes(haystack)
+	if len(queryRunes) < 2 || len(haystackRunes) < 2 {
+		return 0
+	}
+	queryGrams := runeBigrams(queryRunes)
+	haystackGrams := runeBigrams(haystackRunes)
+	intersection := 0
+	for gram := range queryGrams {
+		if haystackGrams[gram] {
+			intersection++
+		}
+	}
+	if intersection == 0 {
+		return 0
+	}
+	coverage := float64(intersection) / float64(len(queryGrams))
+	dice := 2 * float64(intersection) / float64(len(queryGrams)+len(haystackGrams))
+	score := int(12 * maxFloat(coverage, dice))
+	if score == 0 && intersection >= 2 {
+		return 1
+	}
+	return score
+}
+
+func normalizedRunes(value string) []rune {
+	result := make([]rune, 0, len(value))
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r > 127 {
+			result = append(result, r)
+		}
+	}
+	return result
+}
+
+func runeBigrams(runes []rune) map[string]bool {
+	result := make(map[string]bool)
+	for i := 0; i+1 < len(runes); i++ {
+		result[string(runes[i:i+2])] = true
+	}
+	return result
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func searchToolDefinition() model.Tool {
@@ -336,10 +477,15 @@ type Runner struct {
 	Tools         *Registry
 	Skills        SkillSearcher
 	MaxSteps      int
+	MaxToolCalls  int
 	RequireAction bool
+	// StopAfterGroupAction prevents duplicate visible replies. A group-action
+	// tool already delivered the response, so another model loop is unnecessary.
+	StopAfterGroupAction bool
 }
 
 var ErrGroupActionRequired = errors.New("agent finished without a group action")
+var ErrToolBudgetExceeded = errors.New("agent exceeded the tool-call budget")
 
 var runSequence atomic.Uint64
 
@@ -352,6 +498,11 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 	if steps <= 0 {
 		steps = 8
 	}
+	maxToolCalls := r.MaxToolCalls
+	if maxToolCalls <= 0 {
+		maxToolCalls = steps * 3
+	}
+	toolCallCount := 0
 	toolsDefine := make([]model.Tool, 0, len(tools))
 	for _, tool := range tools {
 		toolsDefine = append(toolsDefine, tool.Definition)
@@ -361,8 +512,14 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
 	question := prompt
-	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, r.RequireAction, imageURL != "", logValue(prompt))
+	var postDeliveryErr error
+	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d max_tool_calls=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, maxToolCalls, r.RequireAction, imageURL != "", logValue(prompt))
 	for i := 0; i < steps; i++ {
+		if err := runContextError(ctx); err != nil {
+			ctx.finishTrace("", err)
+			logrus.Warnf("[Agent][run=%d][取消] step=%d/%d error=%v", runID, i+1, steps, err)
+			return "", err
+		}
 		finalActionStep := r.RequireAction && !ctx.ActionPerformed() && i == steps-1
 		if finalActionStep {
 			question = finalActionPrompt(question)
@@ -379,6 +536,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v question=%s", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions), logValue(question))
 		response := new(model.Response)
 		err := r.Model.Request(&model.Request{
+			Context:  ctx.Context,
 			Question: question,
 			History:  history,
 			Tools:    definitions,
@@ -439,8 +597,15 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 			var result any
 			var callErr error
 			callStarted := time.Now()
-			groupAction := false
-			if boundaryCallIndex >= 0 && callIndex != boundaryCallIndex {
+			groupAction := r.Tools.isGroupAction(call.Function.Name)
+			toolCallCount++
+			if err := runContextError(ctx); err != nil {
+				callErr = err
+			} else if r.StopAfterGroupAction && ctx.ActionPerformed() {
+				callErr = errors.New("tool call skipped because a visible group action already completed this run")
+			} else if toolCallCount > maxToolCalls {
+				callErr = ErrToolBudgetExceeded
+			} else if boundaryCallIndex >= 0 && callIndex != boundaryCallIndex {
 				callErr = fmt.Errorf("tool call skipped because %q requires a new model decision before other tools run", boundaryToolName)
 			} else if finalActionStep && call.Function.Name == "search_tools" {
 				callErr = errors.New("the final step only allows a group action")
@@ -460,7 +625,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 						const skillLimit = 1
 						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query+"\n"+prompt, skillLimit)
 						if skillErr != nil {
-							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%q error=%v", runID, input.Query, skillErr)
+							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%s error=%v", runID, logValue(input.Query), skillErr)
 						} else {
 							for _, item := range skills {
 								validTools := make([]string, 0, len(item.RequiredTools))
@@ -477,7 +642,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 									continue
 								}
 								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
-									Markdown: item.Markdown})
+									Namespace: "skill", ReadOnly: true, Idempotent: true, Risk: string(ToolRiskLow), Markdown: item.Markdown})
 								ctx.markSkillUsed(item.ID)
 								for _, toolName := range validTools {
 									activeTools[toolName] = true
@@ -491,25 +656,38 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 							activeTools[item.Name] = true
 						}
 					}
-					logrus.Infof("[Agent][run=%d][工具搜索] step=%d/%d query=%q hits=%v active_tools=%v", runID, i+1, steps, input.Query, searchResultNames(found), sortedActiveToolNames(activeTools))
+					logrus.Infof("[Agent][run=%d][工具搜索] step=%d/%d query=%s hits=%v active_tools=%v", runID, i+1, steps, logValue(input.Query), searchResultNames(found), sortedActiveToolNames(activeTools))
 				}
 			} else if !activeTools[call.Function.Name] {
 				callErr = fmt.Errorf("tool %q is not active; call search_tools first", call.Function.Name)
 			} else {
-				result, callErr = r.Tools.execute(ctx, call)
-				groupAction = r.Tools.isGroupAction(call.Function.Name)
+				if groupAction && ctx.ActionPerformed() {
+					callErr = errors.New("a visible group action was already completed; do not send a duplicate response")
+				} else {
+					result, callErr = r.Tools.execute(ctx, call)
+				}
 				if callErr == nil && groupAction {
 					ctx.MarkActionPerformed()
+					ctx.MarkResponseDelivered("tool:" + call.Function.Name)
 				}
 			}
 			ctx.recordToolCall(call.Function.Name, callErr == nil, groupAction, time.Since(callStarted))
-			payload := map[string]any{"ok": callErr == nil, "result": result}
+			payload := map[string]any{"ok": callErr == nil, "status": "ok", "tool": call.Function.Name, "result": result}
 			if callErr != nil {
-				payload["error"] = callErr.Error()
+				payload["status"] = "error"
+				payload["error"] = map[string]any{"message": callErr.Error(), "retryable": false}
+				if ctx.ActionPerformed() {
+					postDeliveryErr = callErr
+				}
 			}
 			encoded, _ := json.Marshal(payload)
 			logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=%t action_done=%t payload=%s", runID, i+1, steps, call.ID, call.Function.Name, callErr == nil, ctx.ActionPerformed(), logValue(string(encoded)))
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)})
+		}
+		if r.StopAfterGroupAction && ctx.ActionPerformed() {
+			logrus.Infof("[Agent][run=%d][完成] step=%d/%d reason=group_action_delivered", runID, i+1, steps)
+			ctx.finishTrace(response.Answer, postDeliveryErr)
+			return response.Answer, nil
 		}
 		if finalActionStep {
 			if !ctx.ActionPerformed() {
@@ -524,6 +702,18 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 	err := fmt.Errorf("agent exceeded maximum of %d steps", steps)
 	ctx.finishTrace("", err)
 	return "", err
+}
+
+func runContextError(ctx *RunContext) error {
+	if ctx == nil || ctx.Context == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 func finalActionPrompt(question string) string {
@@ -625,12 +815,7 @@ func requestUserMessage(question, imageURL string) (model.Message, bool) {
 }
 
 func logValue(value string) string {
-	const maxRunes = 6000
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return value
-	}
-	return string(runes[:maxRunes]) + "…[日志已截断]"
+	return fmt.Sprintf("<redacted chars=%d>", len([]rune(value)))
 }
 
 func Function(name, description string, properties map[string]any, required ...string) model.Tool {
