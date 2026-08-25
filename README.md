@@ -12,7 +12,7 @@
 - 回复含图片的历史消息时，也会把被引用图片交给图片模型解析
 - Agent 在对话中按需维护群友印象和群聊印象
 - 可开关的群聊复读，并可设置连续多少条相同消息后触发
-- 日志显示 Agent 调用轮次、工具名称与执行状态；提示词、思考内容、工具参数和结果正文默认脱敏
+- 日志显示 Agent 调用轮次、模型决策输出、供应商返回的 `reasoning_content`、工具名称与执行状态；提示词、工具参数和结果正文不展开
 - 支持通义千问和 DeepSeek
 
 机器人不会根据群聊活跃度主动插话。普通消息只用于积累短期上下文，明确触发机器人后才会调用 Agent。复读功能不受这一限制，但必须由配置单独开启。
@@ -154,9 +154,9 @@ Agent 可以使用以下能力：
 - 读取公开 HTTP/HTTPS 网页
 - 使用视觉模型理解 HTTP/HTTPS 图片 URL（仅在配置 `routes.vision` 后提供）
 
-触发事件会以结构化 `EventEnvelope` 交给模型，身份、目标用户、引用消息与正文彼此分离；消息、网页、图片文字、工具结果和 Skill Markdown 都按不可信数据处理。Agent 起初只看到 `search_tools`，搜索命中的少量能力才会在后续轮次暴露。搜索结果同时给出命名空间、只读性、幂等性、副作用和风险等级，中文任务会使用本地字符语义匹配补充精确关键词匹配。
+触发事件会以结构化 `EventEnvelope` 交给模型，身份、目标用户、引用消息与正文彼此分离；消息、网页、图片文字、工具结果和 Skill Markdown 都按不可信数据处理。Agent 起初只看到 `search_tools`，搜索命中的少量能力才会在后续轮次暴露。搜索结果同时给出命名空间、只读性、幂等性、副作用、`group_action` 标签和风险等级，中文任务会使用本地字符语义匹配补充精确关键词匹配。
 
-普通最终文本由宿主直接发送，不再强迫模型先搜索并调用 `send_message`。只有引用回复、拆成多条、发送图片、@ 或戳一戳等特殊交互才使用群聊动作工具；任一可见动作成功后，本轮立即结束，同批剩余调用会被跳过，防止重复发送或事后继续执行副作用。模型轮数、工具调用总数和整轮超时分别受独立预算约束；模型接口失败或没有产生任何可发送内容时才发送兜底消息。
+每次 Agent 运行都必须成功调用至少一个 `group_action=true` 的工具；普通文字也由模型调用 `send_message` 发送，宿主不会直发模型的普通 assistant 文本。任一可见动作成功后，本轮立即结束，同批剩余调用会被跳过，防止重复发送或事后继续执行副作用。模型轮数、工具调用总数和整轮超时分别受独立预算约束；模型未完成群聊动作或接口失败时，本轮返回错误而不绕过工具协议直发文本。
 
 内置 Agent Prompt 按“角色与目标、群聊个性、上下文与信任边界、决策与证据、工具规则、完成与停止”组织。它保留接梗、吐槽、卖萌、发图和戳一戳等群聊娱乐空间，但要求严肃场景收住玩笑，并把事实、权限边界和用户目标放在表演人格之前。
 
@@ -232,7 +232,7 @@ skills:
 
 `skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。当前不支持配置群级 Skill、外部 Skill 文件或 Skill 脚本。
 
-Active Skill 被 `search_tools` 命中时会返回完整 Markdown。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和可选的自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。Skill 的技术成功以“用户可见回复确实送达且整轮无终止错误”为准，不再要求一定调用发送工具；某个可选只读工具失败后若仍正确完成回复，也不会误判整轮失败。
+Active Skill 被 `search_tools` 命中时会返回完整 Markdown。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和可选的自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。Skill 的技术成功要求群聊动作已执行、用户可见回复确实送达且整轮无终止错误；某个可选只读工具失败后若仍通过群聊动作正确完成回复，不会误判整轮失败。
 
 旧版 `instructions`、`required_tools`、`success_checks` 配置仍可读取，并会在启动时转换为 Markdown；新配置应只使用 `markdown`。
 
@@ -272,15 +272,15 @@ impression:
 ```text
 [Agent][run=7][开始] group=123 user=456 max_steps=8 max_tool_calls=16 ... prompt=<redacted chars=320>
 [Agent][run=7][请求模型] step=1/8 history=0 active_tools=[] exposed_tools=[search_tools] question=<redacted chars=320>
-[Agent][run=7][模型决策] step=1/8 tool_calls=1 answer=<redacted chars=0>
-[Agent][run=7][模型推理] step=1/8 reasoning=<redacted chars=42>
+[Agent][run=7][模型决策] step=1/8 tool_calls=[search_tools] answer=""
+[Agent][run=7][模型推理] step=1/8 reasoning="需要先搜索近期活动信息"
 [Agent][run=7][工具搜索] step=1/8 query=<redacted chars=4> hits=[search_web] ...
 [Agent][run=7][调用工具] step=2/8 call_id=... tool=search_web args=<redacted chars=24>
-[Agent][run=7][工具结果] step=2/8 tool=search_web ok=true action_done=false payload=<redacted chars=860>
-[Agent][run=7][完成] step=4/8 action_done=false final_answer=<redacted chars=38>
+[Agent][run=7][工具结果] step=2/8 tool=search_web ok=true action_done=false
+[Agent][run=7][完成] step=4/8 reason=group_action_delivered
 ```
 
-每次执行都有独立的 `run` 编号，可用它串起并发场景下的完整决策链。日志显示当前历史条数、已加载和暴露的工具、工具搜索命中、调用状态以及群聊动作是否完成；提示词、模型回复、`reasoning_content`、工具查询、参数和结果只记录字符数，不记录正文。供应商请求与响应日志也只保留模型名、消息/工具数量、HTTP 状态和字节数。
+每次执行都有独立的 `run` 编号，可用它串起并发场景下的完整决策链。日志显示当前历史条数、已加载和暴露的工具、工具搜索命中、调用状态以及群聊动作是否完成；模型的 `answer` 和接口明确返回的 `reasoning_content` 会完整打印，便于排查决策过程。提示词、工具查询和参数只记录字符数，工具结果正文不写日志；供应商请求与响应日志也只保留模型名、消息/工具数量、HTTP 状态和字节数。模型日志可能包含用户信息，请限制日志访问权限与保存周期。
 
 内置工具集中定义在 `chatai/persona/builtin_tools.go`。注册函数只维护工具元数据和处理器映射，每个工具使用独立的 `handle...` 函数，便于单独维护。
 

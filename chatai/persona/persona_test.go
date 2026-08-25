@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/stretchr/testify/require"
 )
@@ -53,9 +54,18 @@ func TestAgentRulesPreserveGroupChatEntertainment(t *testing.T) {
 	require.Contains(t, agentRules, "严肃、敏感")
 }
 
-func TestAgentRulesSeparateHostReplyFromSpecialActions(t *testing.T) {
-	require.Contains(t, agentRules, "普通最终文本会由宿主自动发送")
+func TestAgentRulesRequireFinalReplyThroughGroupAction(t *testing.T) {
+	require.Contains(t, agentRules, "每次 Agent 运行都必须成功调用至少一个 group_action=true")
+	require.Contains(t, agentRules, "宿主不会发送普通 assistant 文本")
+	require.Contains(t, agentRules, "不要把普通 assistant 文本当作最终输出")
 	require.Contains(t, agentRules, "成功执行一次后不要再次发送同一结果")
+}
+
+func TestPersonaRunnerRequiresAndStopsAfterGroupAction(t *testing.T) {
+	p := &Persona{tools: agent.NewRegistry()}
+	runner := p.agentRunner(&routeTestModel{name: "agent"})
+	require.True(t, runner.RequireAction)
+	require.True(t, runner.StopAfterGroupAction)
 }
 
 func TestScheduledEventPromptDoesNotPretendToBeAChatMessage(t *testing.T) {

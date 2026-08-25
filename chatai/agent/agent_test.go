@@ -225,7 +225,7 @@ func TestRunnerStopsAfterDeliveredGroupActionWhenConfigured(t *testing.T) {
 		{Answer: "this must not become a duplicate reply"},
 	}}
 	runCtx := new(RunContext)
-	_, err := (&Runner{Model: llm, Tools: registry, StopAfterGroupAction: true}).Run(runCtx, "reply", "")
+	_, err := (&Runner{Model: llm, Tools: registry, RequireAction: true, StopAfterGroupAction: true}).Run(runCtx, "reply", "")
 	require.NoError(t, err)
 	require.Equal(t, 1, sendCount)
 	require.Len(t, llm.requests, 2)
@@ -325,7 +325,20 @@ func TestRegistrySearchUsesChineseSemanticMatchingAndReturnsContracts(t *testing
 	require.True(t, results[0].ReadOnly)
 	require.True(t, results[0].Idempotent)
 	require.False(t, results[0].SideEffect)
+	require.False(t, results[0].GroupAction)
 	require.Equal(t, "low", results[0].Risk)
+}
+
+func TestRegistrySearchMarksGroupActionTools(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("send_message", "发送最终回复", map[string]any{}),
+		Namespace:  "chat", GroupAction: true,
+		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return "sent", nil },
+	}))
+	results := registry.Search("发送最终回复", 1)
+	require.Len(t, results, 1)
+	require.True(t, results[0].GroupAction)
 }
 
 func TestRunnerDoesNotFinishWhileModelKeepsCallingToolsAfterGroupAction(t *testing.T) {

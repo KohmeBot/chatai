@@ -545,7 +545,7 @@ func (s *Service) worthReflecting(trace agent.RunTrace) bool {
 }
 
 func technicalSuccess(trace agent.RunTrace) bool {
-	return trace.ResponseDelivered && trace.Error == ""
+	return trace.ActionPerformed && trace.ResponseDelivered && trace.Error == ""
 }
 
 func (s *Service) updateUsedSkills(exp Experience) error {
@@ -597,7 +597,7 @@ func (s *Service) updateUsedSkills(exp Experience) error {
 }
 
 func skillUseSucceeded(trace agent.RunTrace, requiredTools, actualTools []string) bool {
-	if !trace.ResponseDelivered || trace.Error != "" {
+	if !trace.ActionPerformed || !trace.ResponseDelivered || trace.Error != "" {
 		return false
 	}
 	if len(requiredTools) == 0 {

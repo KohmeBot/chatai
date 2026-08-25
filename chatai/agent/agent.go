@@ -313,6 +313,7 @@ type SearchResult struct {
 	ReadOnly    bool   `json:"read_only"`
 	Idempotent  bool   `json:"idempotent"`
 	SideEffect  bool   `json:"side_effect"`
+	GroupAction bool   `json:"group_action"`
 	Risk        string `json:"risk"`
 	Kind        string `json:"kind,omitempty"`
 	SkillID     uint   `json:"skill_id,omitempty"`
@@ -381,7 +382,7 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 			matches = append(matches, scored{SearchResult{
 				Name: name, Description: description, Namespace: tool.Namespace,
 				ReadOnly: tool.ReadOnly, Idempotent: tool.Idempotent,
-				SideEffect: !tool.ReadOnly, Risk: string(risk),
+				SideEffect: !tool.ReadOnly, GroupAction: tool.GroupAction, Risk: string(risk),
 			}, score})
 		}
 	}
@@ -554,9 +555,9 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 			return "", responseErr
 		}
 		ctx.recordModelStep(response)
-		logrus.Infof("[Agent][run=%d][模型决策] step=%d/%d tool_calls=%d answer=%s", runID, i+1, steps, len(response.ToolCalls), logValue(response.Answer))
+		logrus.Infof("[Agent][run=%d][模型决策] step=%d/%d tool_calls=%v answer=%q", runID, i+1, steps, toolCallNames(response.ToolCalls), response.Answer)
 		if response.Reasoning != "" {
-			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=%s", runID, i+1, steps, logValue(response.Reasoning))
+			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=%q", runID, i+1, steps, response.Reasoning)
 		} else {
 			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=<模型未返回 reasoning_content>", runID, i+1, steps)
 		}
@@ -576,7 +577,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 					return response.Answer, ErrGroupActionRequired
 				}
 				history = append(history, model.Message{Role: "assistant", Content: response.Answer})
-				question = "你还没有完成群聊动作。必须先调用 search_tools 加载并成功调用 send_message、send_messages、at_user 或 poke_user 中至少一个；不能静默结束。"
+				question = "你还没有完成群聊动作。不得把普通 assistant 文本作为最终回复。若尚未加载发送能力，先调用 search_tools 搜索“发送最终回复”；随后必须成功调用一个 group_action=true 的工具，把只面向群友的最终回复放进工具参数，不能静默结束。"
 				logrus.Warnf("[Agent][run=%d][继续决策] step=%d/%d 原因=模型未调用群聊动作 corrective_prompt=%s", runID, i+1, steps, question)
 				continue
 			}
@@ -681,7 +682,11 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 				}
 			}
 			encoded, _ := json.Marshal(payload)
-			logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=%t action_done=%t payload=%s", runID, i+1, steps, call.ID, call.Function.Name, callErr == nil, ctx.ActionPerformed(), logValue(string(encoded)))
+			if callErr != nil {
+				logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=false action_done=%t error=%q", runID, i+1, steps, call.ID, call.Function.Name, ctx.ActionPerformed(), callErr.Error())
+			} else {
+				logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=true action_done=%t", runID, i+1, steps, call.ID, call.Function.Name, ctx.ActionPerformed())
+			}
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)})
 		}
 		if r.StopAfterGroupAction && ctx.ActionPerformed() {
@@ -717,7 +722,7 @@ func runContextError(ctx *RunContext) error {
 }
 
 func finalActionPrompt(question string) string {
-	const instruction = "决策步数只剩最后一步。禁止继续搜索、浏览、读取上下文或调用其他非发送工具；必须基于已经获得的信息立即形成最终判断，并调用当前提供的 send_message、send_messages、at_user 或 poke_user 完成回复。信息不足时应明确说明不确定性，但仍然必须回复。"
+	const instruction = "决策步数只剩最后一步。禁止继续搜索、浏览、读取上下文或调用其他非发送工具；必须基于已经获得的信息立即形成最终判断，并成功调用当前提供的一个群聊动作工具完成回复。把只面向群友的最终回复放进工具参数，不要在其中夹带分析过程、决策说明或角色扮演提示。信息不足时应明确说明不确定性，但仍然必须回复。"
 	if strings.TrimSpace(question) == "" {
 		return instruction
 	}
@@ -777,6 +782,14 @@ func definitionNames(definitions []model.Tool) []string {
 	names := make([]string, len(definitions))
 	for i := range definitions {
 		names[i] = definitions[i].Function.Name
+	}
+	return names
+}
+
+func toolCallNames(calls []model.ToolCall) []string {
+	names := make([]string, len(calls))
+	for i := range calls {
+		names[i] = calls[i].Function.Name
 	}
 	return names
 }

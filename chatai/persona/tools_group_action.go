@@ -25,7 +25,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			Handler:     p.handleSendImage,
 		},
 		{
-			Definition: agent.Function("send_message", "立即向当前群发送一句话，可选择引用消息；普通最终文本会由宿主自动发送，仅在必须引用或需要立即执行特殊群聊动作时调用。成功后返回 message_id", map[string]any{
+			Definition: agent.Function("send_message", "立即向当前群发送一句最终回复，可选择引用消息；普通文字回复也必须通过本工具发送。参数 text 只能包含面向群友的内容，不能包含内部分析或决策过程。成功后返回 message_id", map[string]any{
 				"text":             stringProperty("要发送的话"),
 				"reply_message_id": integerProperty("可选，引用的消息 ID"),
 			}, "text"),
