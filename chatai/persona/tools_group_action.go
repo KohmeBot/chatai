@@ -121,7 +121,6 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 			segments = append(segments, message.At(u.ID))
 			segments = append(segments, message.Text(" "))
 		}
-
 	}
 	segments = append(segments, message.Text(input.Text))
 	id := ctx.SendGroupMessage(p.groupID, segments)

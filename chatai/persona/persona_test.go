@@ -61,11 +61,11 @@ func TestAgentRulesRequireFinalReplyThroughGroupAction(t *testing.T) {
 	require.Contains(t, agentRules, "成功执行一次后不要再次发送同一结果")
 }
 
-func TestPersonaRunnerRequiresAndStopsAfterGroupAction(t *testing.T) {
+func TestPersonaRunnerRequiresActionAndWaitsForFinalDecision(t *testing.T) {
 	p := &Persona{tools: agent.NewRegistry()}
 	runner := p.agentRunner(&routeTestModel{name: "agent"})
 	require.True(t, runner.RequireAction)
-	require.True(t, runner.StopAfterGroupAction)
+	require.False(t, runner.StopAfterGroupAction)
 }
 
 func TestScheduledEventPromptDoesNotPretendToBeAChatMessage(t *testing.T) {

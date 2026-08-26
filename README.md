@@ -156,7 +156,7 @@ Agent 可以使用以下能力：
 
 触发事件会以结构化 `EventEnvelope` 交给模型，身份、目标用户、引用消息与正文彼此分离；消息、网页、图片文字、工具结果和 Skill Markdown 都按不可信数据处理。Agent 起初只看到 `search_tools`，搜索命中的少量能力才会在后续轮次暴露。搜索结果同时给出命名空间、只读性、幂等性、副作用、`group_action` 标签和风险等级，中文任务会使用本地字符语义匹配补充精确关键词匹配。
 
-每次 Agent 运行都必须成功调用至少一个 `group_action=true` 的工具；普通文字也由模型调用 `send_message` 发送，宿主不会直发模型的普通 assistant 文本。任一可见动作成功后，本轮立即结束，同批剩余调用会被跳过，防止重复发送或事后继续执行副作用。模型轮数、工具调用总数和整轮超时分别受独立预算约束；模型未完成群聊动作或接口失败时，本轮返回错误而不绕过工具协议直发文本。
+每次 Agent 运行都必须成功调用至少一个 `group_action=true` 的工具；普通文字也由模型调用 `send_message` 发送，宿主不会直发模型的普通 assistant 文本。群聊动作成功后，其结果仍会交回模型继续决策，直到模型主动停止调用工具；已经成功完成群聊动作后，后续重复的群聊动作会被拒绝，避免重复发送。模型轮数、工具调用总数和整轮超时分别受独立预算约束；模型未完成群聊动作或接口失败时，本轮返回错误而不绕过工具协议直发文本。
 
 内置 Agent Prompt 按“角色与目标、群聊个性、上下文与信任边界、决策与证据、工具规则、完成与停止”组织。它保留接梗、吐槽、卖萌、发图和戳一戳等群聊娱乐空间，但要求严肃场景收住玩笑，并把事实、权限边界和用户目标放在表演人格之前。
 
@@ -277,7 +277,7 @@ impression:
 [Agent][run=7][工具搜索] step=1/8 query=<redacted chars=4> hits=[search_web] ...
 [Agent][run=7][调用工具] step=2/8 call_id=... tool=search_web args=<redacted chars=24>
 [Agent][run=7][工具结果] step=2/8 tool=search_web ok=true action_done=false
-[Agent][run=7][完成] step=4/8 reason=group_action_delivered
+[Agent][run=7][完成] step=5/8 action_done=true final_answer=<redacted chars=0>
 ```
 
 每次执行都有独立的 `run` 编号，可用它串起并发场景下的完整决策链。日志显示当前历史条数、已加载和暴露的工具、工具搜索命中、调用状态以及群聊动作是否完成；模型的 `answer` 和接口明确返回的 `reasoning_content` 会完整打印，便于排查决策过程。提示词、工具查询和参数只记录字符数，工具结果正文不写日志；供应商请求与响应日志也只保留模型名、消息/工具数量、HTTP 状态和字节数。模型日志可能包含用户信息，请限制日志访问权限与保存周期。
