@@ -108,6 +108,7 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 	response.Reasoning = responseBody.Choices[0].Message.ReasoningContent
 	response.InputToken = responseBody.PromptTokens
 	response.OutToken = responseBody.CompletionTokens
+	response.Content = responseBody.Choices[0].Message.Content
 
 	return nil
 }

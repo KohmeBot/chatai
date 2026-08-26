@@ -76,6 +76,7 @@ type Response struct {
 	ErrorMsg  string
 	ToolCalls []ToolCall
 	Reasoning string
+	Content   any
 }
 
 func Text(content any) string {

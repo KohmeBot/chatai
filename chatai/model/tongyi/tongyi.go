@@ -35,7 +35,9 @@ func NewTongYiModel(conf model.Config) model.LargeModel {
 func (m *tongYiModel) Request(request *model.Request, response *model.Response) error {
 
 	msg := make([]model.Message, 0, len(request.History)+2)
-	msg = append(msg, m.systemMsg)
+	if m.systemMsg.Content != "" {
+		msg = append(msg, m.systemMsg)
+	}
 	msg = append(msg, request.History...)
 	content := any(request.Question)
 	if request.ImageURL != "" {
@@ -107,6 +109,7 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 	response.Reasoning = responseBody.Choices[0].Message.ReasoningContent
 	response.InputToken = responseBody.PromptTokens
 	response.OutToken = responseBody.CompletionTokens
+	response.Content = responseBody.Choices[0].Message.Content
 
 	return nil
 }
