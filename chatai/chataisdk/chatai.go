@@ -50,26 +50,28 @@ func (c *ChatAIInvoker) NewDefaultModel(online bool, thinking bool, responseJson
 	return res[0].Interface().(model.LargeModel), nil
 }
 
-// NewVisionModel creates a model backed by the chatai plugin's routes.vision
-// configuration. It returns an error when the plugin is too old to expose the
-// method or when no vision route is configured.
-func (c *ChatAIInvoker) NewVisionModel(system string, online bool, thinking bool, responseJson bool) (model.LargeModel, error) {
-	method := c.v.MethodByName("NewVisionModel")
-	if !method.IsValid() {
-		return nil, fmt.Errorf("NewVisionModel method not found")
+// NewProviderModel creates a model using the named provider and model. The
+// provider's API key is resolved from the chatai plugin configuration.
+func (c *ChatAIInvoker) NewProviderModel(providerName, modelName, system string, online bool, thinking bool, responseJson bool) (model.LargeModel, error) {
+	if providerName == "" || modelName == "" {
+		return nil, fmt.Errorf("provider name and model name are required")
 	}
-	res := method.Call([]reflect.Value{reflect.ValueOf(system), reflect.ValueOf(online), reflect.ValueOf(thinking), reflect.ValueOf(responseJson)})
+	method := c.v.MethodByName("NewProviderModel")
+	if !method.IsValid() {
+		return nil, fmt.Errorf("NewProviderModel method not found")
+	}
+	res := method.Call([]reflect.Value{reflect.ValueOf(providerName), reflect.ValueOf(modelName), reflect.ValueOf(system), reflect.ValueOf(online), reflect.ValueOf(thinking), reflect.ValueOf(responseJson)})
 	if len(res) != 1 {
-		return nil, fmt.Errorf("NewVisionModel returned an invalid result")
+		return nil, fmt.Errorf("NewProviderModel returned an invalid result")
 	}
 	if (res[0].Kind() == reflect.Interface || res[0].Kind() == reflect.Ptr) && res[0].IsNil() {
-		return nil, fmt.Errorf("vision model is not configured")
+		return nil, fmt.Errorf("NewProviderModel returned nil")
 	}
-	visionModel, ok := res[0].Interface().(model.LargeModel)
+	providerModel, ok := res[0].Interface().(model.LargeModel)
 	if !ok {
-		return nil, fmt.Errorf("NewVisionModel returned an invalid model")
+		return nil, fmt.Errorf("NewProviderModel returned an invalid model")
 	}
-	return visionModel, nil
+	return providerModel, nil
 }
 
 func (c *ChatAIInvoker) DoRequestWithModel(req string, m model.LargeModel) (string, error) {

@@ -49,25 +49,17 @@ func (c *ChatPlugin) DoRequestWithModel(req string, m model.LargeModel) (string,
 
 // 兼容旧 SDK：未指定路由时仍可直接创建默认模型。
 func (c *ChatPlugin) NewModel(system string, online, thinking, responseJSON bool) model.LargeModel {
-	name, key := c.conf.Model()
+	return c.NewProviderModel(c.conf.ProviderName, c.conf.ModelName, system, online, thinking, responseJSON)
+}
+
+// NewProviderModel 使用指定的供应商和模型名创建供外部插件调用的模型。
+// API Key 从 providers 中对应的供应商配置读取。
+func (c *ChatPlugin) NewProviderModel(providerName, modelName, system string, online, thinking, responseJSON bool) model.LargeModel {
+	name, key := c.conf.modelFor(ModelRouteConfig{ProviderName: providerName, ModelName: modelName})
 	return factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, Online: online, MaxTokens: c.conf.MaxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db})
 }
 func (c *ChatPlugin) NewDefaultModel(online, thinking, responseJSON bool) model.LargeModel {
 	return c.NewModel(string(c.conf.System), online, thinking, responseJSON)
-}
-
-// NewVisionModel 使用 routes.vision 创建供外部插件调用的视觉模型。
-// 视觉路由未配置时返回 nil，避免把图片请求静默回退到默认文本模型。
-func (c *ChatPlugin) NewVisionModel(system string, online, thinking, responseJSON bool) model.LargeModel {
-	if !c.conf.Routes.Vision.Configured() {
-		return nil
-	}
-	name, key := c.conf.modelFor(c.conf.Routes.Vision)
-	maxTokens := c.conf.MaxTokens
-	if c.conf.Routes.Vision.MaxTokens > 0 {
-		maxTokens = c.conf.Routes.Vision.MaxTokens
-	}
-	return factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, Online: online, MaxTokens: maxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db})
 }
 
 // RegisterAgentTool 是稳定的工具扩展入口，其他插件可在初始化阶段注册自定义工具。
@@ -230,4 +222,4 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 func (c *ChatPlugin) OnBoot()              {}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.2.4" }
+func (c *ChatPlugin) Version() string      { return "v1.2.5" }
