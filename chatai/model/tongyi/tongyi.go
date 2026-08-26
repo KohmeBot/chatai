@@ -47,7 +47,7 @@ func (m *tongYiModel) Request(request *model.Request, response *model.Response) 
 		content = request.Content
 	}
 
-	if request.Question != "" || request.ImageURL != "" {
+	if content != nil {
 		msg = append(msg, model.Message{Role: "user", Content: content})
 	}
 
