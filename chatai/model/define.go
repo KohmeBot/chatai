@@ -63,6 +63,7 @@ type Request struct {
 	Tools []Tool
 	// ImageURL 非空时以多模态消息附在 Question 后。
 	ImageURL string
+	Content  any
 }
 
 type Response struct {
