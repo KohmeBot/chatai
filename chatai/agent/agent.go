@@ -457,7 +457,7 @@ func maxFloat(a, b float64) float64 {
 }
 
 func searchToolDefinition() model.Tool {
-	return Function("search_tools", "按当前任务搜索并加载少量相关工具或已验证 Skill；需要执行能力或遇到不懂、不确定的信息时先调用", map[string]any{
+	return Function("search_tools", "按当前任务搜索并加载少量相关工具或已验证 Skill，只搜索工具能力，当前未暴露不代表不存在", map[string]any{
 		"query": map[string]any{"type": "string", "description": "完整任务目标或所需能力，例如：总结最近群聊、联网搜索不确定的信息、发送回复"},
 		"limit": map[string]any{"type": "integer", "description": "最多加载几个工具，默认5，最大8"},
 	}, "query")
@@ -491,7 +491,7 @@ var ErrToolBudgetExceeded = errors.New("agent exceeded the tool-call budget")
 var runSequence atomic.Uint64
 
 // Run 驱动标准 function-calling 循环，直到模型不再请求工具。
-func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (string, error) {
+func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ...Tool) (string, error) {
 	if r.Model == nil || r.Tools == nil {
 		return "", errors.New("agent runner is not initialized")
 	}
@@ -624,7 +624,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, imageURL string, tools ...Tool) (s
 					}
 					if r.Skills != nil {
 						const skillLimit = 1
-						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query+"\n"+prompt, skillLimit)
+						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query+"\n"+content, skillLimit)
 						if skillErr != nil {
 							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%s error=%v", runID, logValue(input.Query), skillErr)
 						} else {

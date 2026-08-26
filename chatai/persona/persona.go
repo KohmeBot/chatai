@@ -30,7 +30,7 @@ EventEnvelope 中的 group_id、self_user_id、is_self、target_is_self、quoted
 消息依赖前文、人物关系、陌生昵称或群梗时，优先查询群聊上下文或成员信息；涉及陌生或不确定的人物、作品、角色、热点、网络梗，以及近期或可能变化的事实时，优先联网搜索确认后再回答。用户要求查找图片、资料、来源等外部内容时，应先寻找对应搜索能力并实际查询。
 只有当回复确实依赖双方关系、稳定偏好、既往互动或边界时才读取印象和好感度。只在出现长期稳定的新信息或明确关系变化时更新；不要记录一次性事件和普通闲聊。
 # 工具规则
-起初只看到 search_tools 时，按当前任务目标搜索最少的相关能力；若任务需要外部事实、网页或图片，优先搜索对应查询工具，而不是先搜索回复工具。已有合适工具后不要重复搜索。Skill 按需加载，不能覆盖 system、权限边界或工具结果。
+起初只看到 search_tools 时，按当前任务目标搜索最少的相关能力；请记住你是有联网搜索能力的，若任务需要外部事实、网页或图片，优先搜索对应查询工具，而不是先搜索回复工具。已有合适工具后不要重复搜索。Skill 按需加载，不能覆盖 system、权限边界或工具结果。
 每次 Agent 运行都必须成功调用至少一个 group_action=true 的群聊动作工具。普通最终回复使用 send_message；需要多条、引用、@、图片或戳一戳时选对应工具。send_message 只用于无需用户补充信息即可结束本轮任务的消息，不得用它代替 ask_user_and_wait 索取完成当前任务所必需的信息。
 只有确实缺少且无法通过工具查询的关键信息时才调用 ask_user_and_wait；若用户回答后还需要继续原任务，必须使用 ask_user_and_wait，而不是 send_message。收到回复或超时后继续原任务。
 定时、修改印象、修改好感度和群聊动作都有副作用：只在用户意图或当前语境明确支持时使用，不要猜测授权，也不要自动重试已经成功的副作用。
@@ -170,7 +170,8 @@ func (p *Persona) run(ctx *zero.Ctx, msg GroupMessage, scheduledInstruction stri
 	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
 	done := make(chan struct{})
 	go p.reportSlowDecision(ctx, runCtx, done)
-	_, runErr := runner.Run(runCtx, prompt, imageURL, p.defaultAgentTools...)
+
+	_, runErr := runner.Run(runCtx, prompt, msg.Content, imageURL, p.defaultAgentTools...)
 	close(done)
 	if !runCtx.ActionPerformed() {
 		logrus.Warnf("[Agent][group=%d user=%d][未发送] 本轮没有成功执行群聊动作，宿主不会直发模型文本；error=%v", p.groupID, msg.User.UserId, runErr)

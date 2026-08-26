@@ -19,7 +19,7 @@ func (p *Persona) webTools() []agent.Tool {
 			ReadOnly:    true,
 			Idempotent:  true,
 			Risk:        agent.ToolRiskMedium,
-			SearchTerms: []string{"联网搜索", "搜索", "搜索网页", "查资料", "最新信息", "互联网", "不懂", "不知道", "陌生概念", "事实核实"},
+			SearchTerms: []string{"联网搜索", "搜索", "搜索网页", "查资料", "最新信息", "互联网", "不懂", "不知道", "陌生概念", "事实核实", "找图", "搜索图片", "网络图片", "角色图片", "人物是谁"},
 			Handler:     p.handleSearchWeb,
 		},
 		{
