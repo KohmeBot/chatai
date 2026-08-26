@@ -28,7 +28,7 @@ func NewTongYiModel(conf model.Config) model.LargeModel {
 			Role:    "system",
 			Content: conf.System,
 		},
-		client: &http.Client{Timeout: 90 * time.Second},
+		client: &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
