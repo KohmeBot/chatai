@@ -828,7 +828,17 @@ func requestUserMessage(question, imageURL string) (model.Message, bool) {
 }
 
 func logValue(value string) string {
-	return fmt.Sprintf("<redacted chars=%d>", len([]rune(value)))
+	runes := []rune(value)
+	if len(runes) <= 200 {
+		return value
+	}
+
+	return fmt.Sprintf(
+		"%s<redacted chars=%d>%s",
+		string(runes[:100]),
+		len(runes)-200,
+		string(runes[len(runes)-100:]),
+	)
 }
 
 func Function(name, description string, properties map[string]any, required ...string) model.Tool {

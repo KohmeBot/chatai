@@ -20,7 +20,7 @@ type followUpWaiter struct {
 
 func (p *Persona) followUpTools() []agent.Tool {
 	return []agent.Tool{{
-		Definition: agent.Function("ask_user_and_wait", "需要关键补充信息时，在当前群 @ 指定用户并发送追问，然后监听该用户接下来30秒内的第一条群消息；这是可见且会阻塞当前决策链的副作用，仅在上下文和其他只读工具都无法补足信息时使用", map[string]any{
+		Definition: agent.Function("ask_user_and_wait", "当当前任务因缺少用户信息而无法继续时，向用户提出一个必要的问题，在当前群 @ 指定用户并发送追问，然后监听该用户接下来30秒内的第一条群消息；这是可见且会阻塞当前决策链的副作用，仅在上下文和其他只读工具都无法补足信息时使用", map[string]any{
 			"user_id":  integerProperty("要追问的用户 QQ 号；通常是触发当前对话的用户"),
 			"question": stringProperty("紧跟在 @ 后发送的明确、简短追问"),
 		}, "user_id", "question"),
