@@ -21,9 +21,12 @@ type Message struct {
 }
 
 type ContentPart struct {
-	Type     string    `json:"type"`
+	Type     string    `json:"type,omitempty"`
 	Text     string    `json:"text,omitempty"`
 	ImageURL *ImageURL `json:"image_url,omitempty"`
+	// Image is used by Alibaba Cloud Model Studio's native image generation
+	// API. Chat-completion APIs use ImageURL instead.
+	Image string `json:"image,omitempty"`
 }
 
 type ImageURL struct {

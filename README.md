@@ -103,6 +103,8 @@ chatai:
 | `tongyi` | 阿里云百炼兼容接口 |
 | `deepseek` | DeepSeek API |
 
+Tongyi 模型名包含 `image`（大小写不敏感）时，会改用阿里云百炼的 `dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` 图像生成接口；其他 Tongyi 模型仍使用 OpenAI 兼容接口。图生图可通过模型请求的 `ImageURL` 或最多三个 `image_url` content part 传入图片，生成成功后模型响应的 `Answer` 为首张图片 URL，完整图片列表保留在 `Response.Content` 中。图片 URL 仅临时有效，调用方应及时下载保存。
+
 ### 多路由
 
 | 路由 | 用途 | 不配置时 |
