@@ -83,6 +83,9 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	if strings.TrimSpace(input.URL) == "" {
 		return nil, errors.New("message URL cannot be empty")
 	}
+	if err := validateMessageText(input.Text); err != nil {
+		return nil, err
+	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
 		return nil, err
@@ -113,6 +116,9 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 	}
 	if strings.TrimSpace(input.Text) == "" {
 		return nil, errors.New("message text cannot be empty")
+	}
+	if err := validateMessageText(input.Text); err != nil {
+		return nil, err
 	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
@@ -150,6 +156,9 @@ func (p *Persona) handleSendMessages(rc *agent.RunContext, raw json.RawMessage) 
 		return nil, errors.New("messages must contain between 2 and 5 items")
 	}
 	for _, text := range input.Messages {
+		if err := validateMessageText(text); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(text) == "" {
 			return nil, errors.New("message text cannot be empty")
 		}
@@ -206,6 +215,9 @@ func (p *Persona) handleAtUser(rc *agent.RunContext, raw json.RawMessage) (any, 
 	}
 	if strings.TrimSpace(input.Text) == "" {
 		return nil, errors.New("message text cannot be empty")
+	}
+	if err := validateMessageText(input.Text); err != nil {
+		return nil, err
 	}
 	ctx, err := zeroContext(rc)
 	if err != nil {

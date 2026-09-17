@@ -265,28 +265,25 @@ func parseToolTime(raw string, dateEnd bool) (time.Time, error) {
 }
 
 type timeMessageResult struct {
-	RawMessage        string          `json:"raw_message,omitempty"`
-	RawSegments       json.RawMessage `json:"raw_segments,omitempty"`
-	QuotedRawSegments json.RawMessage `json:"quoted_raw_segments,omitempty"`
-	MessageID         int64           `json:"message_id"`
-	CreatedAt         string          `json:"created_at"`
-	UserID            int64           `json:"user_id"`
-	Nickname          string          `json:"nickname"`
-	IsSelf            bool            `json:"is_self"`
-	TargetUserID      int64           `json:"target_user_id,omitempty"`
-	TargetNickname    string          `json:"target_nickname,omitempty"`
-	TargetIsSelf      bool            `json:"target_is_self,omitempty"`
-	Type              string          `json:"type"`
-	Content           string          `json:"content,omitempty"`
-	ImageURL          string          `json:"image_url,omitempty"`
-	FileName          string          `json:"file_name,omitempty"`
-	QuotedMessageID   int64           `json:"quoted_message_id,omitempty"`
-	QuotedUserID      int64           `json:"quoted_user_id,omitempty"`
-	QuotedNickname    string          `json:"quoted_nickname,omitempty"`
-	QuotedIsSelf      bool            `json:"quoted_is_self,omitempty"`
-	QuotedContent     string          `json:"quoted_content,omitempty"`
-	QuotedImageURL    string          `json:"quoted_image_url,omitempty"`
-	Referred          bool            `json:"referred,omitempty"`
+	MessageID       int64  `json:"message_id"`
+	CreatedAt       string `json:"created_at"`
+	UserID          int64  `json:"user_id"`
+	Nickname        string `json:"nickname"`
+	IsSelf          bool   `json:"is_self"`
+	TargetUserID    int64  `json:"target_user_id,omitempty"`
+	TargetNickname  string `json:"target_nickname,omitempty"`
+	TargetIsSelf    bool   `json:"target_is_self,omitempty"`
+	Type            string `json:"type"`
+	Content         string `json:"content,omitempty"`
+	ImageURL        string `json:"image_url,omitempty"`
+	FileName        string `json:"file_name,omitempty"`
+	QuotedMessageID int64  `json:"quoted_message_id,omitempty"`
+	QuotedUserID    int64  `json:"quoted_user_id,omitempty"`
+	QuotedNickname  string `json:"quoted_nickname,omitempty"`
+	QuotedIsSelf    bool   `json:"quoted_is_self,omitempty"`
+	QuotedContent   string `json:"quoted_content,omitempty"`
+	QuotedImageURL  string `json:"quoted_image_url,omitempty"`
+	Referred        bool   `json:"referred,omitempty"`
 }
 
 func timeMessageResults(messages []GroupMessage, selfUserID int64) []timeMessageResult {
@@ -296,7 +293,6 @@ func timeMessageResults(messages []GroupMessage, selfUserID int64) []timeMessage
 		targetIsSelf := selfUserID > 0 && item.TargetUser.UserId == selfUserID
 		quotedIsSelf := selfUserID > 0 && item.QuotedUser.UserId == selfUserID
 		results[i] = timeMessageResult{
-			RawMessage: item.RawMessage, RawSegments: rawSegmentsJSON(item.RawSegments), QuotedRawSegments: rawSegmentsJSON(item.QuotedRawSegments),
 			MessageID: item.MsgID, CreatedAt: item.CreatedAt.Format(time.RFC3339), UserID: item.User.UserId, Nickname: contextNickname(item.User, isSelf), IsSelf: isSelf,
 			TargetUserID: item.TargetUser.UserId, TargetNickname: contextNickname(item.TargetUser, targetIsSelf), TargetIsSelf: targetIsSelf, Type: item.MsgType, Content: item.Content,
 			ImageURL: item.Url, FileName: item.FileName, QuotedMessageID: item.QuotedMsgID, QuotedUserID: item.QuotedUser.UserId,

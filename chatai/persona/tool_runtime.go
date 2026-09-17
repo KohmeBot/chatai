@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"strings"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -67,4 +68,12 @@ func checkMessageID(id int64) error {
 	}
 	logrus.Warn("[Agent][发送失败] message_id=0")
 	return agent.ErrMessageDeliveryFailed
+}
+
+// Reject ambiguous escapes before delivery instead of corrupting paths or code.
+func validateMessageText(text string) error {
+	if strings.Contains(text, `\n`) || strings.Contains(text, `\r`) {
+		return errors.New("text contains literal \\n or \\r; for line breaks encode only once in JSON so decoded text contains real newlines and retry; for intentional literal code/path/escape sequences use send_raw_message unchanged")
+	}
+	return nil
 }

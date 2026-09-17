@@ -45,6 +45,9 @@ func (p *Persona) handleAskUserAndWait(rc *agent.RunContext, raw json.RawMessage
 	if err := validateUserID(input.UserID); err != nil {
 		return nil, err
 	}
+	if err := validateMessageText(input.Question); err != nil {
+		return nil, err
+	}
 	input.Question = strings.TrimSpace(input.Question)
 	if input.Question == "" {
 		return nil, errors.New("question must not be empty")
@@ -162,16 +165,14 @@ func followUpReplyResult(questionMessageID int64, reply GroupMessage) map[string
 		"question_message_id": questionMessageID,
 		"timed_out":           false,
 		"reply": map[string]any{
-			"user_id":             reply.User.UserId,
-			"nickname":            reply.User.Nickname,
-			"message_id":          reply.MsgID,
-			"message_type":        reply.MsgType,
-			"content":             reply.Content,
-			"raw_message":         reply.RawMessage,
-			"raw_segments":        rawSegmentsJSON(reply.RawSegments),
-			"quoted_raw_segments": rawSegmentsJSON(reply.QuotedRawSegments),
-			"image_url":           reply.Url,
-			"formatted_text":      formatMessage(reply),
+			"user_id":           reply.User.UserId,
+			"nickname":          reply.User.Nickname,
+			"message_id":        reply.MsgID,
+			"message_type":      reply.MsgType,
+			"content":           reply.Content,
+			"quoted_message_id": reply.QuotedMsgID,
+			"image_url":         reply.Url,
+			"formatted_text":    formatMessage(reply),
 		},
 		"instruction": "这是被追问用户在时限内发出的第一条群消息；请结合它继续决策并给出最终回应。",
 	}
