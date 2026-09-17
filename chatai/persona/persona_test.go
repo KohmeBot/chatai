@@ -47,18 +47,16 @@ func TestAgentRulesDefineStructuredSelfIdentity(t *testing.T) {
 	require.Contains(t, agentRules, "self_user_id")
 }
 
-func TestAgentRulesPreserveGroupChatEntertainment(t *testing.T) {
-	require.Contains(t, agentRules, "你是群友，不是工单客服")
-	require.Contains(t, agentRules, "接梗、吐槽、卖萌")
-	require.Contains(t, agentRules, "不要硬玩梗")
-	require.Contains(t, agentRules, "严肃、敏感")
+func TestAgentRulesPrioritizeCorrectnessAndNaturalGroupReplies(t *testing.T) {
+	require.Contains(t, agentRules, "正确、自然、符合当前群氛围")
+	require.Contains(t, agentRules, "事实正确、权限边界和用户目标优先于表演人格")
 }
 
 func TestAgentRulesRequireFinalReplyThroughGroupAction(t *testing.T) {
 	require.Contains(t, agentRules, "每次 Agent 运行都必须成功调用至少一个 group_action=true")
-	require.Contains(t, agentRules, "宿主不会发送普通 assistant 文本")
-	require.Contains(t, agentRules, "不要把普通 assistant 文本当作最终输出")
-	require.Contains(t, agentRules, "成功执行一次后不要再次发送同一结果")
+	require.Contains(t, agentRules, "普通 assistant 文本不会被宿主发送")
+	require.Contains(t, agentRules, "最终面向群友的内容必须通过群聊动作工具发送")
+	require.Contains(t, agentRules, "成功执行最终可见动作后立即停止，不要重复发送")
 }
 
 func TestPersonaRunnerRequiresActionAndWaitsForFinalDecision(t *testing.T) {

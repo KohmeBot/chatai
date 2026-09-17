@@ -2,9 +2,9 @@ package chatai
 
 import (
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/persona"
-	"github.com/kohmebot/pkg/chain"
 	"github.com/kohmebot/pkg/gopool"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
@@ -82,11 +82,7 @@ func (c *ChatPlugin) SetOnJoinGroup(engine plugin.Engine) {
 				return
 			}
 
-			var msgChain chain.MessageChain
-			msgChain.Join(message.At(ctx.Event.UserID))
-			msgChain.Join(message.Text(" " + res.Answer))
-
-			ctx.Send(msgChain)
+			err = c.sendHostMessage(ctx, message.Message{message.At(ctx.Event.UserID), message.Text(" " + res.Answer)})
 		})
 
 	})
@@ -145,7 +141,7 @@ func (c *ChatPlugin) SetOnUsage(engine plugin.Engine) {
 		}
 
 		if len(modelMap) == 0 {
-			ctx.Send("没有找到任何记录")
+			err = c.sendHostMessage(ctx, message.Message{message.Text("没有找到任何记录")})
 			return
 		}
 		for name, usages := range modelMap {
@@ -174,9 +170,27 @@ func (c *ChatPlugin) SetOnUsage(engine plugin.Engine) {
 			builder.WriteString(fmt.Sprintf("输入Token(K): %.4f\n", float64(totalInput)/1000))
 			builder.WriteString(fmt.Sprintf("输出Token(K): %.4f\n", float64(totalOutput)/1000))
 			builder.WriteString(fmt.Sprintf("平均调用时长: %s\n", avgTTL.String()))
-			ctx.Send(builder.String())
+			err = c.sendHostMessage(ctx, message.Message{message.Text(builder.String())})
+			if err != nil {
+				return
+			}
 			time.Sleep(time.Second)
 		}
 
 	}).SetBlock(true)
+}
+
+func (c *ChatPlugin) sendHostMessage(ctx *zero.Ctx, segments message.Message) error {
+	if p := c.personaMap[ctx.Event.GroupID]; p != nil {
+		return p.SendHostMessage(ctx, segments)
+	}
+	// Private administrative replies have no group Agent to resume.
+	for attempt := 1; attempt <= agent.MaxDeliveryAttempts; attempt++ {
+		if ctx.Send(segments).ID() != 0 {
+			return nil
+		}
+		logrus.Warnf("[发送失败] message_id=0 attempt=%d/%d", attempt, agent.MaxDeliveryAttempts)
+	}
+	logrus.Error("[发送失败] 三次发送均返回 message_id=0")
+	return agent.ErrMessageDeliveryFailed
 }

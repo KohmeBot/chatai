@@ -22,17 +22,43 @@ type RunContext struct {
 	UserID  int64
 	Values  map[string]any
 
-	actionMu          sync.RWMutex
-	actionPerformed   bool
-	deliveryMu        sync.RWMutex
-	responseDelivered bool
-	deliveryKind      string
-	waitingMu         sync.RWMutex
-	waitingForUser    bool
-	decisionMu        sync.RWMutex
-	latestDecision    string
-	traceMu           sync.RWMutex
-	trace             RunTrace
+	actionMu              sync.RWMutex
+	actionPerformed       bool
+	deliveryMu            sync.RWMutex
+	responseDelivered     bool
+	deliveryKind          string
+	waitingMu             sync.RWMutex
+	waitingForUser        bool
+	decisionMu            sync.RWMutex
+	latestDecision        string
+	traceMu               sync.RWMutex
+	trace                 RunTrace
+	pendingDeliveryMu     sync.Mutex
+	pendingDeliveryErrors []error
+}
+
+// ReportDeliveryFailure feeds host-side send failures into the next decision.
+func (r *RunContext) ReportDeliveryFailure(err error) {
+	if err == nil {
+		return
+	}
+	r.pendingDeliveryMu.Lock()
+	r.pendingDeliveryErrors = append(r.pendingDeliveryErrors, err)
+	r.pendingDeliveryMu.Unlock()
+}
+
+func (r *RunContext) takeDeliveryFailures() []error {
+	r.pendingDeliveryMu.Lock()
+	defer r.pendingDeliveryMu.Unlock()
+	errs := r.pendingDeliveryErrors
+	r.pendingDeliveryErrors = nil
+	return errs
+}
+
+func (r *RunContext) hasPendingDeliveryFailures() bool {
+	r.pendingDeliveryMu.Lock()
+	defer r.pendingDeliveryMu.Unlock()
+	return len(r.pendingDeliveryErrors) > 0
 }
 
 // ToolTrace 是供 Skill 学习使用的脱敏工具执行记录。它不保存原始参数和结果。
@@ -488,6 +514,12 @@ type Runner struct {
 var ErrGroupActionRequired = errors.New("agent finished without a group action")
 var ErrToolBudgetExceeded = errors.New("agent exceeded the tool-call budget")
 
+// ErrMessageDeliveryFailed means OneBot returned message_id=0. Only failed
+// deliveries may be revised by the model; successful messages must not repeat.
+var ErrMessageDeliveryFailed = errors.New("message_id=0: message was not sent; correct the message parameters and retry only the unsent content")
+
+const MaxDeliveryAttempts = 3
+
 var runSequence atomic.Uint64
 
 // Run 驱动标准 function-calling 循环，直到模型不再请求工具。
@@ -504,6 +536,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		maxToolCalls = steps * 3
 	}
 	toolCallCount := 0
+	deliveryFailures := 0
 	toolsDefine := make([]model.Tool, 0, len(tools))
 	for _, tool := range tools {
 		toolsDefine = append(toolsDefine, tool.Definition)
@@ -516,6 +549,18 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	var postDeliveryErr error
 	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d max_tool_calls=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, maxToolCalls, r.RequireAction, imageURL != "", logValue(prompt))
 	for i := 0; i < steps; i++ {
+		for _, deliveryErr := range ctx.takeDeliveryFailures() {
+			deliveryFailures++
+			logrus.Warnf("[Agent][run=%d][宿主发送失败] attempt=%d/%d error=%v", runID, deliveryFailures, MaxDeliveryAttempts, deliveryErr)
+			if deliveryFailures >= MaxDeliveryAttempts {
+				logrus.Errorf("[Agent][run=%d][发送失败] exhausted %d attempts", runID, MaxDeliveryAttempts)
+				ctx.finishTrace("", deliveryErr)
+				return "", deliveryErr
+			}
+			steps++
+			maxToolCalls++
+			question += "\n宿主发送消息失败：" + deliveryErr.Error() + "。请修正后通过发送工具完成回复，不要重复已经成功的消息。"
+		}
 		if err := runContextError(ctx); err != nil {
 			ctx.finishTrace("", err)
 			logrus.Warnf("[Agent][run=%d][取消] step=%d/%d error=%v", runID, i+1, steps, err)
@@ -569,6 +614,20 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			logrus.Infof("[Agent][run=%d][写入历史] step=%d/%d role=user image=%t content=%s", runID, i+1, steps, requestImageURL != "", logValue(requestQuestion))
 		}
 		question, imageURL = "", ""
+		// A progress send can fail while the model request is in flight. Give
+		// that failure to the model before executing its now-stale decision.
+		if ctx.hasPendingDeliveryFailures() {
+			history = append(history, model.Message{Role: "assistant", Content: response.Answer, ToolCalls: response.ToolCalls, ReasoningContent: response.Reasoning})
+			for _, call := range response.ToolCalls {
+				payload, _ := json.Marshal(map[string]any{"ok": false, "status": "error", "tool": call.Function.Name,
+					"error": map[string]any{"message": "tool call skipped: host send failed while model was deciding; revise after delivery feedback", "retryable": true}})
+				history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(payload)})
+			}
+			// The pending failure is counted and grants its retry budget at the
+			// top of the next iteration, even if this was the last normal step.
+			i--
+			continue
+		}
 		if len(response.ToolCalls) == 0 {
 			if r.RequireAction && !ctx.ActionPerformed() {
 				if i+1 == steps {
@@ -587,6 +646,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		}
 		history = append(history, model.Message{Role: "assistant", Content: response.Answer, ToolCalls: response.ToolCalls, ReasoningContent: response.Reasoning})
 		boundaryCallIndex, boundaryToolName := -1, ""
+		deliveryFailed := false
 		for callIndex, call := range response.ToolCalls {
 			if r.Tools.isDecisionBoundary(call.Function.Name) {
 				boundaryCallIndex, boundaryToolName = callIndex, call.Function.Name
@@ -599,9 +659,13 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			var callErr error
 			callStarted := time.Now()
 			groupAction := r.Tools.isGroupAction(call.Function.Name)
-			toolCallCount++
+			if !deliveryFailed {
+				toolCallCount++
+			}
 			if err := runContextError(ctx); err != nil {
 				callErr = err
+			} else if deliveryFailed {
+				callErr = errors.New("tool call skipped: a send failed; wait for a new model decision")
 			} else if r.StopAfterGroupAction && ctx.ActionPerformed() {
 				callErr = errors.New("tool call skipped because a visible group action already completed this run")
 			} else if toolCallCount > maxToolCalls {
@@ -673,10 +737,28 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				}
 			}
 			ctx.recordToolCall(call.Function.Name, callErr == nil, groupAction, time.Since(callStarted))
+			if errors.Is(callErr, ErrMessageDeliveryFailed) {
+				deliveryFailed = true
+				deliveryFailures++
+				logrus.Warnf("[Agent][run=%d][发送失败] attempt=%d/%d tool=%s error=%v", runID, deliveryFailures, MaxDeliveryAttempts, call.Function.Name, callErr)
+				if deliveryFailures >= MaxDeliveryAttempts {
+					logrus.Errorf("[Agent][run=%d][发送失败] exhausted %d attempts", runID, MaxDeliveryAttempts)
+					ctx.finishTrace("", callErr)
+					return "", callErr
+				}
+				// A batch may have delivered a prefix. Keep the delivery trace but
+				// allow the model to send only the remaining content.
+				ctx.actionMu.Lock()
+				ctx.actionPerformed = false
+				ctx.actionMu.Unlock()
+				steps++
+				maxToolCalls++
+				question = "发送失败：message_id=0。请修正消息内容或消息段参数后重新调用发送工具；只重发未成功的部分，不要重复已成功的消息。"
+			}
 			payload := map[string]any{"ok": callErr == nil, "status": "ok", "tool": call.Function.Name, "result": result}
 			if callErr != nil {
 				payload["status"] = "error"
-				payload["error"] = map[string]any{"message": callErr.Error(), "retryable": false}
+				payload["error"] = map[string]any{"message": callErr.Error(), "retryable": errors.Is(callErr, ErrMessageDeliveryFailed)}
 				if ctx.ActionPerformed() {
 					postDeliveryErr = callErr
 				}
@@ -689,7 +771,10 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			}
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)})
 		}
-		if r.StopAfterGroupAction && ctx.ActionPerformed() {
+		if deliveryFailed {
+			continue
+		}
+		if (r.StopAfterGroupAction || deliveryFailures > 0) && ctx.ActionPerformed() {
 			logrus.Infof("[Agent][run=%d][完成] step=%d/%d reason=group_action_delivered", runID, i+1, steps)
 			ctx.finishTrace(response.Answer, postDeliveryErr)
 			return response.Answer, nil

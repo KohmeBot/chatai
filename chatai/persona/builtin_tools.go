@@ -15,6 +15,7 @@ func (p *Persona) registerBuiltinTools() {
 		p.memoryTools(),
 		p.followUpTools(),
 		p.groupActionTools(),
+		p.rawMessageTools(),
 		p.scheduleTools(),
 		p.webTools(),
 	}

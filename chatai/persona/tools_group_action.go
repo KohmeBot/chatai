@@ -3,6 +3,7 @@ package persona
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 func (p *Persona) groupActionTools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Definition: agent.Function("send_image", "立即向当前群发送一张图片并可带一句话；这是不可自动重试的可见副作用，成功后返回 message_id", map[string]any{
+			Definition: agent.Function("send_image", "立即向当前群发送一张图片并可带一句话；成功的消息不可重复发送，message_id=0 时需修正后重试，成功后返回 message_id", map[string]any{
 				"url":  stringProperty("发送的图片URL"),
 				"text": stringProperty("可选，发送的图片附带的文字"),
 			}, "url"),
@@ -36,7 +37,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			Handler:     p.handleSendMessage,
 		},
 		{
-			Definition: agent.Function("send_messages", "立即把回复拆成2到5条独立消息依次发送；这是不可自动重试的可见副作用，仅在拆分明显更符合群聊节奏时使用", map[string]any{
+			Definition: agent.Function("send_messages", "立即把回复拆成2到5条独立消息依次发送；成功的消息不可重复发送，message_id=0 时需修正后重试，仅在拆分明显更符合群聊节奏时使用", map[string]any{
 				"messages": map[string]any{
 					"type": "array", "items": map[string]any{"type": "string"},
 					"minItems": 2, "maxItems": 5, "description": "按发送顺序排列的多句话",
@@ -92,6 +93,9 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 		segments = append(segments, message.Text(input.Text))
 	}
 	id := ctx.SendGroupMessage(p.groupID, segments)
+	if err := checkMessageID(id); err != nil {
+		return nil, err
+	}
 	markVisibleAction(rc, "send_image")
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
 		return nil, err
@@ -124,6 +128,9 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 	}
 	segments = append(segments, message.Text(input.Text))
 	id := ctx.SendGroupMessage(p.groupID, segments)
+	if err := checkMessageID(id); err != nil {
+		return nil, err
+	}
 	markVisibleAction(rc, "send_message")
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
 		return nil, err
@@ -161,6 +168,9 @@ func (p *Persona) handleSendMessages(rc *agent.RunContext, raw json.RawMessage) 
 	for i, text := range input.Messages {
 		segments := message.Message{message.Text(text)}
 		id := ctx.SendGroupMessage(p.groupID, segments)
+		if err := checkMessageID(id); err != nil {
+			return map[string]any{"message_ids": ids, "failed_index": i, "unsent_messages": input.Messages[i:]}, fmt.Errorf("batch stopped at index %d; %d messages already sent: %w", i, len(ids), err)
+		}
 		markVisibleAction(rc, "send_messages")
 		if err := p.recordBotMessage(ctx, segments, id); err != nil {
 			return nil, err
@@ -203,6 +213,9 @@ func (p *Persona) handleAtUser(rc *agent.RunContext, raw json.RawMessage) (any, 
 	}
 	segments := message.Message{message.At(input.UserID), message.Text(" " + input.Text)}
 	id := ctx.SendGroupMessage(p.groupID, segments)
+	if err := checkMessageID(id); err != nil {
+		return nil, err
+	}
 	markVisibleAction(rc, "at_user")
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
 		return nil, err

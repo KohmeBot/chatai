@@ -69,19 +69,22 @@ func (u User) String() string {
 }
 
 type GroupMessage struct {
-	User          User      // 发言人
-	TargetUser    User      // 群内@对方的ID或者是reply的人
-	QuotedUser    User      // 被引用消息的发言人
-	Content       string    // 文字内容
-	QuotedContent string    // 被引用消息的文字内容
-	MsgType       string    // text/image/poke/mixed
-	MsgID         int64     // 消息ID,可以定位消息
-	QuotedMsgID   int64     // 被引用消息ID
-	CreatedAt     time.Time // 创建时间
-	Url           string    // url
-	FileName      string    // file name
-	QuotedURL     string    // 被引用消息中的图片 URL
-	Refer         bool      // 是否已引用
+	RawMessage        string
+	RawSegments       string
+	QuotedRawSegments string
+	User              User      // 发言人
+	TargetUser        User      // 群内@对方的ID或者是reply的人
+	QuotedUser        User      // 被引用消息的发言人
+	Content           string    // 文字内容
+	QuotedContent     string    // 被引用消息的文字内容
+	MsgType           string    // text/image/poke/mixed
+	MsgID             int64     // 消息ID,可以定位消息
+	QuotedMsgID       int64     // 被引用消息ID
+	CreatedAt         time.Time // 创建时间
+	Url               string    // url
+	FileName          string    // file name
+	QuotedURL         string    // 被引用消息中的图片 URL
+	Refer             bool      // 是否已引用
 
 }
 
@@ -121,7 +124,7 @@ func (g GroupMessage) IsEmpty() bool {
 
 func newMessage(ctx *zero.Ctx) GroupMessage {
 	segments := ctx.Event.Message
-	quoted := getQuotedMessage(ctx, segments)
+	quoted, quotedRaw := getQuotedMessage(ctx, segments)
 
 	msgType := getMsgType(segments)
 
@@ -129,13 +132,16 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 		msgType = MsgTypePoke
 	}
 
-	if !HasMsgType(msgType) {
+	if len(segments) == 0 && msgType != MsgTypePoke {
 		return GroupMessage{}
 	}
 
 	msgId, _ := ctx.Event.MessageID.(int64)
 
 	msg := GroupMessage{
+		RawMessage:        ctx.Event.RawMessage,
+		RawSegments:       originalSegments(ctx.Event.NativeMessage, segments),
+		QuotedRawSegments: quotedRaw,
 		User: User{
 			UserId:   ctx.Event.UserID,
 			Nickname: ctx.CardOrNickName(ctx.Event.UserID),
@@ -276,17 +282,28 @@ func getTargetIDFromMsgs(ctx *zero.Ctx, msgs message.Message) int64 {
 	return targetID
 }
 
-func getQuotedMessage(ctx *zero.Ctx, msgs message.Message) zero.Message {
+func getQuotedMessage(ctx *zero.Ctx, msgs message.Message) (zero.Message, string) {
 	for _, segment := range msgs {
 		if segment.Type != MsgTypeReply {
 			continue
 		}
 		messageID, err := strconv.ParseInt(segment.Data["id"], 10, 64)
 		if err == nil && messageID > 0 {
-			return ctx.GetMessage(messageID, true)
+			data := ctx.CallAction("get_msg", zero.Params{"message_id": messageID, "__zerobot_no_log_mseeage_id__": true}).Data
+			native := json.RawMessage(data.Get("message").Raw)
+			quoted := zero.Message{
+				Elements:    message.ParseMessage(native),
+				MessageID:   message.NewMessageIDFromInteger(data.Get("message_id").Int()),
+				MessageType: data.Get("message_type").String(),
+			}
+			var sender zero.User
+			if err := json.Unmarshal([]byte(data.Get("sender").Raw), &sender); err == nil {
+				quoted.Sender = &sender
+			}
+			return quoted, originalSegments(native, quoted.Elements)
 		}
 	}
-	return zero.Message{}
+	return zero.Message{}, ""
 }
 
 func replyMessageID(msgs message.Message) int64 {
@@ -373,7 +390,7 @@ func formatMessage(msg GroupMessage) string {
 		action = "分享了一条内容(搬屎)"
 	}
 	if action == "" {
-		return ""
+		action = "发送了 " + msg.MsgType + " 消息"
 	}
 	content = msg.Content
 	if runeLen(content) > 500 {
@@ -454,4 +471,25 @@ func parseQQMiniCard(raw string) string {
 		detail.Desc,
 		jumpURL,
 	)
+}
+
+// Preserve native arrays, including nested nodes and implementation-specific fields.
+func originalSegments(native json.RawMessage, segments message.Message) string {
+	if json.Valid(native) && strings.HasPrefix(strings.TrimSpace(string(native)), "[") {
+		return string(native)
+	}
+	return encodeSegments(segments)
+}
+func encodeSegments(segments message.Message) string {
+	if len(segments) == 0 {
+		return ""
+	}
+	raw, _ := json.Marshal(segments)
+	return string(raw)
+}
+func rawSegmentsJSON(raw string) json.RawMessage {
+	if !json.Valid([]byte(raw)) {
+		return nil
+	}
+	return json.RawMessage(raw)
 }

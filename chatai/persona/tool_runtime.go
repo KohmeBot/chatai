@@ -3,6 +3,8 @@ package persona
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/sirupsen/logrus"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -31,6 +33,9 @@ func validateUserID(userID int64) error {
 }
 
 func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
+	if rc == nil {
+		return nil, errors.New("zero context unavailable")
+	}
 	ctx, ok := rc.Values["zero_ctx"].(*zero.Ctx)
 	if !ok || ctx == nil {
 		return nil, errors.New("zero context unavailable")
@@ -38,6 +43,28 @@ func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
 	return ctx, nil
 }
 
+// SendHostMessage checks delivery for host-generated group messages as well.
+// A failed send enters the Agent with the original content and failure count.
+func (p *Persona) SendHostMessage(ctx *zero.Ctx, segments message.Message) error {
+	id := ctx.SendGroupMessage(p.groupID, segments)
+	if err := checkMessageID(id); err != nil {
+		instruction := "向当前群发送以下宿主生成的消息，保持事实和数字不变。此前发送失败，请修正格式后重试：" + encodeSegments(segments)
+		return p.runWithDeliveryFailure(ctx, GroupMessage{User: User{UserId: ctx.Event.UserID}}, instruction, fmt.Errorf("宿主消息发送失败: %w", err))
+	}
+	return p.recordBotMessage(ctx, segments, id)
+}
+
 func (p *Persona) recordBotMessage(ctx *zero.Ctx, segments message.Message, id int64) error {
-	return p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: selfNickname}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now(), Url: getUrl(segments), FileName: getFileName(segments)})
+	if err := checkMessageID(id); err != nil {
+		return err
+	}
+	return p.saveMessage(GroupMessage{RawSegments: encodeSegments(segments), User: User{UserId: ctx.Event.SelfID, Nickname: selfNickname}, Content: segments.ExtractPlainText(), MsgType: getMsgType(segments), MsgID: id, CreatedAt: time.Now(), Url: getUrl(segments), FileName: getFileName(segments)})
+}
+
+func checkMessageID(id int64) error {
+	if id != 0 {
+		return nil
+	}
+	logrus.Warn("[Agent][发送失败] message_id=0")
+	return agent.ErrMessageDeliveryFailed
 }
