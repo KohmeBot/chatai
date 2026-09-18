@@ -173,9 +173,10 @@ type Experience struct {
 }
 
 type Service struct {
-	db    *gorm.DB
-	model model.LargeModel
-	opts  Options
+	Directory *Directory
+	db        *gorm.DB
+	model     model.LargeModel
+	opts      Options
 
 	learnMu sync.Mutex
 	jobs    chan Experience
@@ -506,11 +507,22 @@ func (s *Service) Observe(exp Experience) error {
 
 // SearchActiveSkills 实现 agent.SkillSearcher。
 func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]agent.SkillMatch, error) {
-	if s == nil || !s.opts.Enabled || s.db == nil || groupID == 0 {
+	if s == nil || !s.opts.Enabled || groupID == 0 {
 		return nil, nil
 	}
 	if limit <= 0 || limit > 2 {
 		limit = 2
+	}
+	var directoryMatches []agent.SkillMatch
+	if s.Directory != nil {
+		var err error
+		directoryMatches, err = s.Directory.Search(query, limit)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if s.db == nil {
+		return directoryMatches, nil
 	}
 	now := time.Now()
 	if err := s.db.Model(&Record{}).Where("scope = ? AND source = ? AND status = ? AND expires_at <= ?", ScopeGlobal, SourceGenerated, StatusActive, now).
@@ -521,7 +533,7 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
-	result := make([]agent.SkillMatch, 0, len(rows))
+	result := append([]agent.SkillMatch{}, directoryMatches...)
 	for _, row := range rows {
 		result = append(result, agent.SkillMatch{ID: row.ID, Name: row.Name, Description: row.Description,
 			Markdown: row.MarkdownText(), RequiredTools: row.RequiredTools()})

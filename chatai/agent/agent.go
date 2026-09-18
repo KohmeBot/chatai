@@ -344,10 +344,12 @@ type SearchResult struct {
 	Kind        string `json:"kind,omitempty"`
 	SkillID     uint   `json:"skill_id,omitempty"`
 	Markdown    string `json:"markdown,omitempty"`
+	Path        string `json:"path,omitempty"`
 }
 
 // SkillMatch 是 Skill 系统向 Runner 暴露的只读、已验证能力说明。
 type SkillMatch struct {
+	Path          string
 	ID            uint
 	Name          string
 	Description   string
@@ -707,7 +709,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 									continue
 								}
 								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
-									Namespace: "skill", ReadOnly: true, Idempotent: true, Risk: string(ToolRiskLow), Markdown: item.Markdown})
+									Namespace: "skill", ReadOnly: true, Idempotent: true, Risk: string(ToolRiskLow), Markdown: item.Markdown, Path: item.Path})
 								ctx.markSkillUsed(item.ID)
 								for _, toolName := range validTools {
 									activeTools[toolName] = true

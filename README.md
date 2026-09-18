@@ -258,13 +258,60 @@ skills:
 
 自动生成的 Skill 使用 `global/generated` 作用域。不同群产生相似描述和相同工具组合时，会合并到同一个记录并累计各群证据。默认只生成和影子验证候选；启用 `auto_activate_generated` 后，候选达到 `activation_evidence`、`global_min_groups` 且成功率不低于 80% 才转为 `active`。关闭该开关不会自动停用数据库中已经 Active 的 Skill。升级后的第一次启动会把旧版群级记录迁移为全局记录并合并重复项。
 
-`skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。当前不支持配置群级 Skill、外部 Skill 文件或 Skill 脚本。
+`skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。旧配置继续兼容；新技能推荐使用下面的目录格式。当前不支持群级目录 Skill，也不会自动执行 Skill 脚本。
 
-Active Skill 被 `search_tools` 命中时会返回完整 Markdown。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和可选的自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。Skill 的技术成功要求群聊动作已执行、用户可见回复确实送达且整轮无终止错误；某个可选只读工具失败后若仍通过群聊动作正确完成回复，不会误判整轮失败。
+数据库中的 Active Skill 被 `search_tools` 命中时仍返回完整 Markdown；目录 Skill 只返回路由摘要和入口路径。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和可选的自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。Skill 的技术成功要求群聊动作已执行、用户可见回复确实送达且整轮无终止错误；某个可选只读工具失败后若仍通过群聊动作正确完成回复，不会误判整轮失败。
 
 旧版 `instructions`、`required_tools`、`success_checks` 配置仍可读取，并会在启动时转换为 Markdown；新配置应只使用 `markdown`。
 
 自动生成 Skill 使用成功会续期并提高置信度；连续两次失败会转为 `stale`，随后通过相似任务重新验证，验证继续失败时退休。过期 Candidate 会退休，过期 Active Skill 会进入 `stale` 并等待相似任务重新验证。反思模型生成的是一段完整 Markdown 经验说明，而不是固定的步骤、工具和检查项数组。数据库只持久化 Skill Markdown、触发条件、学习状态、不可逆任务指纹和内部工具索引，不保存原始聊天、工具参数或工具结果。
+
+### 目录式 Skill 与渐进读取
+
+启用 `skills.enable` 后，插件通过 `env.FilePath()` 获取数据目录，用 `filepath.Join` 创建其下的 `skills` 文件夹。所有群共享该目录；不需要在 YAML 中逐个注册。管理员可以直接放置文件，Agent 也可以通过工具创建：
+
+```text
+<插件数据目录>/skills/
+  chat-summary/
+    SKILL.md
+    references/
+      examples.md
+```
+
+`SKILL.md` 示例（文件夹名与 `name` 必须一致）：
+
+```markdown
+---
+name: chat-summary
+description: 当用户需要总结最近群聊、整理讨论结论时使用。
+triggers: [总结群聊, 整理讨论结论]
+non_triggers: [总结外部文章]
+---
+# 群聊总结
+先确定时间范围，通过 search_tools 查找读取聊天记录的工具。
+按主题整理结论，区分共识、分歧和待办。
+需要输出示例时，再读取 references/examples.md。
+```
+
+`name`、`description` 必填，`triggers`、`non_triggers` 可选。名称以小写字母开头，可包含小写字母、数字、`-`、`_`，最多 64 字符。路由索引只解析 YAML 头部（最多 16 KiB），不会把正文和参考文件预先放入模型上下文。格式错误的目录会记录警告并跳过。
+
+渐进式加载过程：
+
+1. `search_tools` 根据名称、描述和触发条件召回目录 Skill，返回 `name`、`description`、`path`，并激活 `read_skill`。
+2. Agent 调用 `read_skill(name="chat-summary")` 读取 `SKILL.md`。
+3. 仅在需要时调用 `read_skill(name="chat-summary", file="references/examples.md")` 读取辅助文件，`file` 相对于该技能文件夹。
+
+新增工具均可通过 `search_tools` 发现：
+
+| 工具 | 功能 |
+| --- | --- |
+| `list_skills` | 列出目录技能的元数据，不读取正文 |
+| `read_skill` | 读取指定技能内的一个 UTF-8 文本文件，默认 `SKILL.md` |
+| `save_skill` | 保存一个技能文件，参数为 `name`、`content`，可选 `file` 和 `overwrite` |
+
+Agent 先用 `save_skill` 创建完整的 `SKILL.md`，再保存参考文件。保存后下次搜索立即可见，无需重启。默认拒绝覆盖已有文件；更新时先读取旧内容，再显式传入 `overwrite=true`。文件读写限定在对应技能目录内，拒绝路径穿越及越界符号链接，每个文本文件最多 5 MiB。工具只保存和读取文件，不运行脚本。
+
+目录 Skill 保存后立即可用，不参与数据库经验的候选验证、TTL 或激活额度。原有经验总结、影子验证和自动学习机制继续保留；`skills.global` 也仍然有效。关闭 `skills.enable` 会同时关闭目录技能工具和经验学习。插件 `OnBoot` 输出已注册 tools，以及目录 skills 的摘要、数据库 skills 的来源与状态。
 
 ## 复读配置
 

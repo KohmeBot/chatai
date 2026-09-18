@@ -108,6 +108,29 @@ func TestRunnerLoadsInstructionOnlyMarkdownSkill(t *testing.T) {
 	require.Contains(t, llm.requests[1].History[2].Content, "待确认事项")
 }
 
+func TestRunnerRoutesDirectorySkillWithoutLoadingBody(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Tool{
+		Definition: Function("read_skill", "read a skill file", map[string]any{}),
+		Handler:    func(_ *RunContext, _ json.RawMessage) (any, error) { return "BODY_SENTINEL", nil },
+	}))
+	llm := &scriptedModel{steps: []model.Response{
+		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"总结群聊"}`)}},
+		{ToolCalls: []model.ToolCall{call("read", "read_skill", `{"name":"chat-summary"}`)}},
+		{Answer: "done"},
+	}}
+	rc := &RunContext{GroupID: 7}
+	_, err := (&Runner{Model: llm, Tools: registry, Skills: scriptedSkillSearcher{matches: []SkillMatch{{
+		Name: "chat-summary", Description: "总结群聊", Path: "chat-summary/SKILL.md", RequiredTools: []string{"read_skill"},
+	}}}}).Run(rc, "总结群聊", "", "")
+	require.NoError(t, err)
+	require.Contains(t, toolNames(llm.requests[1].Tools), "read_skill")
+	require.Contains(t, llm.requests[1].History[2].Content, `"path":"chat-summary/SKILL.md"`)
+	require.NotContains(t, llm.requests[1].History[2].Content, "BODY_SENTINEL")
+	require.Contains(t, llm.requests[2].History[4].Content, "BODY_SENTINEL")
+	require.Empty(t, rc.Trace().UsedSkillIDs)
+}
+
 func TestRunnerSkipsSkillWhenAnyRequiredToolIsMissing(t *testing.T) {
 	registry := NewRegistry()
 	require.NoError(t, registry.Register(Tool{

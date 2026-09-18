@@ -3,6 +3,7 @@ package chatai
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -28,6 +29,7 @@ type ChatPlugin struct {
 	personaMap     map[int64]*persona.Persona
 	extraTools     []agent.Tool
 	db             *gorm.DB
+	skills         *skill.Service
 }
 
 func NewPlugin() plugin.Plugin         { return &ChatPlugin{personaMap: make(map[int64]*persona.Persona)} }
@@ -147,6 +149,14 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 	var skillService *skill.Service
 	if c.conf.Skills.Enable {
+		dataDir, err := env.FilePath()
+		if err != nil {
+			return fmt.Errorf("get skill data directory: %w", err)
+		}
+		directory, err := skill.NewDirectory(dataDir)
+		if err != nil {
+			return fmt.Errorf("initialize skill directory: %w", err)
+		}
 		skillRoute := c.conf.Routes.Skill
 		if !skillRoute.Configured() {
 			skillRoute = c.conf.Routes.Agent
@@ -171,7 +181,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		if err := skillService.Initialize(definitions); err != nil {
 			return fmt.Errorf("initialize global skills: %w", err)
 		}
+		skillService.Directory = directory
 	}
+	c.skills = skillService
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
 		var vision model.LargeModel
@@ -219,7 +231,40 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	return nil
 }
 
-func (c *ChatPlugin) OnBoot()              {}
+func (c *ChatPlugin) OnBoot() {
+	names := map[string]bool{"search_tools": true}
+	for _, p := range c.personaMap {
+		for _, name := range p.ToolNames() {
+			names[name] = true
+		}
+	}
+	tools := make([]string, 0, len(names))
+	for name := range names {
+		tools = append(tools, name)
+	}
+	sort.Strings(tools)
+	logrus.Infof("[ChatAI][启动] tools=%v", tools)
+	if c.skills == nil {
+		logrus.Info("[ChatAI][启动] skills 已关闭")
+		return
+	}
+	items, err := c.skills.Directory.List()
+	if err != nil {
+		logrus.Warnf("[ChatAI][启动] skills 目录读取失败: %v", err)
+	}
+	for _, item := range items {
+		logrus.Infof("[ChatAI][启动][Skill] source=directory name=%s description=%s path=%s", item.Name, item.Description, item.Path)
+	}
+	var records []skill.Record
+	if err := c.db.Order("name ASC").Find(&records).Error; err != nil {
+		logrus.Warnf("[ChatAI][启动] skills 数据库读取失败: %v", err)
+		return
+	}
+	for _, item := range records {
+		logrus.Infof("[ChatAI][启动][Skill] source=%s name=%s status=%s", item.Source, item.Name, item.Status)
+	}
+	logrus.Infof("[ChatAI][启动] skills: directory=%d database=%d", len(items), len(records))
+}
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.2.11" }
+func (c *ChatPlugin) Version() string      { return "v1.3.0" }
