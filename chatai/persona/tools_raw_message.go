@@ -102,6 +102,7 @@ func (p *Persona) handleSendRawMessage(rc *agent.RunContext, raw json.RawMessage
 		return nil, err
 	}
 	markVisibleAction(rc, "send_raw_message")
+	p.rememberBotDialogue(rc, input.Message, id)
 	encoded, _ := json.Marshal(payload)
 	err = p.saveMessage(GroupMessage{User: User{UserId: ctx.Event.SelfID, Nickname: selfNickname},
 		RawSegments: string(encoded), Content: input.Message.ExtractPlainText(), MsgType: getMsgType(input.Message),

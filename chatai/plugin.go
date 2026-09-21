@@ -184,6 +184,14 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		skillService.Directory = directory
 	}
 	c.skills = skillService
+	var memoryModel model.LargeModel
+	if c.conf.Agent.ConversationMemory.Enable {
+		route := c.conf.Routes.Memory
+		if !route.Configured() {
+			route = c.conf.Routes.Agent
+		}
+		memoryModel = c.routeModel(route, persona.ConversationMemorySystemPrompt(), true)
+	}
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
 		var vision model.LargeModel
@@ -208,8 +216,12 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
-			AgentModel:  c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
-			VisionModel: vision, MaxSteps: c.conf.Agent.MaxSteps,
+			ConversationMemory:   c.conf.Agent.ConversationMemory.Enable,
+			ConversationWindow:   time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second,
+			ConversationMaxChars: c.conf.Agent.ConversationMemory.MaxChars,
+			MemoryModel:          memoryModel,
+			AgentModel:           c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
+			VisionModel:          vision, MaxSteps: c.conf.Agent.MaxSteps,
 			MaxToolCalls:     c.conf.Agent.MaxToolCalls,
 			RunTimeout:       time.Duration(c.conf.Agent.RunTimeoutSeconds) * time.Second,
 			ContextLimit:     c.conf.Agent.ContextLimit,
@@ -267,4 +279,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.3.5" }
+func (c *ChatPlugin) Version() string      { return "v1.3.6" }

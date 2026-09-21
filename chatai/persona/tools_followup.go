@@ -82,6 +82,7 @@ func (p *Persona) handleAskUserAndWait(rc *agent.RunContext, raw json.RawMessage
 	defer timer.Stop()
 	rc.SetWaitingForUser(true)
 	defer rc.SetWaitingForUser(false)
+	p.rememberBotDialogue(rc, segments, messageID)
 	if err := p.recordBotMessage(ctx, segments, messageID); err != nil {
 		return nil, err
 	}
@@ -93,6 +94,7 @@ func (p *Persona) handleAskUserAndWait(rc *agent.RunContext, raw json.RawMessage
 	select {
 	case reply := <-waiter.reply:
 		keepWaiting = false
+		p.rememberFollowUp(rc, reply)
 		return followUpReplyResult(messageID, reply), nil
 	case <-timer.C:
 		if p.cancelFollowUp(waiter) {
@@ -107,6 +109,7 @@ func (p *Persona) handleAskUserAndWait(rc *agent.RunContext, raw json.RawMessage
 		// Delivery won the race with the timer and already queued the reply.
 		reply := <-waiter.reply
 		keepWaiting = false
+		p.rememberFollowUp(rc, reply)
 		return followUpReplyResult(messageID, reply), nil
 	case <-done:
 		if p.cancelFollowUp(waiter) {
@@ -115,6 +118,7 @@ func (p *Persona) handleAskUserAndWait(rc *agent.RunContext, raw json.RawMessage
 		}
 		reply := <-waiter.reply
 		keepWaiting = false
+		p.rememberFollowUp(rc, reply)
 		return followUpReplyResult(messageID, reply), nil
 	}
 }

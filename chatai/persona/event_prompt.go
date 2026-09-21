@@ -17,6 +17,7 @@ type agentEventEnvelope struct {
 	Actor         eventActor         `json:"actor"`
 	Message       *timeMessageResult `json:"message,omitempty"`
 	ScheduledTask *scheduledTask     `json:"scheduled_task,omitempty"`
+	Conversation  *conversationNote  `json:"conversation_memory,omitempty"`
 }
 
 type eventActor struct {
@@ -44,6 +45,7 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string, selfUserID int
 		envelope.Kind = "scheduled_task_due"
 		envelope.ScheduledTask = &scheduledTask{Instruction: scheduled}
 	} else {
+		envelope.Conversation = p.conversationNote(msg.User.UserId, time.Now())
 		result := timeMessageResults([]GroupMessage{msg}, selfUserID)[0]
 		envelope.Message = &result
 	}

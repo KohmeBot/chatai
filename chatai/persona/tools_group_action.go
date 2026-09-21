@@ -100,6 +100,7 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 		return nil, err
 	}
 	markVisibleAction(rc, "send_image")
+	p.rememberBotDialogue(rc, segments, id)
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
 		return nil, err
 	}
@@ -138,6 +139,7 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 		return nil, err
 	}
 	markVisibleAction(rc, "send_message")
+	p.rememberBotDialogue(rc, segments, id)
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
 		return nil, err
 	}
@@ -181,6 +183,7 @@ func (p *Persona) handleSendMessages(rc *agent.RunContext, raw json.RawMessage) 
 			return map[string]any{"message_ids": ids, "failed_index": i, "unsent_messages": input.Messages[i:]}, fmt.Errorf("batch stopped at index %d; %d messages already sent: %w", i, len(ids), err)
 		}
 		markVisibleAction(rc, "send_messages")
+		p.rememberBotDialogue(rc, segments, id)
 		if err := p.recordBotMessage(ctx, segments, id); err != nil {
 			return nil, err
 		}
@@ -229,6 +232,7 @@ func (p *Persona) handleAtUser(rc *agent.RunContext, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	markVisibleAction(rc, "at_user")
+	p.rememberBotDialogue(rc, segments, id)
 	if err := p.recordBotMessage(ctx, segments, id); err != nil {
 		return nil, err
 	}

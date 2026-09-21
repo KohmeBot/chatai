@@ -54,20 +54,27 @@ type ConfiguredSkill struct {
 }
 
 type AgentConfig struct {
-	MaxSteps               int      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大模型决策轮数,minimum=1,maximum=20"`
-	MaxToolCalls           int      `yaml:"max_tool_calls" jsonschema:"description=单次 Agent 最大工具调用总数,minimum=1,maximum=100"`
-	RunTimeoutSeconds      int      `yaml:"run_timeout_seconds" jsonschema:"description=单次 Agent 执行超时秒数,minimum=30,maximum=900"`
-	ContextLimit           int      `yaml:"context_limit" jsonschema:"description=上下文工具默认返回的最大消息数,minimum=1,maximum=200"`
-	WebBrowserEnable       bool     `yaml:"web_browser_enable" jsonschema:"description=网页搜索和读取是否使用 Chrome 浏览器"`
-	WebBrowserAddress      string   `yaml:"web_browser_address" jsonschema:"description=Chrome 远程调试 HTTP 或 WebSocket 地址；留空时启动本机 Chrome"`
-	ScheduleMaxSec         int      `yaml:"schedule_max_seconds" jsonschema:"description=定时任务允许的最大延迟秒数"`
-	ProgressAfterSeconds   int      `yaml:"progress_after_seconds" jsonschema:"description=Agent 耗时多久后向触发者发送决策进展,minimum=5,maximum=60"`
-	ProgressTips           []string `yaml:"progress_tips" jsonschema:"description=Agent 耗时较久时循环发送的固定提示文案"`
-	WebSearchPreferSeconds int      `yaml:"web_search_prefer_seconds" jsonschema:"description=搜索 fallback 成功后优先使用该引擎的秒数,minimum=60"`
+	ConversationMemory     ConversationMemoryConfig `yaml:"conversation_memory" jsonschema:"description=按群和用户隔离的短期对话记忆"`
+	MaxSteps               int                      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大模型决策轮数,minimum=1,maximum=20"`
+	MaxToolCalls           int                      `yaml:"max_tool_calls" jsonschema:"description=单次 Agent 最大工具调用总数,minimum=1,maximum=100"`
+	RunTimeoutSeconds      int                      `yaml:"run_timeout_seconds" jsonschema:"description=单次 Agent 执行超时秒数,minimum=30,maximum=900"`
+	ContextLimit           int                      `yaml:"context_limit" jsonschema:"description=上下文工具默认返回的最大消息数,minimum=1,maximum=200"`
+	WebBrowserEnable       bool                     `yaml:"web_browser_enable" jsonschema:"description=网页搜索和读取是否使用 Chrome 浏览器"`
+	WebBrowserAddress      string                   `yaml:"web_browser_address" jsonschema:"description=Chrome 远程调试 HTTP 或 WebSocket 地址；留空时启动本机 Chrome"`
+	ScheduleMaxSec         int                      `yaml:"schedule_max_seconds" jsonschema:"description=定时任务允许的最大延迟秒数"`
+	ProgressAfterSeconds   int                      `yaml:"progress_after_seconds" jsonschema:"description=Agent 耗时多久后向触发者发送决策进展,minimum=5,maximum=60"`
+	ProgressTips           []string                 `yaml:"progress_tips" jsonschema:"description=Agent 耗时较久时循环发送的固定提示文案"`
+	WebSearchPreferSeconds int                      `yaml:"web_search_prefer_seconds" jsonschema:"description=搜索 fallback 成功后优先使用该引擎的秒数,minimum=60"`
 
 	UseSearchAPI       bool              `yaml:"use_search_api" jsonschema:"description=是否启用搜索API"`
 	SearchProviderName string            `yaml:"search_provider_name" jsonschema:"description=搜索API提供商名称,enum=bocha"`
 	SearchProviders    []SearchAPIConfig `yaml:"search_providers" jsonschema:"description=搜索API提供商配置"`
+}
+
+type ConversationMemoryConfig struct {
+	Enable        bool `yaml:"enable" jsonschema:"description=是否启用短期对话记忆"`
+	WindowSeconds int  `yaml:"window_seconds" jsonschema:"description=无互动后过期秒数，默认600,minimum=1"`
+	MaxChars      int  `yaml:"max_chars" jsonschema:"description=对话压缩阈值及摘要字符上限，默认200,minimum=64"`
 }
 
 type RepeatConfig struct {
@@ -85,6 +92,7 @@ type ImpressionConfig struct {
 }
 
 type ModelRoutes struct {
+	Memory ModelRouteConfig `yaml:"memory" jsonschema:"description=短期对话压缩模型；不配置时使用 Agent 模型"`
 	Agent  ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
 	Vision ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
 	Skill  ModelRouteConfig `yaml:"skill" jsonschema:"description=自生成 Skill 反思模型；不配置时使用 Agent 模型"`
