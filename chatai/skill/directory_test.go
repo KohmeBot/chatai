@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,31 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestDirectoryMultiSkillSearchAndExactName(t *testing.T) {
+	d, err := NewDirectory(t.TempDir())
+	require.NoError(t, err)
+	for i := 0; i < 25; i++ {
+		name := fmt.Sprintf("report-%02d", i)
+		require.NoError(t, d.Save(name, "", fmt.Sprintf("---\nname: %s\ndescription: 用于分析报告\ntriggers: [分析报告]\n---\nBODY_SENTINEL", name), false))
+	}
+	s := NewService(nil, nil, Options{Enabled: true})
+	s.Directory = d
+	for _, tc := range []struct{ limit, want int }{{0, 5}, {3, 3}, {100, 20}} {
+		matches, err := s.SearchActiveSkills(1, "分析报告", tc.limit)
+		require.NoError(t, err)
+		require.Len(t, matches, tc.want)
+	}
+	matches, err := d.Search("分析报告，请使用 $report-24", 1)
+	require.NoError(t, err)
+	require.Equal(t, "report-24", matches[0].Name)
+	require.Empty(t, matches[0].Markdown)
+	require.False(t, mentionsSkillName("$report-240", "report-24"))
+	items, err := s.ListSkillSummaries()
+	require.NoError(t, err)
+	require.Len(t, items, 25)
+	require.Equal(t, []string{"分析报告"}, items[0].Triggers)
+}
 
 const testSkill = "---\nname: chat-summary\ndescription: 总结群聊\ntriggers: [总结群聊]\nnon_triggers: [总结外部文章]\n---\n# Summary\n按需读取 references/examples.md。BODY_SENTINEL\n"
 

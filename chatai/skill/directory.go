@@ -128,15 +128,29 @@ func (d *Directory) Search(query string, limit int) ([]agent.SkillMatch, error) 
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
-	if limit <= 0 {
-		limit = 2
-	}
+	limit = agent.SkillSearchLimit(limit)
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
 	result := make([]agent.SkillMatch, 0, len(hits))
 	for _, h := range hits {
-		result = append(result, agent.SkillMatch{Name: h.m.Name, Description: h.m.Description, Path: h.m.Path, RequiredTools: []string{"read_skill"}})
+		result = append(result, agent.SkillMatch{Score: h.score, Name: h.m.Name, Description: h.m.Description, Path: h.m.Path, RequiredTools: []string{"read_skill"}})
+	}
+	return result, nil
+}
+
+// ListSkillSummaries exposes current metadata without reading skill bodies.
+func (s *Service) ListSkillSummaries() ([]agent.SkillSummary, error) {
+	if s == nil || !s.opts.Enabled || s.Directory == nil {
+		return nil, nil
+	}
+	items, err := s.Directory.List()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]agent.SkillSummary, 0, len(items))
+	for _, m := range items {
+		result = append(result, agent.SkillSummary{Name: m.Name, Description: m.Description, Path: m.Path, Triggers: m.Triggers, NonTriggers: m.NonTriggers})
 	}
 	return result, nil
 }

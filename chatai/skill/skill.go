@@ -510,9 +510,7 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 	if s == nil || !s.opts.Enabled || groupID == 0 {
 		return nil, nil
 	}
-	if limit <= 0 || limit > 2 {
-		limit = 2
-	}
+	limit = agent.SkillSearchLimit(limit)
 	var directoryMatches []agent.SkillMatch
 	if s.Directory != nil {
 		var err error
@@ -535,8 +533,13 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 	}
 	result := append([]agent.SkillMatch{}, directoryMatches...)
 	for _, row := range rows {
-		result = append(result, agent.SkillMatch{ID: row.ID, Name: row.Name, Description: row.Description,
+		result = append(result, agent.SkillMatch{Score: matchScore(query, row), ID: row.ID, Name: row.Name, Description: row.Description,
 			Markdown: row.MarkdownText(), RequiredTools: row.RequiredTools()})
+	}
+	// Rank both sources together; prefer directory skills only on equal scores.
+	sort.SliceStable(result, func(i, j int) bool { return result[i].Score > result[j].Score })
+	if len(result) > limit {
+		result = result[:limit]
 	}
 	return result, nil
 }
@@ -1083,6 +1086,11 @@ func toolsCovered(required, actual []string) bool {
 }
 
 func matchScore(query string, row Record) float64 {
+	// Explicit names (including $name) outrank approximate descriptions. Keep
+	// token boundaries so e.g. "pdf" does not match "pdf-tools" by name alone.
+	if mentionsSkillName(query, row.Name) {
+		return 2
+	}
 	queryNormalized := normalizeMatchText(query)
 	if queryNormalized == "" {
 		return 0
@@ -1102,6 +1110,20 @@ func matchScore(query string, row Record) float64 {
 		}
 	}
 	return best
+}
+
+func mentionsSkillName(query, name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, word := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_'
+	}) {
+		if word == strings.ToLower(name) {
+			return true
+		}
+	}
+	return false
 }
 
 // ngramCoverage 以候选触发词为分母，避免完整事件 Prompt 很长时稀释短触发词。

@@ -34,6 +34,13 @@ func TestSkillToolsSaveReadAndDiscover(t *testing.T) {
 	result, err = registered["list_skills"].Handler(nil, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	require.Len(t, result.([]skill.Metadata), 1)
+	result, err = registered["search_skills"].Handler(nil, json.RawMessage(`{"query":"demo"}`))
+	require.NoError(t, err)
+	items := result.([]agent.SkillSummary)
+	require.Len(t, items, 1)
+	require.Equal(t, "demo/SKILL.md", items[0].Path)
+	_, err = registered["search_skills"].Handler(nil, json.RawMessage(`{"query":`))
+	require.Error(t, err)
 	disabled := &Persona{tools: agent.NewRegistry()}
 	disabled.registerBuiltinTools()
 	require.NotContains(t, disabled.ToolNames(), "save_skill")

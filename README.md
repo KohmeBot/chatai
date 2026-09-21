@@ -182,7 +182,7 @@ Agent 可以使用以下能力：
 - 读取公开 HTTP/HTTPS 网页
 - 使用视觉模型理解 HTTP/HTTPS 图片 URL（仅在配置 `routes.vision` 后提供）
 
-触发事件会以结构化 `EventEnvelope` 交给模型，身份、目标用户、引用消息与正文彼此分离；消息、网页、图片文字、工具结果和 Skill Markdown 都按不可信数据处理。Agent 起初只看到 `search_tools`，搜索命中的少量能力才会在后续轮次暴露。搜索结果同时给出命名空间、只读性、幂等性、副作用、`group_action` 标签和风险等级，中文任务会使用本地字符语义匹配补充精确关键词匹配。
+触发事件会以结构化 `EventEnvelope` 交给模型，身份、目标用户、引用消息与正文彼此分离；消息、网页、图片文字、工具结果和 Skill Markdown 都按不可信数据处理。Agent 默认只看到 `search_tools`；启用目录 Skills 时还会提供技能摘要和读取、搜索、列表工具，其他能力在搜索命中后才会暴露。搜索结果同时给出命名空间、只读性、幂等性、副作用、`group_action` 标签和风险等级，中文任务会使用本地字符语义匹配补充精确关键词匹配。
 
 每次 Agent 运行都必须成功调用至少一个 `group_action=true` 的工具；普通文字也由模型调用 `send_message` 发送，宿主不会直发模型的普通 assistant 文本。群聊动作成功后，其结果仍会交回模型继续决策，直到模型主动停止调用工具；已经成功完成群聊动作后，后续重复的群聊动作会被拒绝，避免重复发送。模型轮数、工具调用总数和整轮超时分别受独立预算约束；模型未完成群聊动作或接口失败时，本轮返回错误而不绕过工具协议直发文本。
 
@@ -258,7 +258,7 @@ skills:
 
 自动生成的 Skill 使用 `global/generated` 作用域。不同群产生相似描述和相同工具组合时，会合并到同一个记录并累计各群证据。默认只生成和影子验证候选；启用 `auto_activate_generated` 后，候选达到 `activation_evidence`、`global_min_groups` 且成功率不低于 80% 才转为 `active`。关闭该开关不会自动停用数据库中已经 Active 的 Skill。升级后的第一次启动会把旧版群级记录迁移为全局记录并合并重复项。
 
-`skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。旧配置继续兼容；新技能推荐使用下面的目录格式。当前不支持群级目录 Skill，也不会自动执行 Skill 脚本。
+`skills.global` 声明的是 `global/config` Skill。`name` 和 `description` 用于标识与召回，`triggers`、`non_triggers` 保留显式的正反触发条件，`markdown` 是命中后完整交给 Agent 的 Markdown 行为说明。它们以配置为准并立即 Active；内容变化时增加版本，配置中删除后自动停用。配置 Skill 与自动生成 Skill 重复时，保留配置内容并把已有证据合并到配置记录。配置 Skill 不设置有效期，也不会因为运行失败自动停用，但会记录使用结果。旧配置继续兼容；新技能推荐使用下面的目录格式。当前不支持群级目录 Skill。目录中的 Python 脚本可由 Agent 显式调用 run_skill_script，通过 pyrunner SDK 执行。
 
 数据库中的 Active Skill 被 `search_tools` 命中时仍返回完整 Markdown；目录 Skill 只返回路由摘要和入口路径。配置 Skill 可以只是行为规范，不要求绑定工具；需要某种执行能力时，Markdown 应指导 Agent 通过 `search_tools` 加载。自动生成 Skill 仍会在内部记录成功轨迹实际使用过的工具，用于候选验证、合并和可选的自动激活，但该工具索引不是 Skill 内容，也不需要管理员配置。Skill 的技术成功要求群聊动作已执行、用户可见回复确实送达且整轮无终止错误；某个可选只读工具失败后若仍通过群聊动作正确完成回复，不会误判整轮失败。
 
@@ -297,19 +297,26 @@ non_triggers: [总结外部文章]
 
 渐进式加载过程：
 
-1. `search_tools` 根据名称、描述和触发条件召回目录 Skill，返回 `name`、`description`、`path`，并激活 `read_skill`。
-2. Agent 调用 `read_skill(name="chat-summary")` 读取 `SKILL.md`。
+1. Agent 首轮可见目录 Skill 的名称、适用场景、入口路径和正反触发条件（总预算 8000 字符，超出会明确提示），同时可直接调用 `read_skill`、`search_skills`、`list_skills`。只读取元数据，不预加载正文或执行脚本；每次运行刷新目录。
+2. Agent 根据用户明确点名与适用场景，选择覆盖当前任务所需的最小技能集合，可以组合多个，也可以不用。分别调用 `read_skill(name="chat-summary")` 读取选中技能的 `SKILL.md`。
 3. 仅在需要时调用 `read_skill(name="chat-summary", file="references/examples.md")` 读取辅助文件，`file` 相对于该技能文件夹。
+
+`search_skills(query, limit)` 独立检索目录技能摘要；`search_tools` 仍可同时召回目录技能和数据库经验。默认返回 5 个 Skill 候选，最多 20 个，不再限制为一个；混合来源按匹配分排序并共享数量预算。明确的完整技能名（含 `$name`）优先于模糊描述匹配，负触发条件仍生效。搜索只使用本次查询，不拼接整段历史消息。未命中或首轮摘要被截断时，Agent 可以用 `list_skills` 浏览完整目录，根据描述选择后直接读取。
+
+此发现方式参考 [Codex 的渐进式技能加载](https://learn.chatgpt.com/docs/customization/overview)：先展示元数据，再按需读取正文、参考文件与脚本。建议 description 写清楚“何时使用 / 何时不使用”，便于模型判断，而不是只堆关键词。
 
 新增工具均可通过 `search_tools` 发现：
 
 | 工具 | 功能 |
 | --- | --- |
 | `list_skills` | 列出目录技能的元数据，不读取正文 |
+| `search_skills` | 按目标或完整名称搜索多个目录技能摘要，默认 5 个，最多 20 个 |
 | `read_skill` | 读取指定技能内的一个 UTF-8 文本文件，默认 `SKILL.md` |
 | `save_skill` | 保存一个技能文件，参数为 `name`、`content`，可选 `file` 和 `overwrite` |
+| `list_skill_files` | 递归列出指定 `name` 下的文件相对路径和大小，不读取正文 |
+| `run_skill_script` | 通过 pyrunner 运行 `name` 内的 `.py` 入口 `file`，可选 `args` 和 `timeout_seconds` |
 
-Agent 先用 `save_skill` 创建完整的 `SKILL.md`，再保存参考文件。保存后下次搜索立即可见，无需重启。默认拒绝覆盖已有文件；更新时先读取旧内容，再显式传入 `overwrite=true`。文件读写限定在对应技能目录内，拒绝路径穿越及越界符号链接，每个文本文件最多 5 MiB。工具只保存和读取文件，不运行脚本。
+Agent 先用 `save_skill` 创建完整的 `SKILL.md`，再保存参考文件。保存后下次搜索立即可见，无需重启。默认拒绝覆盖已有文件；更新时先读取旧内容，再显式传入 `overwrite=true`。文件读写限定在对应技能目录内，拒绝路径穿越及越界符号链接，每个文本文件最多 5 MiB。保存和读取不会触发执行；脚本须通过 run_skill_script 显式运行。
 
 目录 Skill 保存后立即可用，不参与数据库经验的候选验证、TTL 或激活额度。原有经验总结、影子验证和自动学习机制继续保留；`skills.global` 也仍然有效。关闭 `skills.enable` 会同时关闭目录技能工具和经验学习。插件 `OnBoot` 输出已注册 tools，以及目录 skills 的摘要、数据库 skills 的来源与状态。
 
@@ -387,3 +394,44 @@ impression:
 ### 网页读取失败
 
 网页必须是公开的 HTTP/HTTPS 地址。内网地址、本机地址、响应过大的页面、超时页面或重定向到内网的页面会被拒绝。启用浏览器模式时，还需要确认本机已安装 Chrome/Chromium，或 `web_browser_address` 指向可访问的 Chrome DevTools 服务。
+
+### Skill Python 脚本执行
+
+在 `plugins.yaml` 同时启用 `pyrunner`，并开启 chatai 的 `skills.enable`：
+
+```yaml
+pyrunner:
+  repo: github.com/kohmebot/pyrunner
+chatai:
+  repo: github.com/kohmebot/chatai
+  conf:
+    skills:
+      enable: true
+```
+
+SDK 在工具调用时查找 pyrunner，避免插件初始化顺序影响其他技能工具。未启用 pyrunner 时，执行工具返回明确错误，技能读写仍然可用。
+
+示例目录：
+
+```text
+skills/report/
+  SKILL.md
+  requirements.txt
+  scripts/
+    main.py
+    helper.py
+  assets/
+    input.json
+```
+
+`SKILL.md` 使用 `name: report` 的 front matter，并说明脚本入口、参数和输出。Agent 先读取说明及相关脚本，再调用：
+
+```json
+{"name":"report","file":"scripts/main.py","args":["--format","json"],"timeout_seconds":60}
+```
+
+调用会创建整个 Skill 的临时快照，再通过 `pyrunnersdk.Invoker.Run` 以 `Path` 和 `EntryPoint` 运行。工作目录是项目根目录，保留辅助模块及资源的相对路径；脚本可按标准 Python 规则导入模块。项目根目录的 `requirements.txt`、入口 PEP 723 依赖或 `pyproject.toml` 交由 pyrunner 安装。无需将源代码拼入 shell，也不暴露任意宿主路径参数。
+
+快照拒绝路径穿越、符号链接和特殊文件，最多 1000 个文件、合计 10 MiB。执行默认超时 60 秒，可设置 1–180 秒，并受 Agent 本轮剩余时间限制；依赖安装也计入超时。沙箱后端、网络、资源和输出限制由 pyrunner 配置决定，Python 依赖安装阶段可能联网。依赖与脚本应来自可信来源。
+
+返回 `success`、`stdout`、`stderr`、`output`、`exit_code`、`timed_out`、`output_truncated`、`duration_ms`、`environment`、`sandbox_backend` 和 `dependencies_installed`。失败时仍保留 SDK 提供的诊断信息。运行结束清理临时副本，不改写原 Skill，也不持久化生成文件；需交给 Agent 的结果应输出至 stdout。

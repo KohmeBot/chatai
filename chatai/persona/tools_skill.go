@@ -12,6 +12,31 @@ func (p *Persona) skillTools() []agent.Tool {
 	}
 	d := p.opts.Skills.Directory
 	return []agent.Tool{
+		p.listSkillFilesTool(),
+		p.runSkillScriptTool(),
+		{
+			Definition: agent.Function("search_skills", "按任务目标搜索可用目录 Skills，返回多个候选的名称、适用场景和入口路径，不读取正文。可按名称搜索；选择相关技能后分别 read_skill，可组合多个技能。无匹配时用 list_skills 浏览，勿猜测名称", map[string]any{"query": stringProperty("任务目标或明确的技能名称"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 20, "description": "候选数量，默认5，最多20"}}, "query"),
+			Namespace:  "skill", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow,
+			SearchTerms: []string{"搜索技能", "查找技能", "skills", "search skills"},
+			Handler: func(_ *agent.RunContext, raw json.RawMessage) (any, error) {
+				var in struct {
+					Query string `json:"query"`
+					Limit int    `json:"limit"`
+				}
+				if err := json.Unmarshal(raw, &in); err != nil {
+					return nil, err
+				}
+				matches, err := d.Search(in.Query, in.Limit)
+				if err != nil {
+					return nil, err
+				}
+				items := make([]agent.SkillSummary, 0, len(matches))
+				for _, m := range matches {
+					items = append(items, agent.SkillSummary{Name: m.Name, Description: m.Description, Path: m.Path})
+				}
+				return items, nil
+			},
+		},
 		{
 			Definition: agent.Function("list_skills", "列出目录 Skill 的名称、描述和入口路径，不读取正文；根据任务选择后使用 read_skill", map[string]any{}),
 			Namespace:  "skill", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow,

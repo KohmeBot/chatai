@@ -349,6 +349,7 @@ type SearchResult struct {
 
 // SkillMatch 是 Skill 系统向 Runner 暴露的只读、已验证能力说明。
 type SkillMatch struct {
+	Score         float64 // Internal ranking across directory and database sources.
 	Path          string
 	ID            uint
 	Name          string
@@ -547,7 +548,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	ctx.startTrace(runID, prompt)
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
-	question := prompt
+	question := prompt + r.skillCatalogPrompt(activeTools)
 	var postDeliveryErr error
 	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d max_tool_calls=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, maxToolCalls, r.RequireAction, imageURL != "", logValue(prompt))
 	for i := 0; i < steps; i++ {
@@ -689,8 +690,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 						found[i].Kind = "tool"
 					}
 					if r.Skills != nil {
-						const skillLimit = 1
-						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query+"\n"+content, skillLimit)
+						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query, SkillSearchLimit(input.Limit))
 						if skillErr != nil {
 							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%s error=%v", runID, logValue(input.Query), skillErr)
 						} else {
