@@ -6,7 +6,15 @@ import (
 	"github.com/kohmebot/plugin/v2/ui"
 )
 
+type MonitorConfig struct {
+	Enable      bool      `yaml:"enable" jsonschema:"description=启用 Agent 实时监控网页"`
+	Listen      string    `yaml:"listen" jsonschema:"description=监听地址，默认127.0.0.1:9086"`
+	AccessToken ui.Secret `yaml:"access_token" jsonschema:"description=监控访问口令，启用时必填"`
+	MaxRuns     int       `yaml:"max_runs" jsonschema:"description=内存保留运行数量，默认200，最大2000,minimum=1,maximum=2000"`
+}
+
 type Config struct {
+	Monitor      MonitorConfig         `yaml:"monitor" jsonschema:"description=Agent 运行监控"`
 	System       ui.TextArea           `yaml:"system" jsonschema:"description=Agent 系统提示词"`
 	ProviderName string                `yaml:"provider_name" jsonschema:"description=默认供应商,enum=tongyi,enum=deepseek"`
 	ModelName    string                `yaml:"model_name" jsonschema:"description=默认模型名称"`

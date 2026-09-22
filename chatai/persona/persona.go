@@ -49,6 +49,7 @@ EventEnvelope 的 conversation_memory 是同群同用户近期对外对话或压
 func AgentRules() string { return agentRules }
 
 type Options struct {
+	Observer               agent.Observer
 	ConversationMemory     bool
 	ConversationWindow     time.Duration
 	ConversationMaxChars   int
@@ -195,7 +196,7 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	runner := p.agentRunner(agentModel)
 	executionCtx, cancel := context.WithTimeout(context.Background(), p.opts.RunTimeout)
 	defer cancel()
-	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
+	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, UserName: msg.User.Nickname, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
 	runCtx.ReportDeliveryFailure(deliveryErr)
 	if p.opts.ConversationMemory && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
 		runCtx.Values[conversationTurnKey] = &conversationTurn{}
@@ -205,7 +206,11 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	done := make(chan struct{})
 	go p.reportSlowDecision(ctx, runCtx, done)
 
-	_, runErr := runner.Run(runCtx, prompt, msg.Content, imageURL, p.defaultAgentTools...)
+	triggerContent := msg.Content
+	if scheduledInstruction != "" {
+		triggerContent = "[定时任务] " + scheduledInstruction
+	}
+	_, runErr := runner.Run(runCtx, prompt, triggerContent, imageURL, p.defaultAgentTools...)
 	close(done)
 	if !runCtx.ActionPerformed() {
 		logrus.Warnf("[Agent][group=%d user=%d][未发送] 本轮没有成功执行群聊动作，宿主不会直发模型文本；error=%v", p.groupID, msg.User.UserId, runErr)
@@ -219,7 +224,7 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 
 func (p *Persona) agentRunner(agentModel model.LargeModel) agent.Runner {
 	return agent.Runner{
-		Model: agentModel, Tools: p.tools, Skills: p.opts.Skills,
+		Observer: p.opts.Observer, Model: agentModel, Tools: p.tools, Skills: p.opts.Skills,
 		MaxSteps: p.opts.MaxSteps, MaxToolCalls: p.opts.MaxToolCalls,
 		RequireAction: true,
 	}

@@ -3,6 +3,7 @@ package chatai
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/favor"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/factory"
+	"github.com/kohmebot/chatai/chatai/monitor"
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/chatai/chatai/pkg/search"
 	factory2 "github.com/kohmebot/chatai/chatai/pkg/search/factory"
@@ -21,8 +23,10 @@ import (
 )
 
 type ChatPlugin struct {
-	conf Config
-	env  plugin.Env
+	monitor       *monitor.Store
+	monitorServer *http.Server
+	conf          Config
+	env           plugin.Env
 
 	joinGroupModel model.LargeModel
 	otherModel     model.LargeModel
@@ -85,7 +89,7 @@ func (c *ChatPlugin) routeModel(route ModelRouteConfig, system string, responseJ
 	if route.MaxTokens > 0 {
 		maxTokens = route.MaxTokens
 	}
-	return factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, MaxTokens: maxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db})
+	return namedModel{LargeModel: factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, MaxTokens: maxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db}), name: name}
 }
 
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
@@ -192,6 +196,13 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 		memoryModel = c.routeModel(route, persona.ConversationMemorySystemPrompt(), true)
 	}
+	if err := c.startMonitor(); err != nil {
+		return err
+	}
+	var observer agent.Observer
+	if c.monitor != nil {
+		observer = c.monitor.Observe
+	}
 	c.personaMap = make(map[int64]*persona.Persona)
 	for group := range env.Groups().RangeGroup() {
 		var vision model.LargeModel
@@ -216,6 +227,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
+			Observer:             observer,
 			ConversationMemory:   c.conf.Agent.ConversationMemory.Enable,
 			ConversationWindow:   time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second,
 			ConversationMaxChars: c.conf.Agent.ConversationMemory.MaxChars,
@@ -279,4 +291,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.3.6" }
+func (c *ChatPlugin) Version() string      { return "v1.3.7" }

@@ -17,10 +17,12 @@ import (
 
 // RunContext 是一次 Agent 执行的运行时环境。Values 可供插件扩展工具传递自定义依赖。
 type RunContext struct {
+	observer Observer
 	context.Context
-	GroupID int64
-	UserID  int64
-	Values  map[string]any
+	GroupID  int64
+	UserID   int64
+	UserName string
+	Values   map[string]any
 
 	actionMu              sync.RWMutex
 	actionPerformed       bool
@@ -503,6 +505,7 @@ func (r *Registry) execute(ctx *RunContext, call model.ToolCall) (any, error) {
 }
 
 type Runner struct {
+	Observer      Observer
 	Model         model.LargeModel
 	Tools         *Registry
 	Skills        SkillSearcher
@@ -546,6 +549,16 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	}
 	runID := runSequence.Add(1)
 	ctx.startTrace(runID, prompt)
+	ctx.observer = r.Observer
+	modelName := "unknown"
+	if named, ok := r.Model.(interface{ ModelName() string }); ok {
+		modelName = named.ModelName()
+	}
+	ctx.emit(Event{Kind: "run_started", Model: modelName, Text: content, UserName: ctx.UserName})
+	defer func() {
+		trace := ctx.Trace()
+		ctx.emit(Event{Kind: "run_finished", Text: trace.FinalAnswer, Error: trace.Error, DurationMS: trace.Duration.Milliseconds()})
+	}()
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
 	question := prompt + r.skillCatalogPrompt(activeTools)
@@ -583,6 +596,8 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			}
 		}
 		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v question=%s", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions), logValue(question))
+		ctx.emit(Event{Kind: "model_started", Step: i + 1, Model: modelName})
+		modelStarted := time.Now()
 		response := new(model.Response)
 		err := r.Model.Request(&model.Request{
 			Context:  ctx.Context,
@@ -591,6 +606,11 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			Tools:    definitions,
 			ImageURL: imageURL,
 		}, response)
+		modelEvent := Event{Kind: "model_finished", Step: i + 1, Model: modelName, Text: response.Answer, Reasoning: response.Reasoning, InputTokens: response.InputToken, OutputTokens: response.OutToken, DurationMS: time.Since(modelStarted).Milliseconds(), Error: response.ErrorMsg}
+		if err != nil {
+			modelEvent.Error = err.Error()
+		}
+		ctx.emit(modelEvent)
 		if err != nil {
 			ctx.finishTrace("", err)
 			logrus.Errorf("[Agent][run=%d][模型请求失败] step=%d/%d error=%v", runID, i+1, steps, err)
@@ -661,6 +681,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			var result any
 			var callErr error
 			callStarted := time.Now()
+			ctx.emit(Event{Kind: "tool_started", Step: i + 1, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
 			groupAction := r.Tools.isGroupAction(call.Function.Name)
 			if !deliveryFailed {
 				toolCallCount++
@@ -711,6 +732,9 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
 									Namespace: "skill", ReadOnly: true, Idempotent: true, Risk: string(ToolRiskLow), Markdown: item.Markdown, Path: item.Path})
 								ctx.markSkillUsed(item.ID)
+								if item.Markdown != "" {
+									ctx.emit(Event{Kind: "skill_loaded", Step: i + 1, CallID: call.ID, Name: item.Name, Text: item.Path})
+								}
 								for _, toolName := range validTools {
 									activeTools[toolName] = true
 								}
@@ -738,6 +762,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 					ctx.MarkResponseDelivered("tool:" + call.Function.Name)
 				}
 			}
+			ctx.observeToolResult(i+1, call, result, callErr, time.Since(callStarted))
 			ctx.recordToolCall(call.Function.Name, callErr == nil, groupAction, time.Since(callStarted))
 			if errors.Is(callErr, ErrMessageDeliveryFailed) {
 				deliveryFailed = true
