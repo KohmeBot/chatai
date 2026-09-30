@@ -512,8 +512,8 @@ type Runner struct {
 	MaxSteps      int
 	MaxToolCalls  int
 	RequireAction bool
-	// StopAfterGroupAction prevents duplicate visible replies. A group-action
-	// tool already delivered the response, so another model loop is unnecessary.
+	// StopAfterGroupAction optionally ends the run after the first successful
+	// group action. By default, the model may perform multiple group actions.
 	StopAfterGroupAction bool
 }
 
@@ -752,11 +752,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			} else if !activeTools[call.Function.Name] {
 				callErr = fmt.Errorf("tool %q is not active; call search_tools first", call.Function.Name)
 			} else {
-				if groupAction && ctx.ActionPerformed() {
-					callErr = errors.New("a visible group action was already completed; do not send a duplicate response")
-				} else {
-					result, callErr = r.Tools.execute(ctx, call)
-				}
+				result, callErr = r.Tools.execute(ctx, call)
 				if callErr == nil && groupAction {
 					ctx.MarkActionPerformed()
 					ctx.MarkResponseDelivered("tool:" + call.Function.Name)

@@ -56,7 +56,8 @@ func TestAgentRulesRequireFinalReplyThroughGroupAction(t *testing.T) {
 	require.Contains(t, agentRules, "每次 Agent 运行都必须成功调用至少一个 group_action=true")
 	require.Contains(t, agentRules, "普通 assistant 文本不会被宿主发送")
 	require.Contains(t, agentRules, "最终面向群友的内容必须通过群聊动作工具发送")
-	require.Contains(t, agentRules, "成功执行最终可见动作后立即停止，不要重复发送")
+	require.Contains(t, agentRules, "同一轮任务可以按需多次调用群聊动作工具")
+	require.Contains(t, agentRules, "完成任务所需的全部动作后停止，不要重复发送已成功的内容")
 }
 
 func TestPersonaRunnerRequiresActionAndWaitsForFinalDecision(t *testing.T) {

@@ -256,7 +256,56 @@ func TestRunnerStopsAfterDeliveredGroupActionWhenConfigured(t *testing.T) {
 	require.Equal(t, "tool:send_message", runCtx.Trace().DeliveryKind)
 }
 
-func TestRunnerRejectsDuplicateGroupActionsInOneDecision(t *testing.T) {
+func TestRunnerAllowsMultipleGroupActions(t *testing.T) {
+	for _, sameDecision := range []bool{true, false} {
+		name := "across_decisions"
+		if sameDecision {
+			name = "same_decision"
+		}
+		t.Run(name, func(t *testing.T) {
+			registry := NewRegistry()
+			var sent []string
+			for _, toolName := range []string{"send_message", "send_image"} {
+				require.NoError(t, registry.Register(Tool{
+					Definition: Function(toolName, "send", map[string]any{}), GroupAction: true,
+					Handler: func(_ *RunContext, raw json.RawMessage) (any, error) {
+						sent = append(sent, string(raw))
+						return "sent", nil
+					},
+				}))
+			}
+			calls := []model.ToolCall{
+				call("first", "send_message", `{"text":"first"}`),
+				call("second", "send_message", `{"text":"second"}`),
+				call("image", "send_image", `{"url":"image"}`),
+			}
+			llm := &scriptedModel{steps: []model.Response{
+				{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
+			}}
+			if sameDecision {
+				llm.steps = append(llm.steps, model.Response{ToolCalls: calls})
+			} else {
+				for _, toolCall := range calls {
+					llm.steps = append(llm.steps, model.Response{ToolCalls: []model.ToolCall{toolCall}})
+				}
+			}
+			llm.steps = append(llm.steps, model.Response{Answer: "done"})
+			runCtx := new(RunContext)
+			answer, err := (&Runner{Model: llm, Tools: registry, RequireAction: true}).Run(runCtx, "reply", "", "")
+			require.NoError(t, err)
+			require.Equal(t, "done", answer)
+			require.Equal(t, []string{calls[0].Function.Arguments, calls[1].Function.Arguments, calls[2].Function.Arguments}, sent)
+			require.Len(t, llm.requests, len(llm.steps))
+			require.True(t, runCtx.ActionPerformed())
+			require.True(t, runCtx.ResponseDelivered())
+			for _, toolCall := range runCtx.Trace().ToolCalls {
+				require.True(t, toolCall.OK)
+			}
+		})
+	}
+}
+
+func TestRunnerRejectsFurtherGroupActionsWhenStopConfigured(t *testing.T) {
 	registry := NewRegistry()
 	sendCount := 0
 	require.NoError(t, registry.Register(Tool{
