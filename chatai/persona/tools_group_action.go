@@ -16,7 +16,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 	return []agent.Tool{
 		{
 			Definition: agent.Function("send_image", "立即向当前群发送一张图片并可带一句话；成功的消息不可重复发送，message_id=0 时需修正后重试，成功后返回 message_id", map[string]any{
-				"url":  stringProperty("发送的图片URL"),
+				"url":  stringProperty("发送的图片URL或者是本地图片的路径"),
 				"text": stringProperty("可选，发送的图片附带的文字"),
 			}, "url"),
 			Namespace:   "chat",
