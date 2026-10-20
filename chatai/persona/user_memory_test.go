@@ -25,7 +25,7 @@ func memoryTestDB(t *testing.T) *gorm.DB {
 	raw, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = raw.Close() })
-	require.NoError(t, db.AutoMigrate(&UserMemory{}, &MemoryCursor{}, &MemoryAudit{}, &ChatMessageRecord{}, &UserImpression{}, &favor.FavorRecord{}))
+	require.NoError(t, db.AutoMigrate(&UserMemory{}, &MemoryCursor{}, &MemoryAudit{}, &PendingMemoryMessage{}, &ChatMessageRecord{}, &UserImpression{}, &favor.FavorRecord{}))
 	return db
 }
 
@@ -339,6 +339,7 @@ func TestMaintainerWorkerCoalescesObserveAndHonorsCancellation(t *testing.T) {
 		return req.Context.Err()
 	}}
 	worker := NewMemoryMaintainer(db, m, 10*time.Millisecond, 40)
+	worker.ObserveGroupChat = true
 	var wg sync.WaitGroup
 	for range 20 {
 		wg.Add(1)

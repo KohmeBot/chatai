@@ -92,8 +92,9 @@ type RepeatConfig struct {
 
 type ImpressionConfig struct {
 	Enable             bool `yaml:"enable" jsonschema:"description=启用后台结构化用户记忆维护和 Agent 记忆写入工具"`
+	ObserveGroupChat   bool `yaml:"observe_group_chat" jsonschema:"description=从所有群聊自动提取长期记忆；默认false，仅在Agent对话过期后提取"`
 	MaintenanceSeconds int  `yaml:"maintenance_seconds" jsonschema:"description=后台记忆维护间隔秒数，默认60,minimum=10"`
-	BatchSize          int  `yaml:"batch_size" jsonschema:"description=每群每次最多处理新增消息数，默认40,minimum=1,maximum=100"`
+	BatchSize          int  `yaml:"batch_size" jsonschema:"description=每个过期会话（全群模式为每群）每轮最多处理消息数，默认40,minimum=1,maximum=100"`
 
 	// Deprecated: 仅兼容旧配置；新后台维护使用 maintenance_seconds。
 	LegacyIntervalMinutes int `yaml:"interval_minutes,omitempty" jsonschema:"-"`

@@ -46,13 +46,16 @@ relationship描述熟悉程度和互动方式，score由宿主维护，只给-5�
 }
 
 type MemoryMaintainer struct {
-	db       *gorm.DB
-	model    model.LargeModel
-	interval time.Duration
-	batch    int
-	mu       sync.Mutex
-	groups   map[int64]int64
-	once     sync.Once
+	// Set at initialization. The zero value only processes expired Agent conversations.
+	ObserveGroupChat bool
+	db               *gorm.DB
+	model            model.LargeModel
+	interval         time.Duration
+	batch            int
+	mu               sync.Mutex
+	groups           map[int64]int64
+	once             sync.Once
+	active           map[conversationKey]int
 }
 
 func NewMemoryMaintainer(db *gorm.DB, m model.LargeModel, interval time.Duration, batch int) *MemoryMaintainer {
@@ -62,13 +65,13 @@ func NewMemoryMaintainer(db *gorm.DB, m model.LargeModel, interval time.Duration
 	if batch <= 0 || batch > 100 {
 		batch = 40
 	}
-	return &MemoryMaintainer{db: db, model: m, interval: interval, batch: batch, groups: make(map[int64]int64)}
+	return &MemoryMaintainer{db: db, model: m, interval: interval, batch: batch, groups: make(map[int64]int64), active: make(map[conversationKey]int)}
 }
 
 // Observe only registers work. The worker reads durable rows, never an unbounded
 // in-memory queue, and coalesces all messages in one group until the next tick.
 func (m *MemoryMaintainer) Observe(groupID, selfID int64) {
-	if m == nil || groupID <= 0 || selfID <= 0 {
+	if m == nil || !m.ObserveGroupChat || groupID <= 0 || selfID <= 0 {
 		return
 	}
 	m.mu.Lock()
@@ -89,6 +92,12 @@ func (m *MemoryMaintainer) Start(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					if !m.ObserveGroupChat {
+						if err := m.processConversations(ctx, time.Now()); err != nil {
+							logrus.Warnf("[Memory] 对话记忆维护失败，保留待处理消息: %v", err)
+						}
+						continue
+					}
 					m.mu.Lock()
 					groups := make(map[int64]int64, len(m.groups))
 					for groupID, selfID := range m.groups {
@@ -145,6 +154,21 @@ func (m *MemoryMaintainer) process(ctx context.Context, groupID, selfID int64) e
 	if len(rows) == 0 {
 		return nil
 	}
+	return m.processRows(ctx, groupID, selfID, rows, func(tx *gorm.DB, consumed []ChatMessageRecord) error {
+		result := tx.Model(&MemoryCursor{}).Where("group_id = ? AND last_id = ?", groupID, cursor.LastID).Update("last_id", consumed[len(consumed)-1].ID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("memory cursor changed")
+		}
+		return nil
+	})
+}
+
+// Both modes share evidence validation and atomic profile/audit persistence.
+func (m *MemoryMaintainer) processRows(ctx context.Context, groupID, selfID int64, rows []ChatMessageRecord, commit func(*gorm.DB, []ChatMessageRecord) error) error {
+	db := m.db.WithContext(ctx)
 	profiles := make(map[int64]UserProfile)
 	eligible := make([]int64, 0)
 	// At most ten user profiles per request; stop before the next user's row
@@ -245,13 +269,9 @@ func (m *MemoryMaintainer) process(ctx context.Context, groupID, selfID int64) e
 		}
 		updated = append(updated, next)
 	}
-	err = db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&MemoryCursor{}).Where("group_id = ? AND last_id = ?", groupID, cursor.LastID).Update("last_id", rows[len(rows)-1].ID)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return errors.New("memory cursor changed")
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := commit(tx, rows); err != nil {
+			return err
 		}
 		for i, profile := range updated {
 			if err := writeUserMemory(tx, profile); err != nil {
@@ -264,7 +284,7 @@ func (m *MemoryMaintainer) process(ctx context.Context, groupID, selfID int64) e
 		return nil
 	})
 	if err == nil {
-		logrus.Infof("[Memory][group=%d] 已处理%d条消息，更新%d位用户，cursor=%d", groupID, len(rows), len(updated), rows[len(rows)-1].ID)
+		logrus.Infof("[Memory][group=%d] 已处理%d条消息，更新%d位用户，last_source_id=%d", groupID, len(rows), len(updated), rows[len(rows)-1].ID)
 	}
 	return err
 }

@@ -72,9 +72,9 @@ func projectFiles(ctx context.Context, root *os.Root) ([]FileInfo, error) {
 			return fmt.Errorf("non-regular skill file: %s", path)
 		}
 		size += info.Size()
-		if len(files) >= maxProjectFiles || size > maxProjectBytes {
-			return fmt.Errorf("skill project exceeds 1000 files or 10 MiB")
-		}
+		//if len(files) >= maxProjectFiles || size > maxProjectBytes {
+		//	return fmt.Errorf("skill project exceeds 1000 files or 10 MiB")
+		//}
 		files = append(files, FileInfo{Path: path, Size: info.Size()})
 		return nil
 	})

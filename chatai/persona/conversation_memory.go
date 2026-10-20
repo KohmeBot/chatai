@@ -18,7 +18,15 @@ const conversationTurnKey = "conversation_visible_turn"
 const contextFirstAction = "先搜索并读取 read_group_context，核实前文后继续。"
 
 // Only public dialogue enters this buffer: never model history or tool results.
-type conversationTurn struct{ Lines []string }
+type conversationTurn struct {
+	Lines   []string
+	Sources []dialogueSource
+}
+
+type dialogueSource struct {
+	UserID    int64
+	MessageID int64
+}
 type conversationNote struct {
 	Summary     string `json:"summary,omitempty"`
 	FirstAction string `json:"first_action,omitempty"`
@@ -93,6 +101,9 @@ func (p *Persona) rememberDialogue(rc *agent.RunContext, role string, userID, me
 		content = "[" + kind + "]"
 	}
 	turn.Lines = append(turn.Lines, fmt.Sprintf("%s(user_id=%d,message_id=%d): %s", role, userID, messageID, content))
+	if messageID != 0 {
+		turn.Sources = append(turn.Sources, dialogueSource{userID, messageID})
+	}
 }
 
 func (p *Persona) rememberBotDialogue(rc *agent.RunContext, segments message.Message, id int64) {
@@ -113,6 +124,12 @@ func (p *Persona) finishConversation(rc *agent.RunContext) {
 		return
 	}
 	now := time.Now()
+	if err := p.opts.MemoryMaintainer.stageConversation(p.groupID, rc, turn.Sources, now.Add(p.opts.ConversationWindow)); err != nil {
+		logrus.Warnf("[Memory] 暂存对话来源失败: %v", err)
+	}
+	if !p.opts.ConversationMemory {
+		return
+	}
 	p.conversationMu.Lock()
 	p.pruneConversations(now)
 	if p.conversations == nil {

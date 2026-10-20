@@ -203,7 +203,9 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	defer cancel()
 	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, UserName: msg.User.Nickname, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
 	runCtx.ReportDeliveryFailure(deliveryErr)
-	if p.opts.ConversationMemory && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
+	if (p.opts.ConversationMemory || p.opts.MemoryMaintainer.conversationMode()) && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
+		finish := p.opts.MemoryMaintainer.beginConversation(p.groupID, msg.User.UserId)
+		defer finish()
 		runCtx.Values[conversationTurnKey] = &conversationTurn{}
 		p.rememberDialogue(runCtx, "user", msg.User.UserId, msg.MsgID, msg.Content, msg.MsgType)
 		defer p.finishConversation(runCtx)

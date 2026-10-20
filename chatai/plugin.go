@@ -107,7 +107,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	tables := []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
 		&persona.ChatMessageRecord{}, &model.TokenUsage{},
-		&persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{},
+		&persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
 	}
 	tables = append(tables, skill.Models()...)
 	for _, table := range tables {
@@ -129,6 +129,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 		interval = max(10, interval)
 		c.memory = persona.NewMemoryMaintainer(db, c.routeModel(route, persona.ImpressionMemorySystemPrompt(), true), time.Duration(interval)*time.Second, c.conf.Impression.BatchSize)
+		c.memory.ObserveGroupChat = c.conf.Impression.ObserveGroupChat
 	}
 	if c.conf.Agent.MaxSteps <= 0 {
 		c.conf.Agent.MaxSteps = 8
@@ -311,4 +312,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.3.11" }
+func (c *ChatPlugin) Version() string      { return "v1.4.0" }
