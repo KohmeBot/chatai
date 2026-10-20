@@ -337,7 +337,10 @@ non_triggers: [总结外部文章]
 | `read_skill` | 读取指定技能内的一个 UTF-8 文本文件，默认 `SKILL.md` |
 | `save_skill` | 保存一个技能文件，参数为 `name`、`content`，可选 `file` 和 `overwrite` |
 | `list_skill_files` | 递归列出指定 `name` 下的文件相对路径和大小，不读取正文 |
+| `search_skill_files` | 按路径关键词 `query` 搜索文件或文件夹；可选 `directory`（skills 相对目录）、`type`（file/directory）、`limit`（默认50，最多200）；返回 skills 相对 `path`、`absolute_path`、类型、大小及 `truncated` |
 | `run_skill_script` | 通过 pyrunner 运行 `name` 内的 `.py` 入口 `file`，可选 `args` 和 `timeout_seconds` |
+
+资源搜索与技能路由元数据独立。例如 `search_skill_files(query="开心", directory="meme/assets", type="file")` 返回的 `path` 为 `meme/assets/开心.png`，相对于整个 skills 目录；`absolute_path` 为本机绝对路径。两者均可直接传给 `send_image(url=...)`；相对路径会在发送前校验并转换为绝对路径，拒绝不存在的文件、目录和越界路径。`list_skill_files` 的路径仍相对于指定 Skill，传给 `send_image` 时需加上技能文件夹名前缀。
 
 Agent 先用 `save_skill` 创建完整的 `SKILL.md`，再保存参考文件。保存后下次搜索立即可见，无需重启。默认拒绝覆盖已有文件；更新时先读取旧内容，再显式传入 `overwrite=true`。文件读写限定在对应技能目录内，拒绝路径穿越及越界符号链接，每个文本文件最多 5 MiB。保存和读取不会触发执行；脚本须通过 run_skill_script 显式运行。
 

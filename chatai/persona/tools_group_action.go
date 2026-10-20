@@ -16,7 +16,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 	return []agent.Tool{
 		{
 			Definition: agent.Function("send_image", "立即向当前群发送一张图片并可带一句话；成功的消息不可重复发送，message_id=0 时需修正后重试，成功后返回 message_id", map[string]any{
-				"url":  stringProperty("发送的图片URL或者是本地图片的路径"),
+				"url":  stringProperty("图片URL或者本地绝对路径"),
 				"text": stringProperty("可选，发送的图片附带的文字"),
 			}, "url"),
 			Namespace:   "chat",
@@ -86,12 +86,16 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	if err := validateMessageText(input.Text); err != nil {
 		return nil, err
 	}
+	source, err := p.resolveImageSource(input.URL)
+	if err != nil {
+		return nil, fmt.Errorf("resolve image path: %w", err)
+	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
 		return nil, err
 	}
 	segments := message.Message{}
-	segments = append(segments, message.Image(input.URL))
+	segments = append(segments, message.Image(source))
 	if len(strings.TrimSpace(input.Text)) > 0 {
 		segments = append(segments, message.Text(input.Text))
 	}

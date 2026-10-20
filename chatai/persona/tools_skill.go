@@ -13,6 +13,7 @@ func (p *Persona) skillTools() []agent.Tool {
 	d := p.opts.Skills.Directory
 	return []agent.Tool{
 		p.listSkillFilesTool(),
+		p.searchSkillFilesTool(),
 		p.runSkillScriptTool(),
 		{
 			Definition: agent.Function("search_skills", "按任务目标搜索可用目录 Skills，返回多个候选的名称、适用场景和入口路径，不读取正文。可按名称搜索；选择相关技能后分别 read_skill，可组合多个技能。无匹配时用 list_skills 浏览，勿猜测名称", map[string]any{"query": stringProperty("任务目标或明确的技能名称"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 20, "description": "候选数量，默认5，最多20"}}, "query"),
