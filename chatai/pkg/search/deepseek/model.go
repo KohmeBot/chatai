@@ -10,7 +10,7 @@ type WebSearchRequest struct {
 
 type WebSearchResponse struct {
 	Results []struct {
-		RerankScore int       `json:"rerank_score"`
+		RerankScore float64   `json:"rerank_score"`
 		Title       string    `json:"title"`
 		Url         string    `json:"url"`
 		Snippet     string    `json:"snippet"`
@@ -19,6 +19,6 @@ type WebSearchResponse struct {
 		SiteName    string    `json:"site_name"`
 		SiteIcon    string    `json:"site_icon"`
 		Date        time.Time `json:"date"`
-		Authority   int       `json:"authority"`
+		Authority   float64   `json:"authority"`
 	} `json:"results"`
 }
