@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -14,7 +15,7 @@ import (
 func (p *Persona) memoryTools() []agent.Tool {
 	tools := []agent.Tool{
 		{
-			Definition:  agent.Function("read_user_impression", "读取对某个用户的长期印象", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"),
+			Definition:  agent.Function("read_user_impression", "兼容工具：读取用户简介和结构化记忆；优先使用read_user_memory", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"),
 			Namespace:   "memory",
 			ReadOnly:    true,
 			Idempotent:  true,
@@ -41,7 +42,7 @@ func (p *Persona) memoryTools() []agent.Tool {
 			Handler:     p.handleReadUserFavor,
 		},
 		{
-			Definition: agent.Function("update_user_favor", "按增量修改指定用户的好感度；单次增加最多60，减少最多30", map[string]any{
+			Definition: agent.Function("update_user_favor", "兼容工具：修改统一用户记忆内的关系分值，单次最多增减5；优先使用有来源依据的update_user_memory", map[string]any{
 				"user_id": integerProperty("用户 QQ 号"),
 				"delta":   integerProperty("增加或减少的数值，负数表示减少"),
 				"reason":  stringProperty("修改原因"),
@@ -51,6 +52,9 @@ func (p *Persona) memoryTools() []agent.Tool {
 			SearchTerms: []string{"修改好感度", "增加好感度", "减少好感度", "关系变化", "亲密度", "好感度"},
 			Handler:     p.handleUpdateUserFavor,
 		},
+	}
+	if !p.opts.ImpressionUpdateEnable {
+		tools = tools[:3] // All memory writes share the same configuration switch.
 	}
 	if p.opts.ImpressionUpdateEnable {
 		tools = append(tools, agent.Tool{
@@ -80,11 +84,11 @@ func (p *Persona) handleReadUserImpression(_ *agent.RunContext, raw json.RawMess
 	if err != nil {
 		return nil, err
 	}
-	impression, err := new(UserImpression).Get(p.db, userID)
+	profile, err := readUserMemory(p.db, userID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"scope": "user", "user_id": impression.UserID, "content": impression.Content}, nil
+	return map[string]any{"scope": "user", "user_id": userID, "content": profile.Summary, "memory": visibleUserProfile(profile, p.groupID, time.Now(), 30)}, nil
 }
 
 func (p *Persona) handleReadGroupImpression(_ *agent.RunContext, _ json.RawMessage) (any, error) {
@@ -142,20 +146,22 @@ func (p *Persona) handleUpdateImpression(_ *agent.RunContext, raw json.RawMessag
 		if utf8.RuneCountInString(input.Content) > 300 {
 			return nil, errors.New("user impression content must not exceed 300 characters")
 		}
-		before, err := new(UserImpression).Get(p.db, input.UserID)
+		before, err := readUserMemory(p.db, input.UserID)
 		if err != nil {
 			return nil, err
 		}
-		if before.Content != input.PreviousContent {
+		if before.Summary != input.PreviousContent {
 			return nil, errors.New("user impression changed; read it again before updating")
 		}
-		if before.Content == input.Content {
+		if before.Summary == input.Content {
 			return map[string]any{"scope": "user", "user_id": input.UserID, "changed": false, "content": input.Content, "reason": input.Reason}, nil
 		}
-		if err := new(UserImpression).Update(p.db, UserImpression{UserID: input.UserID, Content: input.Content}); err != nil {
+		previous := before.Summary
+		before.Summary = input.Content
+		if err := writeUserMemory(p.db, before); err != nil {
 			return nil, err
 		}
-		return map[string]any{"scope": "user", "user_id": input.UserID, "changed": true, "before": before.Content, "after": input.Content, "reason": input.Reason}, nil
+		return map[string]any{"scope": "user", "user_id": input.UserID, "changed": true, "before": previous, "after": input.Content, "reason": input.Reason}, nil
 	default:
 		return nil, fmt.Errorf("scope must be group or user, got %q", input.Scope)
 	}
@@ -166,12 +172,12 @@ func (p *Persona) handleReadUserFavor(_ *agent.RunContext, raw json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
-	value, err := favor.GetFavor(p.db, userID)
+	profile, err := readUserMemory(p.db, userID)
 	if err != nil {
 		return nil, err
 	}
-	level := favor.GetFavorLevelInfo(value)
-	return map[string]any{"user_id": userID, "favor": value, "level": level.Name, "description": level.Desc, "range": []int64{favor.FavorMin, favor.FavorMax}}, nil
+	level := favor.GetFavorLevelInfo(profile.Relationship.Score)
+	return map[string]any{"user_id": userID, "favor": profile.Relationship.Score, "level": level.Name, "description": level.Desc, "relationship": profile.Relationship, "range": []int64{favor.FavorMin, favor.FavorMax}}, nil
 }
 
 func (p *Persona) handleUpdateUserFavor(_ *agent.RunContext, raw json.RawMessage) (any, error) {
@@ -189,17 +195,20 @@ func (p *Persona) handleUpdateUserFavor(_ *agent.RunContext, raw json.RawMessage
 	if input.Delta == 0 {
 		return nil, errors.New("delta must not be zero")
 	}
-	before, err := favor.GetFavor(p.db, input.UserID)
+	if strings.TrimSpace(input.Reason) == "" || utf8.RuneCountInString(input.Reason) > 200 {
+		return nil, errors.New("reason must contain 1 to 200 characters")
+	}
+	profile, err := readUserMemory(p.db, input.UserID)
 	if err != nil {
 		return nil, err
 	}
-	if err := favor.UpdateFavor(p.db, input.UserID, input.Delta); err != nil {
+	before := profile.Relationship.Score
+	profile.Relationship.Score = max(favor.FavorMin, min(favor.FavorMax, before+max(-5, min(5, input.Delta))))
+	profile.Relationship.Reason = input.Reason
+	if err := writeUserMemory(p.db, profile); err != nil {
 		return nil, err
 	}
-	after, err := favor.GetFavor(p.db, input.UserID)
-	if err != nil {
-		return nil, err
-	}
+	after := profile.Relationship.Score
 	level := favor.GetFavorLevelInfo(after)
 	return map[string]any{"user_id": input.UserID, "before": before, "after": after, "actual_delta": after - before, "level": level.Name, "reason": input.Reason}, nil
 }

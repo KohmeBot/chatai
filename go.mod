@@ -16,6 +16,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	github.com/wdvxdr1123/ZeroBot v1.8.1
 	gopkg.in/yaml.v3 v3.0.1
+	gorm.io/driver/sqlite v1.5.6
 	gorm.io/gorm v1.25.12
 )
 
@@ -37,6 +38,7 @@ require (
 	github.com/itlightning/dateparse v0.2.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/panjf2000/ants/v2 v2.10.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

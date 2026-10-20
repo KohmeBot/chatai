@@ -91,22 +91,23 @@ type RepeatConfig struct {
 }
 
 type ImpressionConfig struct {
-	Enable bool `yaml:"enable" jsonschema:"description=是否允许 Agent 主动维护群印象和群友印象"`
+	Enable             bool `yaml:"enable" jsonschema:"description=启用后台结构化用户记忆维护和 Agent 记忆写入工具"`
+	MaintenanceSeconds int  `yaml:"maintenance_seconds" jsonschema:"description=后台记忆维护间隔秒数，默认60,minimum=10"`
+	BatchSize          int  `yaml:"batch_size" jsonschema:"description=每群每次最多处理新增消息数，默认40,minimum=1,maximum=100"`
 
-	// Deprecated: 仅用于兼容旧配置，周期印象功能已移除。
+	// Deprecated: 仅兼容旧配置；新后台维护使用 maintenance_seconds。
 	LegacyIntervalMinutes int `yaml:"interval_minutes,omitempty" jsonschema:"-"`
-	// Deprecated: 仅用于兼容旧配置，周期印象功能已移除。
+	// Deprecated: 仅兼容旧配置；新后台维护使用 batch_size。
 	LegacyMinMessages int `yaml:"min_messages,omitempty" jsonschema:"-"`
 }
 
 type ModelRoutes struct {
-	Memory ModelRouteConfig `yaml:"memory" jsonschema:"description=短期对话压缩模型；不配置时使用 Agent 模型"`
-	Agent  ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
-	Vision ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
-	Skill  ModelRouteConfig `yaml:"skill" jsonschema:"description=自生成 Skill 反思模型；不配置时使用 Agent 模型"`
-	// Deprecated: 仅用于兼容旧配置，印象现在由 Agent 模型通过工具维护。
-	LegacyImpression ModelRouteConfig `yaml:"impression,omitempty" jsonschema:"-"`
-	Join             ModelRouteConfig `yaml:"join" jsonschema:"description=入群欢迎模型"`
+	Memory     ModelRouteConfig `yaml:"memory" jsonschema:"description=短期对话压缩模型；不配置时使用 Agent 模型"`
+	Agent      ModelRouteConfig `yaml:"agent" jsonschema:"description=Agent 决策模型"`
+	Vision     ModelRouteConfig `yaml:"vision" jsonschema:"description=图片解析模型；不配置即不解析"`
+	Skill      ModelRouteConfig `yaml:"skill" jsonschema:"description=自生成 Skill 反思模型；不配置时使用 Agent 模型"`
+	Impression ModelRouteConfig `yaml:"impression,omitempty" jsonschema:"description=后台结构化用户记忆维护模型；不配置时使用 Agent 模型"`
+	Join       ModelRouteConfig `yaml:"join" jsonschema:"description=入群欢迎模型"`
 }
 
 type ModelRouteConfig struct {
@@ -151,6 +152,6 @@ type JoinGroupConfig struct {
 }
 
 type SearchAPIConfig struct {
-	Name   string    `yaml:"name" jsonschema:"description=搜索API提供商名称,enum=bocha"`
+	Name   string    `yaml:"name" jsonschema:"description=搜索API提供商名称,enum=bocha,enum=deepseek"`
 	ApiKey ui.Secret `yaml:"api_key"`
 }

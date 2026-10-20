@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // agentEventEnvelope is the protocol boundary between the chat adapter and the
@@ -18,6 +20,7 @@ type agentEventEnvelope struct {
 	Message       *timeMessageResult `json:"message,omitempty"`
 	ScheduledTask *scheduledTask     `json:"scheduled_task,omitempty"`
 	Conversation  *conversationNote  `json:"conversation_memory,omitempty"`
+	UserMemory    *UserProfile       `json:"user_memory,omitempty"`
 }
 
 type eventActor struct {
@@ -40,6 +43,15 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string, selfUserID int
 			UserID: msg.User.UserId, Nickname: msg.User.Nickname,
 			IsSelf: selfUserID > 0 && msg.User.UserId == selfUserID,
 		},
+	}
+	if p.db != nil && msg.User.UserId > 0 && msg.User.UserId != selfUserID {
+		profile, err := readUserMemory(p.db, msg.User.UserId)
+		if err != nil {
+			logrus.Warnf("[Memory] 读取用户记忆失败: %v", err)
+		} else {
+			profile = visibleUserProfile(profile, p.groupID, time.Now(), 8)
+			envelope.UserMemory = &profile
+		}
 	}
 	if strings.TrimSpace(scheduled) != "" {
 		envelope.Kind = "scheduled_task_due"

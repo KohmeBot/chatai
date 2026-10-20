@@ -56,7 +56,7 @@ func messageRecord(groupID int64, msg GroupMessage) ChatMessageRecord {
 }
 
 func (r ChatMessageRecord) message() GroupMessage {
-	return GroupMessage{RawMessage: r.RawMessage, RawSegments: r.RawSegments, QuotedRawSegments: r.QuotedRawSegments, User: User{UserId: r.UserID, Nickname: r.UserNickname}, TargetUser: User{UserId: r.TargetUserID, Nickname: r.TargetNickname},
+	return GroupMessage{SourceID: r.ID, RawMessage: r.RawMessage, RawSegments: r.RawSegments, QuotedRawSegments: r.QuotedRawSegments, User: User{UserId: r.UserID, Nickname: r.UserNickname}, TargetUser: User{UserId: r.TargetUserID, Nickname: r.TargetNickname},
 		QuotedUser: User{UserId: r.QuotedUserID, Nickname: r.QuotedNickname}, Content: r.Content, QuotedContent: r.QuotedContent,
 		MsgType: r.MsgType, MsgID: r.MessageID, QuotedMsgID: r.QuotedMessageID, CreatedAt: r.CreatedAt, Url: r.URL,
 		FileName: r.FileName, QuotedURL: r.QuotedURL, Refer: r.Referred}

@@ -1,6 +1,7 @@
 package chatai
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -34,6 +35,7 @@ type ChatPlugin struct {
 	extraTools     []agent.Tool
 	db             *gorm.DB
 	skills         *skill.Service
+	memory         *persona.MemoryMaintainer
 }
 
 func NewPlugin() plugin.Plugin         { return &ChatPlugin{personaMap: make(map[int64]*persona.Persona)} }
@@ -105,12 +107,28 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	tables := []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
 		&persona.ChatMessageRecord{}, &model.TokenUsage{},
+		&persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{},
 	}
 	tables = append(tables, skill.Models()...)
 	for _, table := range tables {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
 		}
+	}
+	if err := persona.MigrateUserMemories(db); err != nil {
+		return fmt.Errorf("migrate user memory: %w", err)
+	}
+	if c.conf.Impression.Enable {
+		route := c.conf.Routes.Impression
+		if !route.Configured() {
+			route = c.conf.Routes.Agent
+		}
+		interval := c.conf.Impression.MaintenanceSeconds
+		if interval <= 0 {
+			interval = 60
+		}
+		interval = max(10, interval)
+		c.memory = persona.NewMemoryMaintainer(db, c.routeModel(route, persona.ImpressionMemorySystemPrompt(), true), time.Duration(interval)*time.Second, c.conf.Impression.BatchSize)
 	}
 	if c.conf.Agent.MaxSteps <= 0 {
 		c.conf.Agent.MaxSteps = 8
@@ -232,6 +250,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			ConversationWindow:   time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second,
 			ConversationMaxChars: c.conf.Agent.ConversationMemory.MaxChars,
 			MemoryModel:          memoryModel,
+			MemoryMaintainer:     c.memory,
 			AgentModel:           c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
 			VisionModel:          vision, MaxSteps: c.conf.Agent.MaxSteps,
 			MaxToolCalls:     c.conf.Agent.MaxToolCalls,
@@ -256,6 +275,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 }
 
 func (c *ChatPlugin) OnBoot() {
+	c.memory.Start(context.Background())
 	names := map[string]bool{"search_tools": true}
 	for _, p := range c.personaMap {
 		for _, name := range p.ToolNames() {
@@ -291,4 +311,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.3.10" }
+func (c *ChatPlugin) Version() string      { return "v1.3.11" }

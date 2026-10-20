@@ -265,6 +265,7 @@ func parseToolTime(raw string, dateEnd bool) (time.Time, error) {
 }
 
 type timeMessageResult struct {
+	SourceID        uint   `json:"source_id,omitempty"`
 	MessageID       int64  `json:"message_id"`
 	CreatedAt       string `json:"created_at"`
 	UserID          int64  `json:"user_id"`
@@ -293,6 +294,7 @@ func timeMessageResults(messages []GroupMessage, selfUserID int64) []timeMessage
 		targetIsSelf := selfUserID > 0 && item.TargetUser.UserId == selfUserID
 		quotedIsSelf := selfUserID > 0 && item.QuotedUser.UserId == selfUserID
 		results[i] = timeMessageResult{
+			SourceID:  item.SourceID,
 			MessageID: item.MsgID, CreatedAt: item.CreatedAt.Format(time.RFC3339), UserID: item.User.UserId, Nickname: contextNickname(item.User, isSelf), IsSelf: isSelf,
 			TargetUserID: item.TargetUser.UserId, TargetNickname: contextNickname(item.TargetUser, targetIsSelf), TargetIsSelf: targetIsSelf, Type: item.MsgType, Content: item.Content,
 			ImageURL: item.Url, FileName: item.FileName, QuotedMessageID: item.QuotedMsgID, QuotedUserID: item.QuotedUser.UserId,

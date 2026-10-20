@@ -69,6 +69,7 @@ func (u User) String() string {
 }
 
 type GroupMessage struct {
+	SourceID          uint
 	RawMessage        string
 	RawSegments       string
 	QuotedRawSegments string
