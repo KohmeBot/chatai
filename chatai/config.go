@@ -75,7 +75,7 @@ type AgentConfig struct {
 	WebSearchPreferSeconds int                      `yaml:"web_search_prefer_seconds" jsonschema:"description=搜索 fallback 成功后优先使用该引擎的秒数,minimum=60"`
 
 	UseSearchAPI       bool              `yaml:"use_search_api" jsonschema:"description=是否启用搜索API"`
-	SearchProviderName string            `yaml:"search_provider_name" jsonschema:"description=搜索API提供商名称,enum=bocha"`
+	SearchProviderName string            `yaml:"search_provider_name" jsonschema:"description=搜索API提供商名称,enum=bocha,enum=deepseek"`
 	SearchProviders    []SearchAPIConfig `yaml:"search_providers" jsonschema:"description=搜索API提供商配置"`
 }
 
