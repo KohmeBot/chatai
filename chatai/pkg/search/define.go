@@ -3,8 +3,9 @@ package search
 import "context"
 
 type Request struct {
-	Query string
-	Limit int
+	Query       string
+	OriQuestion string
+	Limit       int
 }
 
 type Response struct {

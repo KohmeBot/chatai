@@ -41,19 +41,20 @@ var defaultWebSearchProviders = []webSearchProvider{
 	}, parse: parseBaiduResults},
 }
 
-func (p *Persona) searchWeb(rc *agent.RunContext, query string, limit int) ([]webSearchResult, error) {
+func (p *Persona) searchWeb(rc *agent.RunContext, query string, oriQuestion string, limit int) ([]webSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, errors.New("search query cannot be empty")
 	}
 	if limit <= 0 {
-		limit = 5
+		limit = 10
 	}
 
 	if p.opts.SearchAPI != nil {
 		rsp, err := p.opts.SearchAPI.DoRequest(rc, search.Request{
-			Query: query,
-			Limit: limit,
+			Query:       query,
+			OriQuestion: oriQuestion,
+			Limit:       limit,
 		})
 		if err == nil {
 			results := make([]webSearchResult, 0, len(rsp.Results))

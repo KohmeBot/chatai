@@ -203,6 +203,9 @@ type webContextWindow struct {
 // limitWebContent leaves small pages untouched. For large pages it returns
 // the metadata plus the most relevant, non-overlapping context windows.
 func limitWebContent(content, query string, maxBytes int) string {
+	if strings.TrimSpace(query) == "" {
+		return content
+	}
 	if maxBytes <= 0 || len(content) <= maxBytes {
 		return content
 	}
