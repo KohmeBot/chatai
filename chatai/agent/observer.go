@@ -9,6 +9,7 @@ import (
 // Event is an ordered observation of the loop, separate from the learning trace.
 // Reasoning contains only content explicitly returned by the model provider.
 type Event struct {
+	Request      string    `json:"request,omitempty"`
 	UserName     string    `json:"user_name,omitempty"`
 	RunID        uint64    `json:"run_id,string"`
 	GroupID      int64     `json:"group_id,string"`

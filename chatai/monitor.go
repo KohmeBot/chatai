@@ -36,7 +36,10 @@ func (c *ChatPlugin) startMonitor() error {
 	if err != nil {
 		return fmt.Errorf("start agent monitor: %w", err)
 	}
-	c.monitor = monitor.New(c.conf.Monitor.MaxRuns)
+	if c.monitor == nil {
+		c.monitor = monitor.New(c.conf.Monitor.MaxRuns)
+	}
+	c.monitor.Inspect = c.inspectMonitor
 	c.monitorServer = &http.Server{Handler: c.monitor.Handler(string(c.conf.Monitor.AccessToken)), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 	go func() {
 		if err := c.monitorServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {

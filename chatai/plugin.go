@@ -215,8 +215,8 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 		memoryModel = c.routeModel(route, persona.ConversationMemorySystemPrompt(), true)
 	}
-	if err := c.startMonitor(); err != nil {
-		return err
+	if c.conf.Monitor.Enable {
+		c.monitor = monitor.New(c.conf.Monitor.MaxRuns)
 	}
 	var observer agent.Observer
 	if c.monitor != nil {
@@ -271,6 +271,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 	c.joinGroupModel = c.routeModel(c.conf.Routes.Join, string(c.conf.System), false)
 	c.otherModel = c.routeModel(c.conf.Routes.Agent, string(c.conf.System), false)
+	if err := c.startMonitor(); err != nil {
+		return err
+	}
 	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnUsage(engine)
@@ -314,4 +317,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.4.3" }
+func (c *ChatPlugin) Version() string      { return "v1.4.4" }

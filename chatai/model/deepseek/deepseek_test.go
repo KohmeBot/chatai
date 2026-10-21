@@ -65,3 +65,18 @@ func TestVisionRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestObservedRequestMatchesWireBody(t *testing.T) {
+	m := NewDeepSeekModel(model.Config{Name: "test", ApiKey: "secret-key", System: "完整系统提示"}).(*deepSeekModel)
+	var observed string
+	m.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, string(body), observed)
+		require.Contains(t, observed, "完整系统提示")
+		require.Contains(t, observed, "历史原文")
+		require.NotContains(t, observed, "secret-key")
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}]}`))}, nil
+	})}
+	require.NoError(t, m.Request(&model.Request{Question: "当前原文", History: []model.Message{{Role: "user", Content: "历史原文"}}, ObserveRequest: func(b []byte) { observed = string(b) }}, &model.Response{}))
+}

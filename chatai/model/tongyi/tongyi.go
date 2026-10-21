@@ -94,6 +94,10 @@ func (m *tongYiModel) requestChat(request *model.Request, response *model.Respon
 
 	logrus.Infof("model request provider=tongyi model=%s messages=%d tools=%d image=%t", m.Name, len(msg), len(tools), request.ImageURL != "")
 
+	if request.ObserveRequest != nil {
+		request.ObserveRequest(jsonData)
+	}
+
 	requestContext := request.Context
 	if requestContext == nil {
 		requestContext = context.Background()
@@ -159,6 +163,10 @@ func (m *tongYiModel) requestImage(request *model.Request, response *model.Respo
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		return err
+	}
+
+	if request.ObserveRequest != nil {
+		request.ObserveRequest(jsonData)
 	}
 
 	requestContext := request.Context

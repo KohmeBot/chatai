@@ -600,6 +600,11 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		modelStarted := time.Now()
 		response := new(model.Response)
 		err := r.Model.Request(&model.Request{
+			ObserveRequest: func(body []byte) {
+				if ctx.observer != nil {
+					ctx.emit(Event{Kind: "model_request", Step: i + 1, Model: modelName, Request: string(body)})
+				}
+			},
 			Context:  ctx.Context,
 			Question: question,
 			History:  history,

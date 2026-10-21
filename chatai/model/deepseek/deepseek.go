@@ -71,6 +71,10 @@ func (m *deepSeekModel) Request(request *model.Request, response *model.Response
 
 	logrus.Infof("model request provider=deepseek model=%s messages=%d tools=%d image=%t", m.Name, len(msg), len(request.Tools), request.ImageURL != "")
 
+	if request.ObserveRequest != nil {
+		request.ObserveRequest(jsonData)
+	}
+
 	requestContext := request.Context
 	if requestContext == nil {
 		requestContext = context.Background()

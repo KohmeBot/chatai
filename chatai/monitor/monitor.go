@@ -37,9 +37,12 @@ type Run struct {
 	Truncated    bool          `json:"truncated"`
 	Events       []agent.Event `json:"events,omitempty"`
 	bytes        int
+	requestBytes int
 }
 
 type Store struct {
+	// Inspect is installed before serving; it exposes read-only runtime data.
+	Inspect   func(*http.Request) (any, error)
 	mu        sync.RWMutex
 	runs      map[uint64]*Run
 	limit     int
@@ -99,16 +102,24 @@ func (s *Store) Observe(e agent.Event) {
 		r.Error = clip(e.Error)
 		r.DurationMS = e.DurationMS
 	}
-	for _, field := range []*string{&e.UserName, &e.Text, &e.Arguments, &e.Result, &e.Reasoning, &e.Error, &e.Name, &e.Model, &e.CallID} {
+	for _, field := range []*string{&e.UserName, &e.Text, &e.Result, &e.Reasoning, &e.Error, &e.Name, &e.Model, &e.CallID} {
 		if len(*field) > 8192 {
 			r.Truncated = true
 		}
 		*field = clip(*field)
 	}
 	data, _ := json.Marshal(e)
-	if len(r.Events) < 512 && r.bytes+len(data) <= 512*1024 {
+	withinBudget := r.bytes+len(data) <= 512*1024
+	if e.Request != "" || e.Kind == "tool_started" {
+		withinBudget = r.requestBytes+len(data) <= 8*1024*1024
+	}
+	if len(r.Events) < 512 && withinBudget {
 		r.Events = append(r.Events, e)
-		r.bytes += len(data)
+		if e.Request != "" || e.Kind == "tool_started" {
+			r.requestBytes += len(data)
+		} else {
+			r.bytes += len(data)
+		}
 	} else {
 		r.Truncated = true
 	}
@@ -188,6 +199,19 @@ func (s *Store) Handler(token string) http.Handler {
 		json.NewEncoder(w).Encode(items[0])
 	}))
 	mux.HandleFunc("GET /api/events", auth(s.stream))
+	mux.HandleFunc("GET /api/inspect/{section}", auth(func(w http.ResponseWriter, r *http.Request) {
+		if s.Inspect == nil {
+			http.Error(w, "运行数据尚未就绪", 503)
+			return
+		}
+		value, err := s.Inspect(r)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(value)
+	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

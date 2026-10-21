@@ -56,6 +56,8 @@ type ToolCallFunction struct {
 }
 
 type Request struct {
+	// ObserveRequest receives the exact serialized provider body, never headers.
+	ObserveRequest func([]byte) `json:"-"`
 	// Context 控制整次模型请求的取消和超时；nil 表示不额外限制。
 	Context context.Context
 	// 输入的问题
