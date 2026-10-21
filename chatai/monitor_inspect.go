@@ -1,12 +1,15 @@
 package chatai
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
 	"time"
 
+	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/chatai/chatai/skill"
 )
 
@@ -32,6 +35,28 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 	case "tools":
 		return p.ToolCatalog(), nil
 	case "memory":
+		if r.Method != http.MethodGet {
+			var edit persona.MemoryEdit
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&edit); err != nil {
+				return nil, fmt.Errorf("无效记忆数据：%w", err)
+			}
+			if decoder.Decode(new(any)) != io.EOF {
+				return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
+			}
+			var userID int64
+			if edit.Target != "group" {
+				userID, err = strconv.ParseInt(edit.UserID, 10, 64)
+				if err != nil || userID <= 0 {
+					return nil, fmt.Errorf("无效用户 ID")
+				}
+			}
+			if err := p.EditMemory(userID, edit, r.Method == http.MethodDelete); err != nil {
+				return nil, err
+			}
+			return map[string]bool{"ok": true}, nil
+		}
 		offset := 0
 		if raw := r.URL.Query().Get("offset"); raw != "" {
 			offset, err = strconv.Atoi(raw)

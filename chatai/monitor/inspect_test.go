@@ -30,6 +30,47 @@ func TestInspectRequiresSession(t *testing.T) {
 	require.JSONEq(t, `{"section":"tools"}`, w.Body.String())
 }
 
+func TestMemoryMutationRequiresSessionAndJSON(t *testing.T) {
+	s := New(1)
+	called := false
+	s.Inspect = func(r *http.Request) (any, error) {
+		called = true
+		require.Equal(t, "memory", r.PathValue("section"))
+		return map[string]bool{"ok": true}, nil
+	}
+	h := s.Handler("secret")
+	cookie := login(t, h)
+	for _, method := range []string{"PATCH", "DELETE"} {
+		for _, tc := range []struct {
+			loggedIn          bool
+			contentType, site string
+			status            int
+		}{
+			{false, "application/json", "same-origin", 401},
+			{true, "text/plain", "same-origin", 403},
+			{true, "application/json", "cross-site", 403},
+			{true, "application/json", "same-origin", 200},
+		} {
+			called = false
+			r := httptest.NewRequest(method, "/api/inspect/memory?group=10", strings.NewReader(`{"target":"group"}`))
+			if tc.loggedIn {
+				r.AddCookie(cookie)
+			}
+			r.Header.Set("Content-Type", tc.contentType)
+			r.Header.Set("Sec-Fetch-Site", tc.site)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			require.Equal(t, tc.status, w.Code)
+			require.Equal(t, tc.status == 200, called)
+		}
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/api/inspect/memory", nil)
+	r.AddCookie(cookie)
+	h.ServeHTTP(w, r)
+	require.Equal(t, 405, w.Code)
+}
+
 func TestOriginalRequestsAreDiscardedAndToolArgumentsKeepSeparateBudget(t *testing.T) {
 	s := New(1)
 	s.Observe(agent.Event{RunID: 1, Kind: "run_started", Time: time.Now()})

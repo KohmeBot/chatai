@@ -1,4 +1,4 @@
-// Package monitor serves the embedded, read-only Agent observability console.
+// Package monitor serves the embedded Agent observability and memory console.
 package monitor
 
 import (
@@ -21,6 +21,12 @@ import (
 //go:embed index.html
 var page []byte
 
+//go:embed memory-ui.js
+var memoryUI []byte
+
+//go:embed glass.css
+var glassCSS []byte
+
 type Run struct {
 	Summary      string        `json:"summary,omitempty"`
 	UserName     string        `json:"user_name,omitempty"`
@@ -42,7 +48,7 @@ type Run struct {
 }
 
 type Store struct {
-	// Inspect is installed before serving; it exposes read-only runtime data.
+	// Inspect is installed before serving; memory supports authenticated edits.
 	Inspect   func(*http.Request) (any, error)
 	mu        sync.RWMutex
 	runs      map[uint64]*Run
@@ -166,6 +172,14 @@ func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
 	cookieValue := hex.EncodeToString(hash[:])
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /memory-ui.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(memoryUI)
+	})
+	mux.HandleFunc("GET /glass.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Write(glassCSS)
+	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(page)
@@ -207,6 +221,27 @@ func (s *Store) Handler(token string) http.Handler {
 		json.NewEncoder(w).Encode(items[0])
 	}))
 	mux.HandleFunc("GET /api/events", auth(s.stream))
+	for _, method := range []string{"PATCH", "DELETE"} {
+		mux.HandleFunc(method+" /api/inspect/memory", auth(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				http.Error(w, "仅支持同站 JSON 请求", http.StatusForbidden)
+				return
+			}
+			if s.Inspect == nil {
+				http.Error(w, "运行数据尚未就绪", 503)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
+			r.SetPathValue("section", "memory")
+			value, err := s.Inspect(r)
+			if err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(value)
+		}))
+	}
 	mux.HandleFunc("GET /api/inspect/{section}", auth(func(w http.ResponseWriter, r *http.Request) {
 		if s.Inspect == nil {
 			http.Error(w, "运行数据尚未就绪", 503)
@@ -225,7 +260,7 @@ func (s *Store) Handler(token string) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' https://q1.qlogo.cn https://p.qlogo.cn; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
 		mux.ServeHTTP(w, r)
 	})
 }

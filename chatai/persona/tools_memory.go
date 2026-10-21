@@ -135,8 +135,19 @@ func (p *Persona) handleUpdateImpression(_ *agent.RunContext, raw json.RawMessag
 		if before.Content == input.Content {
 			return map[string]any{"scope": "group", "group_id": p.groupID, "changed": false, "content": input.Content, "reason": input.Reason}, nil
 		}
-		if err := new(GroupImpression).Update(p.db, GroupImpression{GroupID: p.groupID, Content: input.Content}); err != nil {
-			return nil, err
+		// Compare at the write itself: a monitor edit/delete may happen after
+		// the read above, and must not be overwritten by this stale tool call.
+		result := p.db.Model(&GroupImpression{}).Where("group_id = ? AND content = ?", p.groupID, input.PreviousContent).Update("content", input.Content)
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		if result.RowsAffected == 0 {
+			if input.PreviousContent != "" {
+				return nil, errors.New("group impression changed; read it again before updating")
+			}
+			if err := p.db.Create(&GroupImpression{GroupID: p.groupID, Content: input.Content}).Error; err != nil {
+				return nil, err
+			}
 		}
 		return map[string]any{"scope": "group", "group_id": p.groupID, "changed": true, "before": before.Content, "after": input.Content, "reason": input.Reason}, nil
 	case "user":
