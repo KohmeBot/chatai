@@ -22,6 +22,7 @@ import (
 var page []byte
 
 type Run struct {
+	Summary      string        `json:"summary,omitempty"`
 	UserName     string        `json:"user_name,omitempty"`
 	ID           string        `json:"id"`
 	GroupID      string        `json:"group_id"`
@@ -67,6 +68,10 @@ func clip(s string) string {
 }
 
 func (s *Store) Observe(e agent.Event) {
+	// Ignore legacy request observations as well as no longer producing them.
+	if e.Kind == "model_request" {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.runs[e.RunID]
@@ -90,6 +95,9 @@ func (s *Store) Observe(e agent.Event) {
 	if r == nil {
 		return
 	}
+	if e.Summary != "" {
+		r.Summary = clip(e.Summary)
+	}
 	if e.Kind == "model_finished" {
 		r.InputTokens += e.InputTokens
 		r.OutputTokens += e.OutputTokens
@@ -102,7 +110,7 @@ func (s *Store) Observe(e agent.Event) {
 		r.Error = clip(e.Error)
 		r.DurationMS = e.DurationMS
 	}
-	for _, field := range []*string{&e.UserName, &e.Text, &e.Result, &e.Reasoning, &e.Error, &e.Name, &e.Model, &e.CallID} {
+	for _, field := range []*string{&e.Summary, &e.UserName, &e.Text, &e.Result, &e.Reasoning, &e.Error, &e.Name, &e.Model, &e.CallID} {
 		if len(*field) > 8192 {
 			r.Truncated = true
 		}
@@ -110,12 +118,12 @@ func (s *Store) Observe(e agent.Event) {
 	}
 	data, _ := json.Marshal(e)
 	withinBudget := r.bytes+len(data) <= 512*1024
-	if e.Request != "" || e.Kind == "tool_started" {
+	if e.Kind == "tool_started" {
 		withinBudget = r.requestBytes+len(data) <= 8*1024*1024
 	}
 	if len(r.Events) < 512 && withinBudget {
 		r.Events = append(r.Events, e)
-		if e.Request != "" || e.Kind == "tool_started" {
+		if e.Kind == "tool_started" {
 			r.requestBytes += len(data)
 		} else {
 			r.bytes += len(data)

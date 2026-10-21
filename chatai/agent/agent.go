@@ -563,7 +563,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	activeTools := make(map[string]bool)
 	question := prompt + r.skillCatalogPrompt(activeTools)
 	var postDeliveryErr error
-	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d max_tool_calls=%d require_action=%t image=%t prompt=%s", runID, ctx.GroupID, ctx.UserID, steps, maxToolCalls, r.RequireAction, imageURL != "", logValue(prompt))
+	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d max_tool_calls=%d require_action=%t image=%t", runID, ctx.GroupID, ctx.UserID, steps, maxToolCalls, r.RequireAction, imageURL != "")
 	for i := 0; i < steps; i++ {
 		for _, deliveryErr := range ctx.takeDeliveryFailures() {
 			deliveryFailures++
@@ -595,23 +595,18 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				activeTools[definition.Function.Name] = true
 			}
 		}
-		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v question=%s", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions), logValue(question))
+		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions))
 		ctx.emit(Event{Kind: "model_started", Step: i + 1, Model: modelName})
 		modelStarted := time.Now()
 		response := new(model.Response)
 		err := r.Model.Request(&model.Request{
-			ObserveRequest: func(body []byte) {
-				if ctx.observer != nil {
-					ctx.emit(Event{Kind: "model_request", Step: i + 1, Model: modelName, Request: string(body)})
-				}
-			},
 			Context:  ctx.Context,
 			Question: question,
 			History:  history,
 			Tools:    definitions,
 			ImageURL: imageURL,
 		}, response)
-		modelEvent := Event{Kind: "model_finished", Step: i + 1, Model: modelName, Text: response.Answer, Reasoning: response.Reasoning, InputTokens: response.InputToken, OutputTokens: response.OutToken, DurationMS: time.Since(modelStarted).Milliseconds(), Error: response.ErrorMsg}
+		modelEvent := Event{Kind: "model_finished", Step: i + 1, Model: modelName, Text: response.Answer, Summary: decisionProgress(response), Reasoning: response.Reasoning, InputTokens: response.InputToken, OutputTokens: response.OutToken, DurationMS: time.Since(modelStarted).Milliseconds(), Error: response.ErrorMsg}
 		if err != nil {
 			modelEvent.Error = err.Error()
 		}
@@ -639,7 +634,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		// 否则下一轮工具调用会从 assistant 消息开始并丢失原始用户问题。
 		if userMessage, ok := requestUserMessage(requestQuestion, requestImageURL); ok {
 			history = append(history, userMessage)
-			logrus.Infof("[Agent][run=%d][写入历史] step=%d/%d role=user image=%t content=%s", runID, i+1, steps, requestImageURL != "", logValue(requestQuestion))
+			logrus.Infof("[Agent][run=%d][写入历史] step=%d/%d role=user image=%t", runID, i+1, steps, requestImageURL != "")
 		}
 		question, imageURL = "", ""
 		// A progress send can fail while the model request is in flight. Give
@@ -686,7 +681,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			var result any
 			var callErr error
 			callStarted := time.Now()
-			ctx.emit(Event{Kind: "tool_started", Step: i + 1, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
+			ctx.emit(Event{Kind: "tool_started", Step: i + 1, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments, Summary: r.Tools.toolProgress(call.Function.Name)})
 			groupAction := r.Tools.isGroupAction(call.Function.Name)
 			if !deliveryFailed {
 				toolCallCount++
@@ -843,26 +838,43 @@ func finalActionPrompt(question string) string {
 }
 
 func decisionProgress(response *model.Response) string {
-	if answer := strings.TrimSpace(response.Answer); answer != "" {
-		return answer
-	}
-	if reasoning := strings.TrimSpace(response.Reasoning); reasoning != "" {
-		return reasoning
-	}
 	if len(response.ToolCalls) > 0 {
+		if answer := strings.TrimSpace(response.Answer); answer != "" {
+			return conciseSummary(answer)
+		}
 		names := make([]string, 0, len(response.ToolCalls))
 		for _, call := range response.ToolCalls {
 			names = append(names, call.Function.Name)
 		}
-		return "准备执行：" + strings.Join(names, "、")
+		return conciseSummary("准备执行：" + strings.Join(names, "、"))
 	}
-	return ""
+	return "正在整理本轮处理结果。"
 }
 
 func (r *Registry) isGroupAction(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.tools[name].GroupAction
+}
+
+func (r *Registry) toolProgress(name string) string {
+	if name == "search_tools" {
+		return "正在查找完成当前任务所需的工具和技能。"
+	}
+	r.mu.RLock()
+	description := r.tools[name].Definition.Function.Description
+	r.mu.RUnlock()
+	if description == "" {
+		return "准备调用：" + name
+	}
+	// Only the capability's opening phrase belongs in the progress summary.
+	parts := strings.FieldsFunc(description, func(c rune) bool {
+		return c == '。' || c == '；' || c == ';' || c == '\n'
+	})
+	if len(parts) == 0 {
+		return "准备调用：" + name
+	}
+	return conciseSummary("准备执行：" + parts[0])
 }
 
 func (r *Registry) isDecisionBoundary(name string) bool {

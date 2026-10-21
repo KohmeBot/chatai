@@ -30,19 +30,20 @@ func TestInspectRequiresSession(t *testing.T) {
 	require.JSONEq(t, `{"section":"tools"}`, w.Body.String())
 }
 
-func TestOriginalRequestsHaveSeparateBudget(t *testing.T) {
+func TestOriginalRequestsAreDiscardedAndToolArgumentsKeepSeparateBudget(t *testing.T) {
 	s := New(1)
 	s.Observe(agent.Event{RunID: 1, Kind: "run_started", Time: time.Now()})
 	body := `{"messages":"` + strings.Repeat("原文", 200000) + `"}`
-	s.Observe(agent.Event{RunID: 1, Kind: "model_request", Request: body})
+	s.Observe(agent.Event{RunID: 1, Kind: "model_request", Text: body})
 	args := strings.Repeat("a", 20000)
 	s.Observe(agent.Event{RunID: 1, Kind: "tool_started", Arguments: args})
-	s.Observe(agent.Event{RunID: 1, Kind: "model_request", Request: strings.Repeat("x", 8*1024*1024)})
-	s.Observe(agent.Event{RunID: 1, Kind: "run_finished", Text: "done"})
+	s.Observe(agent.Event{RunID: 1, Kind: "tool_started", Arguments: strings.Repeat("x", 8*1024*1024)})
+	s.Observe(agent.Event{RunID: 1, Kind: "run_finished", Text: "done", Summary: "本轮处理已结束。"})
 	r := s.snapshot("1")[0]
-	require.Equal(t, body, r.Events[1].Request)
-	require.Equal(t, args, r.Events[2].Arguments)
+	require.Len(t, r.Events, 3)
+	require.Equal(t, args, r.Events[1].Arguments)
+	require.Equal(t, "本轮处理已结束。", r.Summary)
 	require.True(t, r.Truncated)
-	require.Equal(t, "run_finished", r.Events[3].Kind)
+	require.Equal(t, "run_finished", r.Events[2].Kind)
 	require.LessOrEqual(t, r.requestBytes, 8*1024*1024)
 }

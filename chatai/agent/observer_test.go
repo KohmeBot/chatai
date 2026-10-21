@@ -26,6 +26,7 @@ func TestObserverPreservesLoopOrderAndPayloads(t *testing.T) {
 		require.EqualValues(t, 456, e.UserID)
 		require.Equal(t, events[0].RunID, e.RunID)
 		require.False(t, e.Time.IsZero())
+		require.NotEmpty(t, e.Summary)
 	}
 	require.Equal(t, []string{"run_started", "model_started", "model_finished", "tool_started", "tool_finished", "model_started", "model_finished", "tool_started", "tool_finished", "skill_loaded", "model_started", "model_finished", "run_finished"}, kinds)
 	require.Equal(t, "user input", events[0].Text)
@@ -33,6 +34,19 @@ func TestObserverPreservesLoopOrderAndPayloads(t *testing.T) {
 	require.EqualValues(t, 10, events[6].InputTokens)
 	require.JSONEq(t, `{"name":"example"}`, events[7].Arguments)
 	require.Equal(t, `"skill contents"`, events[8].Result)
+	for _, request := range llm.requests {
+		require.Nil(t, request.ObserveRequest, "agent logs must not collect raw request bodies")
+	}
+}
+
+func TestDecisionProgressUsesCommentaryNotReasoning(t *testing.T) {
+	response := &model.Response{Answer: "正在核实上映日期。", Reasoning: "private reasoning", ToolCalls: []model.ToolCall{call("s", "search_tools", `{}`)}}
+	require.Equal(t, "正在核实上映日期。", decisionProgress(response))
+	response.Answer = ""
+	require.Equal(t, "准备执行：search_tools", decisionProgress(response))
+	response.ToolCalls = nil
+	response.Answer = "a long final answer"
+	require.Equal(t, "正在整理本轮处理结果。", decisionProgress(response))
 }
 
 func TestObserverModelErrorFinishesRun(t *testing.T) {
