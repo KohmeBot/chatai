@@ -62,6 +62,7 @@ type ConfiguredSkill struct {
 }
 
 type AgentConfig struct {
+	ContinuationSeconds    int                      `yaml:"continuation_seconds" jsonschema:"description=连续对话存留秒数，默认60,minimum=1"`
 	ConversationMemory     ConversationMemoryConfig `yaml:"conversation_memory" jsonschema:"description=按群和用户隔离的短期对话记忆"`
 	MaxSteps               int                      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大模型决策轮数,minimum=1,maximum=20"`
 	MaxToolCalls           int                      `yaml:"max_tool_calls" jsonschema:"description=单次 Agent 最大工具调用总数,minimum=1,maximum=100"`

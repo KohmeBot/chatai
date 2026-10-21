@@ -246,6 +246,8 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
+			ContinuationWindow:   time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second,
+			ContinuationModel:    c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true),
 			Observer:             observer,
 			ConversationMemory:   c.conf.Agent.ConversationMemory.Enable,
 			ConversationWindow:   time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second,
@@ -312,4 +314,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.4.2" }
+func (c *ChatPlugin) Version() string      { return "v1.4.3" }

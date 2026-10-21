@@ -111,6 +111,9 @@ func (p *Persona) rememberBotDialogue(rc *agent.RunContext, segments message.Mes
 		return
 	}
 	selfID, _ := rc.Values["self_user_id"].(int64)
+	if enabled, _ := rc.Values[continuationTurnKey].(bool); enabled {
+		p.renewContinuation(rc.UserID, time.Now())
+	}
 	p.rememberDialogue(rc, "agent", selfID, id, segments.ExtractPlainText(), getMsgType(segments))
 }
 

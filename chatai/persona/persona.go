@@ -50,6 +50,8 @@ EventEnvelope 的 user_memory 是已知的结构化用户记忆，包含偏好�
 func AgentRules() string { return agentRules }
 
 type Options struct {
+	ContinuationWindow     time.Duration
+	ContinuationModel      model.LargeModel
 	Observer               agent.Observer
 	ConversationMemory     bool
 	ConversationWindow     time.Duration
@@ -78,6 +80,9 @@ type Options struct {
 }
 
 type Persona struct {
+	continuationMu sync.Mutex
+	continuations  map[int64]time.Time
+	activeMessages map[int64]int
 	conversationMu sync.Mutex
 	conversations  map[int64]conversationState
 	groupID        int64
@@ -100,6 +105,9 @@ type Persona struct {
 }
 
 func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Persona {
+	if opts.ContinuationWindow <= 0 {
+		opts.ContinuationWindow = time.Minute
+	}
 	if opts.ConversationWindow <= 0 {
 		opts.ConversationWindow = 10 * time.Minute
 	}
@@ -150,7 +158,7 @@ func (p *Persona) RegisterTool(tool agent.Tool) error { return p.tools.Register(
 
 func (p *Persona) ToolNames() []string { return p.tools.Names() }
 
-// UpdateContext 始终记录消息，但只有明确 @/回复机器人或戳机器人时才启动 Agent。
+// UpdateContext 记录消息；明确触发直接运行，存留窗口内先判断是否值得续聊。
 func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	msg := newMessage(ctx)
 	if msg.IsEmpty() {
@@ -169,7 +177,16 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	if saveErr != nil {
 		return saveErr
 	}
-	if p.opts.RepeatEnable {
+	if msg.User.UserId == ctx.Event.SelfID {
+		return nil
+	}
+	triggered := ctx.Event.IsToMe || (msg.MsgType == MsgTypePoke && msg.TargetUser.UserId == ctx.Event.SelfID)
+	if !p.beginMessage(msg.User.UserId, triggered) {
+		return nil
+	}
+	defer p.endMessage(msg.User.UserId)
+	// Explicit requests and active conversations take priority over parroting.
+	if p.opts.RepeatEnable && !triggered && p.continuationDeadline(msg.User.UserId, time.Now()).IsZero() {
 		if p.shouldRepeat(msg, p.opts.RepeatCount) {
 			segments := repeatMessage(ctx.Event.Message)
 			id := ctx.SendGroupMessage(p.groupID, segments)
@@ -179,9 +196,18 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 			return p.recordBotMessage(ctx, segments, id)
 		}
 	}
-	triggered := ctx.Event.IsToMe || (msg.MsgType == MsgTypePoke && msg.TargetUser.UserId == ctx.Event.SelfID)
 	if !triggered {
-		return nil
+		if msg.MsgType == MsgTypePoke {
+			return nil
+		}
+		reply, err := p.shouldContinue(msg, ctx.Event.SelfID)
+		if err != nil {
+			logrus.Warnf("[续聊判断][group=%d user=%d] %v", p.groupID, msg.User.UserId, err)
+			return nil
+		}
+		if !reply {
+			return nil
+		}
 	}
 
 	if err := p.run(ctx, msg, ""); err != nil {
@@ -203,6 +229,9 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	defer cancel()
 	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, UserName: msg.User.Nickname, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
 	runCtx.ReportDeliveryFailure(deliveryErr)
+	if scheduledInstruction == "" && deliveryErr == nil && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
+		runCtx.Values[continuationTurnKey] = true
+	}
 	if (p.opts.ConversationMemory || p.opts.MemoryMaintainer.conversationMode()) && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
 		finish := p.opts.MemoryMaintainer.beginConversation(p.groupID, msg.User.UserId)
 		defer finish()
