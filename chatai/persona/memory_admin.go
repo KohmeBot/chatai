@@ -10,8 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// MemoryEdit deliberately has no create/upsert operation. Identity and provenance
-// are immutable; the monitor can only operate on existing, visible records.
+// MemoryEdit supports manual additions to existing profiles. Identity and
+// provenance of existing items remain immutable.
 type MemoryEdit struct {
 	Target      string     `json:"target"`
 	UserID      string     `json:"user_id"`
@@ -60,6 +60,38 @@ func (p *Persona) EditMemory(userID int64, edit MemoryEdit, remove bool) error {
 			return errors.New("记忆不存在或版本已变化，请刷新后重试")
 		}
 		switch edit.Target {
+		case "item_create":
+			if remove {
+				return errors.New("新增条目不支持删除操作")
+			}
+			switch edit.Kind {
+			case "fact", "preference", "boundary", "state", "experience":
+			default:
+				return errors.New("无效记忆类型")
+			}
+			if strings.TrimSpace(edit.Key) == "" || utf8.RuneCountInString(edit.Key) > 64 || strings.TrimSpace(edit.Text) == "" || utf8.RuneCountInString(edit.Text) > 200 {
+				return errors.New("条目键须为 1–64 字，内容须为 1–200 字")
+			}
+			if edit.Confidence != "explicit" && edit.Confidence != "inferred" {
+				return errors.New("无效可信度")
+			}
+			now := time.Now()
+			if edit.ExpiresAt != nil && !edit.ExpiresAt.After(now) {
+				return errors.New("到期时间须晚于当前时间")
+			}
+			if edit.Kind == "state" && edit.ExpiresAt == nil {
+				return errors.New("近期状态必须有到期时间")
+			}
+			for _, item := range profile.Items {
+				if item.Key == edit.Key {
+					return errors.New("条目键已存在，请使用其他键")
+				}
+			}
+			if len(profile.Items) >= 30 {
+				return errors.New("最多保存30条结构化记忆，请先删除过时条目")
+			}
+			// SourceID zero denotes a manual addition, without invented chat evidence.
+			profile.Items = append(profile.Items, MemoryItem{Key: edit.Key, Kind: edit.Kind, Text: edit.Text, Confidence: edit.Confidence, ExpiresAt: edit.ExpiresAt, GroupID: p.groupID, ObservedAt: now})
 		case "profile":
 			if remove {
 				// Keep a versioned tombstone so migration/backlogged maintenance cannot

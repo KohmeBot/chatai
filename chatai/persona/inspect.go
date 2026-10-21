@@ -29,7 +29,7 @@ func (p *Persona) ShortMemorySnapshot() []map[string]any {
 
 func (p *Persona) MemorySnapshot(offset int) (any, error) {
 	var rows []UserMemory
-	if err := p.db.Order("user_id").Offset(offset).Limit(51).Find(&rows).Error; err != nil {
+	if err := p.db.Order("updated_at DESC").Order("user_id ASC").Offset(offset).Limit(51).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	more := len(rows) > 50

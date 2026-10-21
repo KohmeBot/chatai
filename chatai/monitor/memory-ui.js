@@ -11,8 +11,17 @@ function identity(kind,id,name=''){
 function identifyCard(c,kind,id){c.querySelector('h3').replaceChildren(identity(kind,id));return c}
 function action(text,fn,danger=false){const b=el('button',danger?'danger':'',text);b.type='button';b.onclick=fn;return b}
 function memoryActions(c,u){
+ const add=el('div','actions');add.append(action('新增结构化记忆',()=>addMemoryItem(u)));c.append(add);
  const row=el('div','actions');row.append(action('编辑简介与关系',()=>editProfile(u)),action('清空长期记忆',()=>confirmMemory('清空该用户全部长期记忆？','此操作会清空简介、关系和所有群中的结构化条目，影响所有群聊。之后仍可从新消息形成记忆。',{target:'profile',user_id:u.user_id,version:u.version}),true));c.append(row);
 }
+function addMemoryItem(u){openMemoryDialog('新增结构化记忆','事实、偏好、边界跨群共享；近期状态和共同经历仅在当前群可见。',form=>{
+ form.append(identity('user',u.user_id));
+ const key=field(form,'记忆键（唯一标识）','','text',64);key.required=true;
+ const kind=field(form,'类型','fact','select');kind.replaceChildren();for(const [v,t]of [['fact','事实'],['preference','偏好'],['boundary','边界'],['state','近期状态'],['experience','共同经历']]){const o=el('option','',t);o.value=v;kind.append(o)}
+ const text=field(form,'记忆内容','','textarea',200);text.required=true;
+ const confidence=field(form,'可信度','explicit','select'),expiry=field(form,'到期时间（近期状态必填，含时区）','','text');expiry.placeholder='2026-12-31T23:59:59+08:00';kind.onchange=()=>{expiry.required=kind.value==='state'};
+ return()=>{if(expiry.value&&!Number.isFinite(Date.parse(expiry.value)))throw Error('请输入有效的到期时间，例如 2026-12-31T23:59:59+08:00');return{target:'item_create',user_id:u.user_id,version:u.version,key:key.value.trim(),kind:kind.value,text:text.value,confidence:confidence.value,expires_at:expiry.value?new Date(expiry.value).toISOString():null}};
+ })}
 function groupActions(c,content){if(!content)return;const row=el('div','actions');row.append(action('修改群印象',()=>openMemoryDialog('修改群印象','只修改已有群印象。',form=>{const text=field(form,'群印象',content,'textarea',4000);return()=>({target:'group',previous:content,text:text.value})})),action('删除',()=>confirmMemory('删除该群印象？','删除后将不再向 Agent 提供这段群印象。',{target:'group',previous:content}),true));c.append(row)}
 function itemActions(node,u,item){const row=el('div','actions');row.append(action('修改',()=>openMemoryDialog('修改结构化记忆','键、类型、来源和所属群保持不变。',form=>{
  form.append(el('p','muted',`键：${item.key} · 类型：${item.kind} · 来源 #${item.source_id}`),identity('group',String(item.group_id)));
