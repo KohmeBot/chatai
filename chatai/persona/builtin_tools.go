@@ -16,7 +16,6 @@ func (p *Persona) registerBuiltinTools() {
 		p.structuredMemoryTools(),
 		p.groupMemoryTools(),
 		p.skillTools(),
-		p.followUpTools(),
 		p.groupActionTools(),
 		p.rawMessageTools(),
 		p.scheduleTools(),

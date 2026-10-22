@@ -38,6 +38,27 @@ func TestBuiltinToolSearchFindsGroupMemberTools(t *testing.T) {
 	require.Contains(t, searchNames(list), "get_group_member_list")
 }
 
+// Global rules describe intent rather than naming every tool. These workflows
+// must remain discoverable without the caller knowing the implementation name.
+func TestBuiltinToolSearchFindsWorkflowsByIntent(t *testing.T) {
+	p := &Persona{opts: Options{ImpressionUpdateEnable: true}, tools: agent.NewRegistry()}
+	p.registerBuiltinTools()
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{"纠正记忆 更新用户记忆", "update_user_memory"},
+		{"忘记 更新群记忆", "update_group_memory"},
+		{"读取原始消息 合并转发", "read_raw_message"},
+		{"发送原始消息段", "send_raw_message"},
+		{"发送最终回复", "send_message"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			require.Contains(t, searchNames(p.tools.Search(tc.query, 5)), tc.want)
+		})
+	}
+}
+
 func TestBuiltinToolSearchFindsImpressionUpdateWhenEnabled(t *testing.T) {
 	p := &Persona{opts: Options{ImpressionUpdateEnable: true}, tools: agent.NewRegistry()}
 	p.registerBuiltinTools()

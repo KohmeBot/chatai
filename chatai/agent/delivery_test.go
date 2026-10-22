@@ -29,10 +29,13 @@ func TestDeliveryFailureReturnsToModelEvenOnFinalStep(t *testing.T) {
 			for i := 1; i <= 3; i++ {
 				llm.steps = append(llm.steps, model.Response{ToolCalls: []model.ToolCall{call(fmt.Sprint(i), "send_raw_message", fmt.Sprintf(`{"revision":%d}`, i))}})
 			}
+			llm.steps = append(llm.steps, model.Response{Answer: "delivery failed"})
 			rc := &RunContext{}
 			_, err := (&Runner{Model: llm, Tools: registry, RequireAction: true, MaxSteps: 1, MaxToolCalls: 1}).Run(rc, "send", "", "")
 			if failures == 3 {
-				require.ErrorIs(t, err, ErrMessageDeliveryFailed)
+				require.NoError(t, err)
+				require.True(t, rc.Trace().Finalized)
+				require.Contains(t, llm.requests[3].History[len(llm.requests[3].History)-2].Content, "message_id=0")
 				require.False(t, rc.ActionPerformed())
 				require.False(t, rc.ResponseDelivered())
 				require.Equal(t, 3, attempts)
@@ -89,9 +92,11 @@ func TestHostFailureCountsTowardDeliveryLimit(t *testing.T) {
 		{ToolCalls: []model.ToolCall{call("load", "search_tools", `{"query":"send"}`)}},
 		{ToolCalls: []model.ToolCall{call("a", "send_message", `{}`)}},
 		{ToolCalls: []model.ToolCall{call("b", "send_message", `{}`)}},
+		{Answer: "delivery failed"},
 	}}
 	_, err := (&Runner{Model: llm, Tools: registry, RequireAction: true}).Run(rc, "original event", "", "")
-	require.ErrorIs(t, err, ErrMessageDeliveryFailed)
+	require.NoError(t, err)
+	require.True(t, rc.Trace().Finalized)
 	require.Equal(t, 2, attempts)
 	require.Contains(t, llm.requests[0].Question, "original event")
 	require.Contains(t, llm.requests[0].Question, "message_id=0")

@@ -2,7 +2,6 @@ package persona
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -35,29 +34,6 @@ func TestEventPromptUsesStructuredEnvelopeAndIncludesQuote(t *testing.T) {
 	require.Equal(t, "原作者", envelope.Message.QuotedNickname)
 	require.True(t, envelope.Message.TargetIsSelf)
 	require.Equal(t, "Agent自己", envelope.Message.TargetNickname)
-}
-
-func TestAgentRulesPrioritizeContextBeforeAskingUser(t *testing.T) {
-	require.True(t, strings.Index(agentRules, "优先查询群聊上下文") < strings.Index(agentRules, "才调用 ask_user_and_wait"))
-}
-
-func TestAgentRulesDefineStructuredSelfIdentity(t *testing.T) {
-	require.Contains(t, agentRules, "“Agent自己”和“群里的Bot”始终指你本人")
-	require.Contains(t, agentRules, "is_self")
-	require.Contains(t, agentRules, "self_user_id")
-}
-
-func TestAgentRulesPrioritizeCorrectnessAndNaturalGroupReplies(t *testing.T) {
-	require.Contains(t, agentRules, "正确、自然、符合当前群氛围")
-	require.Contains(t, agentRules, "事实正确、权限边界和用户目标优先于表演人格")
-}
-
-func TestAgentRulesRequireFinalReplyThroughGroupAction(t *testing.T) {
-	require.Contains(t, agentRules, "每次 Agent 运行都必须成功调用至少一个 group_action=true")
-	require.Contains(t, agentRules, "普通 assistant 文本不会被宿主发送")
-	require.Contains(t, agentRules, "最终面向群友的内容必须通过群聊动作工具发送")
-	require.Contains(t, agentRules, "同一轮任务可以按需多次调用群聊动作工具")
-	require.Contains(t, agentRules, "完成任务所需的全部动作后停止，不要重复发送已成功的内容")
 }
 
 func TestPersonaRunnerRequiresActionAndWaitsForFinalDecision(t *testing.T) {

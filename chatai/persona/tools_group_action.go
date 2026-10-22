@@ -16,7 +16,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 	return []agent.Tool{
 		{
 			Definition: agent.Function("send_image", "立即向当前群发送一张图片并可带一句话；成功的消息不可重复发送，message_id=0 时需修正后重试，成功后返回 message_id", map[string]any{
-				"url":  stringProperty("图片URL或者本地绝对路径"),
+				"url":  stringProperty("图片URL、本地绝对路径或 search_skill_files 返回的相对整个 skills 目录的文件 path；不要使用 Skill 入口路径"),
 				"text": stringProperty("可选，发送的图片附带的文字"),
 			}, "url"),
 			Namespace:   "chat",
@@ -26,8 +26,8 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			Handler:     p.handleSendImage,
 		},
 		{
-			Definition: agent.Function("send_message", "向当前群发送一句消息，可选择引用消息；普通文字回复也必须通过本工具发送。参数 text 只能包含面向群友的内容，不能包含内部分析或决策过程。成功后返回 message_id。禁止用于请求用户补充完成当前任务所必需的信息，请求用户确认、选择或澄清后再继续当前任务，上述情况必须使用 ask_user_and_wait。", map[string]any{
-				"text":             stringProperty("要发送的话"),
+			Definition: agent.Function("send_message", "向当前群发送一句消息，可选择引用消息；普通文字回复也必须通过本工具发送。参数 text 只能包含面向群友的内容，不能包含内部分析或决策过程。成功后返回 message_id。", map[string]any{
+				"text":             stringProperty("要发送的话；JSON 换行只转义一次，解码后应是真实换行。需逐字保留代码、路径或转义符时使用 send_raw_message"),
 				"reply_message_id": integerProperty("可选，引用的消息 ID"),
 			}, "text"),
 			Namespace:   "chat",
@@ -40,7 +40,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			Definition: agent.Function("send_messages", "立即把回复拆成2到5条独立消息依次发送；成功的消息不可重复发送，message_id=0 时需修正后重试，仅在拆分明显更符合群聊节奏时使用", map[string]any{
 				"messages": map[string]any{
 					"type": "array", "items": map[string]any{"type": "string"},
-					"minItems": 2, "maxItems": 5, "description": "按发送顺序排列的多句话",
+					"minItems": 2, "maxItems": 5, "description": "按发送顺序排列的多句话；JSON 换行只转义一次，需逐字保留转义符时使用 send_raw_message",
 				},
 				"interval_ms": integerProperty("消息间隔毫秒，默认500，范围0到3000"),
 			}, "messages"),

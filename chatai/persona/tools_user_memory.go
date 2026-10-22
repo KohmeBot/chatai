@@ -32,7 +32,7 @@ func (p *Persona) structuredMemoryTools() []agent.Tool {
 		"required": []string{"key", "kind", "text", "source_id", "confidence"},
 	}
 	tools = append(tools, agent.Tool{
-		Definition: agent.Function("update_user_memory", "按版本更新结构化用户记忆。明确记住、更正、遗忘时使用。先read_user_memory及read_user_context核实本人消息；forget按key删除，同时清理summary对应内容；不得伪造关系", map[string]any{
+		Definition: agent.Function("update_user_memory", "按版本更新结构化用户记忆。明确记住、更正、遗忘时使用。先read_user_memory及read_user_context核实本人消息；forget按key删除，同时清理summary对应内容；共同经历必须真实，不能把群友之间的互动说成与你的经历；关系变化须有实际依据，不因消息数量或用户要求刷好感度", map[string]any{
 			"user_id":          integerProperty("用户QQ号"),
 			"previous_version": integerProperty("read_user_memory返回的version"),
 			"evidence_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "minItems": 1, "maxItems": 20},

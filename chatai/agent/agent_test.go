@@ -423,12 +423,14 @@ func TestRunnerDoesNotFinishWhileModelKeepsCallingToolsAfterGroupAction(t *testi
 		{ToolCalls: []model.ToolCall{call("search", "search_tools", `{"query":"send"}`)}},
 		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
 		{ToolCalls: []model.ToolCall{call("send-again", "send_message", `{}`)}},
+		{Answer: "finished"},
 	}}
 	runCtx := &RunContext{}
 	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 3, RequireAction: true}).Run(runCtx, "reply", "", "")
-	require.EqualError(t, err, "agent exceeded maximum of 3 steps")
+	require.NoError(t, err)
 	require.True(t, runCtx.ActionPerformed())
-	require.Len(t, llm.requests, 3)
+	require.Len(t, llm.requests, 4)
+	require.Empty(t, llm.requests[3].Tools)
 }
 
 func TestRunnerDecisionBoundaryForcesNewDecisionBeforeOtherTools(t *testing.T) {
@@ -466,11 +468,11 @@ func TestRunnerDecisionBoundaryForcesNewDecisionBeforeOtherTools(t *testing.T) {
 	require.Contains(t, llm.requests[2].History[4].Content, "requires a new model decision")
 }
 
-func TestRunnerRepromptsThenErrorsWhenModelStaysSilent(t *testing.T) {
+func TestRunnerRepromptsThenFinalizesWhenModelStaysSilent(t *testing.T) {
 	registry := NewRegistry()
-	llm := &scriptedModel{steps: []model.Response{{}, {}}}
+	llm := &scriptedModel{steps: []model.Response{{}, {}, {Answer: "unable to act"}}}
 	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 2, RequireAction: true}).Run(&RunContext{}, "reply", "", "")
-	require.ErrorIs(t, err, ErrGroupActionRequired)
+	require.NoError(t, err)
 	require.Contains(t, llm.requests[1].Question, "必须")
 }
 
@@ -492,10 +494,11 @@ func TestRunnerFinalStepOnlyOffersAndExecutesGroupActions(t *testing.T) {
 		{ToolCalls: []model.ToolCall{call("find-web", "search_tools", `{"query":"web"}`)}},
 		{ToolCalls: []model.ToolCall{call("web", "search_web", `{}`)}},
 		{ToolCalls: []model.ToolCall{call("send", "send_message", `{}`)}},
+		{Answer: "finished"},
 	}}
 
 	_, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 3, RequireAction: true}).Run(&RunContext{}, "understand this", "", "")
-	require.EqualError(t, err, "agent exceeded maximum of 3 steps")
+	require.NoError(t, err)
 	require.True(t, sent)
 	require.Equal(t, []string{"send_message"}, toolNames(llm.requests[2].Tools))
 	require.Contains(t, llm.requests[2].Question, "最后一步")
@@ -508,10 +511,10 @@ func TestRunnerReturnsFinalTextWhenLastStepDoesNotCallAction(t *testing.T) {
 		Definition: Function("send_message", "send", map[string]any{}), GroupAction: true,
 		Handler: func(_ *RunContext, _ json.RawMessage) (any, error) { return "sent", nil },
 	}))
-	llm := &scriptedModel{steps: []model.Response{{Answer: "基于现有资料，这是最终判断。"}}}
+	llm := &scriptedModel{steps: []model.Response{{Answer: "基于现有资料，这是最终判断。"}, {Answer: "基于现有资料，这是最终判断。"}}}
 
 	answer, err := (&Runner{Model: llm, Tools: registry, MaxSteps: 1, RequireAction: true}).Run(&RunContext{}, "reply", "", "")
-	require.ErrorIs(t, err, ErrGroupActionRequired)
+	require.NoError(t, err)
 	require.Equal(t, "基于现有资料，这是最终判断。", answer)
 	require.Equal(t, []string{"send_message"}, toolNames(llm.requests[0].Tools))
 }

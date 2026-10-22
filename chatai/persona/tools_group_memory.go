@@ -26,7 +26,7 @@ func (p *Persona) groupMemoryTools() []agent.Tool {
 		"required": []string{"key", "kind", "text", "source_id", "confidence"},
 	}
 	tools = append(tools, agent.Tool{
-		Definition: agent.Function("update_group_memory", "按版本更新当前群记忆。先read_group_memory及read_group_context核实来源；保存群体事实、共同话题偏好、互动边界、近期状态和共同事件。个人意见不等于群体共识，玩笑不等于群规；forget时同时清理summary。", map[string]any{
+		Definition: agent.Function("update_group_memory", "按版本更新当前群记忆，明确记住、更正或遗忘群信息时使用。先read_group_memory及read_group_context核实来源；保存群体事实、共同话题偏好、互动边界、近期状态和共同事件。个人意见不等于群体共识，玩笑不等于群规；forget时同时清理summary。", map[string]any{
 			"previous_version": integerProperty("read_group_memory返回的version"),
 			"evidence_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "minItems": 1, "maxItems": 20},
 			"reason":           stringProperty("本次变化的依据，最多200字"),

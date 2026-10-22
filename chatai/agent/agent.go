@@ -88,6 +88,7 @@ type RunTrace struct {
 	ResponseDelivered bool
 	DeliveryKind      string
 	FinalAnswer       string
+	Finalized         bool // A bounded, tool-free closing response for host delivery.
 	Error             string
 }
 
@@ -494,7 +495,12 @@ func searchToolDefinition() model.Tool {
 	}, "query")
 }
 
-func (r *Registry) execute(ctx *RunContext, call model.ToolCall) (any, error) {
+func (r *Registry) execute(ctx *RunContext, call model.ToolCall) (result any, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("tool %q panicked: %v", call.Function.Name, recovered)
+		}
+	}()
 	r.mu.RLock()
 	tool, ok := r.tools[call.Function.Name]
 	r.mu.RUnlock()
@@ -562,6 +568,12 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
 	question := prompt + r.skillCatalogPrompt(activeTools)
+	finalize := func(cause error) (string, error) {
+		if errors.Is(runContextError(ctx), context.DeadlineExceeded) {
+			cause = fmt.Errorf("%v: %w", cause, context.DeadlineExceeded)
+		}
+		return r.finalize(ctx, history, question, imageURL, cause, modelName)
+	}
 	var postDeliveryErr error
 	logrus.Infof("[Agent][run=%d][开始] group=%d user=%d max_steps=%d max_tool_calls=%d require_action=%t image=%t", runID, ctx.GroupID, ctx.UserID, steps, maxToolCalls, r.RequireAction, imageURL != "")
 	for i := 0; i < steps; i++ {
@@ -570,14 +582,16 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			logrus.Warnf("[Agent][run=%d][宿主发送失败] attempt=%d/%d error=%v", runID, deliveryFailures, MaxDeliveryAttempts, deliveryErr)
 			if deliveryFailures >= MaxDeliveryAttempts {
 				logrus.Errorf("[Agent][run=%d][发送失败] exhausted %d attempts", runID, MaxDeliveryAttempts)
-				ctx.finishTrace("", deliveryErr)
-				return "", deliveryErr
+				return finalize(deliveryErr)
 			}
 			steps++
 			maxToolCalls++
 			question += "\n宿主发送消息失败：" + deliveryErr.Error() + "。请修正后通过发送工具完成回复，不要重复已经成功的消息。"
 		}
 		if err := runContextError(ctx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return finalize(err)
+			}
 			ctx.finishTrace("", err)
 			logrus.Warnf("[Agent][run=%d][取消] step=%d/%d error=%v", runID, i+1, steps, err)
 			return "", err
@@ -612,6 +626,9 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		}
 		ctx.emit(modelEvent)
 		if err != nil {
+			if errors.Is(runContextError(ctx), context.DeadlineExceeded) && errors.Is(err, context.DeadlineExceeded) {
+				return finalize(err)
+			}
 			ctx.finishTrace("", err)
 			logrus.Errorf("[Agent][run=%d][模型请求失败] step=%d/%d error=%v", runID, i+1, steps, err)
 			return "", err
@@ -655,8 +672,8 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			if r.RequireAction && !ctx.ActionPerformed() {
 				if i+1 == steps {
 					logrus.Warnf("[Agent][run=%d][未完成] 已用完 %d 轮，但模型没有完成群聊动作", runID, steps)
-					ctx.finishTrace(response.Answer, ErrGroupActionRequired)
-					return response.Answer, ErrGroupActionRequired
+					history = append(history, model.Message{Role: "assistant", Content: response.Answer})
+					return finalize(ErrGroupActionRequired)
 				}
 				history = append(history, model.Message{Role: "assistant", Content: response.Answer})
 				question = "你还没有完成群聊动作。不得把普通 assistant 文本作为最终回复。若尚未加载发送能力，先调用 search_tools 搜索“发送最终回复”；随后必须成功调用一个 group_action=true 的工具，把只面向群友的最终回复放进工具参数，不能静默结束。"
@@ -713,6 +730,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 					if r.Skills != nil {
 						skills, skillErr := r.Skills.SearchActiveSkills(ctx.GroupID, input.Query, SkillSearchLimit(input.Limit))
 						if skillErr != nil {
+							callErr = fmt.Errorf("skill search failed: %w", skillErr)
 							logrus.Warnf("[Agent][run=%d][Skill 搜索失败] query=%s error=%v", runID, logValue(input.Query), skillErr)
 						} else {
 							for _, item := range skills {
@@ -766,16 +784,18 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				logrus.Warnf("[Agent][run=%d][发送失败] attempt=%d/%d tool=%s error=%v", runID, deliveryFailures, MaxDeliveryAttempts, call.Function.Name, callErr)
 				if deliveryFailures >= MaxDeliveryAttempts {
 					logrus.Errorf("[Agent][run=%d][发送失败] exhausted %d attempts", runID, MaxDeliveryAttempts)
-					ctx.finishTrace("", callErr)
-					return "", callErr
+					// Finish the tool-result history before asking the model to close.
+					steps = i + 1
 				}
 				// A batch may have delivered a prefix. Keep the delivery trace but
 				// allow the model to send only the remaining content.
 				ctx.actionMu.Lock()
 				ctx.actionPerformed = false
 				ctx.actionMu.Unlock()
-				steps++
-				maxToolCalls++
+				if deliveryFailures < MaxDeliveryAttempts {
+					steps++
+					maxToolCalls++
+				}
 				question = "发送失败：message_id=0。请修正消息内容或消息段参数后重新调用发送工具；只重发未成功的部分，不要重复已成功的消息。"
 			}
 			payload := map[string]any{"ok": callErr == nil, "status": "ok", "tool": call.Function.Name, "result": result}
@@ -786,7 +806,14 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 					postDeliveryErr = callErr
 				}
 			}
-			encoded, _ := json.Marshal(payload)
+			encoded, encodeErr := json.Marshal(payload)
+			if encodeErr != nil {
+				detail := "encode tool result: " + encodeErr.Error()
+				if callErr != nil {
+					detail += "; tool error: " + callErr.Error()
+				}
+				encoded, _ = json.Marshal(map[string]any{"ok": false, "status": "error", "tool": call.Function.Name, "error": map[string]any{"message": detail}})
+			}
 			if callErr != nil {
 				logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=false action_done=%t error=%q", runID, i+1, steps, call.ID, call.Function.Name, ctx.ActionPerformed(), callErr.Error())
 			} else {
@@ -805,16 +832,64 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		if finalActionStep {
 			if !ctx.ActionPerformed() {
 				logrus.Warnf("[Agent][run=%d][未完成] 最后一步未执行群聊动作 answer=%s", runID, logValue(response.Answer))
-				ctx.finishTrace(response.Answer, ErrGroupActionRequired)
-				return response.Answer, ErrGroupActionRequired
+				return finalize(ErrGroupActionRequired)
 			}
 			logrus.Warnf("[Agent][run=%d][未完成] 最后一步已执行群聊动作，但模型尚未主动完成决策", runID)
 		}
 	}
 	logrus.Warnf("[Agent][run=%d][未完成] exceeded maximum of %d steps action_done=%t", runID, steps, ctx.ActionPerformed())
 	err := fmt.Errorf("agent exceeded maximum of %d steps", steps)
-	ctx.finishTrace("", err)
-	return "", err
+	if contextErr := runContextError(ctx); errors.Is(contextErr, context.DeadlineExceeded) {
+		err = contextErr
+	}
+	return finalize(err)
+}
+
+// finalize gives the model one bounded chance to summarize existing evidence.
+// No tools are exposed or executed, so exhaustion cannot restart the loop.
+func (r *Runner) finalize(ctx *RunContext, history []model.Message, question, imageURL string, cause error, modelName string) (string, error) {
+	parent := ctx.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	if errors.Is(parent.Err(), context.Canceled) {
+		ctx.finishTrace("", parent.Err())
+		return "", parent.Err()
+	}
+	if errors.Is(parent.Err(), context.DeadlineExceeded) {
+		parent = context.WithoutCancel(parent)
+	}
+	closingCtx, cancel := context.WithTimeout(parent, 30*time.Second)
+	defer cancel()
+	if msg, ok := requestUserMessage(question, imageURL); ok {
+		history = append(history, msg)
+	}
+	instruction := "Agent 循环已结束，不能再调用工具。错误内容：" + cause.Error()
+	if errors.Is(cause, context.DeadlineExceeded) {
+		instruction += "。本次执行超时了"
+	}
+	instruction += "。请根据当前已经获得的知识和工具结果直接返回最终回复，说明未完成的部分和不确定性，不要声称未成功的操作已完成。这是唯一一次收尾请求，返回后结束循环。本次允许直接输出面向用户的最终文本，由宿主发送；不要重复已成功发送的内容。"
+	instruction += "如果所有结果都已成功发送且没有需要补充的内容，返回空文本。"
+	step := ctx.Trace().DecisionSteps + 1
+	ctx.emit(Event{Kind: "model_started", Step: step, Model: modelName})
+	started := time.Now()
+	response := new(model.Response)
+	err := r.Model.Request(&model.Request{Context: closingCtx, History: history, Question: instruction}, response)
+	if err == nil && response.ErrorMsg != "" {
+		err = errors.New(response.ErrorMsg)
+	}
+	event := Event{Kind: "model_finished", Step: step, Model: modelName, Text: response.Answer, Reasoning: response.Reasoning, InputTokens: response.InputToken, OutputTokens: response.OutToken, DurationMS: time.Since(started).Milliseconds()}
+	if err != nil {
+		event.Error = err.Error()
+	} else {
+		ctx.recordModelStep(response)
+		ctx.traceMu.Lock()
+		ctx.trace.Finalized = true
+		ctx.traceMu.Unlock()
+	}
+	ctx.emit(event)
+	ctx.finishTrace(response.Answer, err)
+	return response.Answer, err
 }
 
 func runContextError(ctx *RunContext) error {
