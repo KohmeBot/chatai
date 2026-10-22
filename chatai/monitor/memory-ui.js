@@ -45,8 +45,49 @@ function openMemoryDialog(title,description,build,remove=false){
  heading.id='memory-dialog-title';dialog.setAttribute('aria-labelledby',heading.id);error.setAttribute('role','alert');form.append(heading,el('p','muted',description));const payload=build(form);
  const cancel=action('取消',()=>dialog.close()),save=el('button',remove?'danger':'primary',remove?'确认删除':'保存修改');save.type='submit';buttons.append(cancel,save);form.append(error,buttons);dialog.append(form);document.body.append(dialog);
  let busy=false;dialog.oncancel=e=>{if(busy)e.preventDefault()};dialog.onclose=()=>dialog.remove();
- form.onsubmit=async e=>{e.preventDefault();if(busy)return;try{const data=payload();busy=true;save.disabled=cancel.disabled=true;save.textContent='正在保存…';error.textContent='';await api(`/api/inspect/memory?group=${encodeURIComponent(group)}`,{method:remove?'DELETE':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(15000)});dialog.close();if(authenticated&&currentView==='memory'&&$('group').value===group)await loadCatalog();notifyMemory(remove?'记忆已删除':'修改已保存')}catch(err){error.textContent=err.message+'；如数据已变化，请取消并刷新后重试。'}finally{busy=false;save.disabled=cancel.disabled=false;save.textContent=remove?'确认删除':'保存修改'}};
+ form.onsubmit=async e=>{e.preventDefault();if(busy)return;try{const data=payload();busy=true;save.disabled=cancel.disabled=true;save.textContent='正在保存…';error.textContent='';await api(`/api/inspect/memory?group=${encodeURIComponent(group)}`,{method:remove?'DELETE':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(15000)});dialog.close();document.querySelectorAll('.memory-detail').forEach(d=>d.close());if(authenticated&&currentView==='memory'&&$('group').value===group)await loadCatalog();notifyMemory(remove?'记忆已删除':'修改已保存')}catch(err){error.textContent=err.message+'；如数据已变化，请取消并刷新后重试。'}finally{busy=false;save.disabled=cancel.disabled=false;save.textContent=remove?'确认删除':'保存修改'}};
  dialog.showModal();(remove?cancel:form.querySelector('textarea,input,select')||cancel).focus();
 }
 function notifyMemory(message){const toast=el('div','toast',message);toast.setAttribute('role','status');document.body.append(toast);setTimeout(()=>toast.remove(),3500)}
-function updateGroupIdentity(){const target=$('group-identity');target.replaceChildren();if($('group').value)target.append(identity('group',$('group').value))}
+function updateGroupIdentity(){const target=$('group-identity');target.replaceChildren();if($('group').value)target.append(identity('group',$('group').value));else target.textContent='暂无可选群聊';renderGroupOptions()}
+
+function renderGroupOptions(){
+ const list=$('group-list');if(!list)return;list.replaceChildren();
+ const query=$('group-search').value.trim();
+ for(const option of $('group').options){
+  if(!option.value.includes(query))continue;
+  const selected=option.value===$('group').value;
+  const button=action('',()=>{$('group').value=option.value;closeGroupPicker();$('group').dispatchEvent(new Event('change'))});
+  button.className='group-option';button.setAttribute('aria-pressed',String(selected));
+  button.append(identity('group',option.value),el('span','group-check',selected?'✓':''));list.append(button);
+ }
+ if(!list.children.length)list.append(el('p','empty','没有匹配的群聊'));
+}
+function closeGroupPicker(){ $('group-options').hidden=true;$('group-toggle').setAttribute('aria-expanded','false') }
+function initConsoleUI(){
+ const toggle=$('theme-toggle');
+ function syncTheme(){const dark=document.documentElement.dataset.theme==='dark';toggle.textContent=dark?'☀ 白天':'☾ 黑夜';toggle.setAttribute('aria-label',dark?'切换到白天模式':'切换到黑夜模式')}
+ syncTheme();toggle.onclick=()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;try{localStorage.setItem('chatai-theme',theme)}catch{}syncTheme()};
+ $('group-toggle').onclick=()=>{const open=$('group-options').hidden;$('group-options').hidden=!open;$('group-toggle').setAttribute('aria-expanded',String(open));if(open){$('group-search').value='';renderGroupOptions();$('group-search').focus()}};
+ $('group-search').oninput=renderGroupOptions;
+ document.addEventListener('click',e=>{if(!e.target.closest('.group-picker'))closeGroupPicker()});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('group-options').hidden){closeGroupPicker();$('group-toggle').focus()}});
+}
+function userMemoryCard(u){
+ const c=identifyCard(card('用户 '+u.user_id,'','长期记忆'),'user',u.user_id);c.classList.add('user-summary-card');
+ c.append(el('p','memory-summary',u.summary||'尚未形成用户简介'));
+ const bottom=el('div','row');bottom.append(el('small','',`${(u.items||[]).length} 条结构化记忆`),action('查看详情 →',()=>showUserMemory(u)));c.append(bottom);return c;
+}
+function showUserMemory(u){
+ const dialog=el('dialog','memory-dialog memory-detail'),heading=el('h2'),head=el('div','row');
+ heading.id='user-memory-title';heading.append(identity('user',u.user_id));dialog.setAttribute('aria-labelledby',heading.id);
+ const close=action('关闭',()=>dialog.close());head.append(heading,close);dialog.append(head,el('h3','','用户简介'),el('p','memory-full-summary',u.summary||'尚未形成用户简介'));
+ const rel=u.relationship||{};dialog.append(el('h3','','关系'),el('p','',`${rel.level||'暂无'} · ${rel.score??0}${rel.description?' · '+rel.description:''}`));
+ if(rel.reason)dialog.append(el('p','muted',rel.reason));
+ dialog.append(el('div','meta',`版本 ${u.version} · 更新 ${time(u.updated_at)}`));
+ memoryActions(dialog,u);dialog.append(el('h3','section-heading',`结构化记忆 · ${(u.items||[]).length}`));
+ const kinds={fact:'事实',preference:'偏好',boundary:'边界',state:'近期状态',experience:'共同经历'};
+ for(const i of u.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 #${i.source_id} · ${i.confidence==='explicit'?'明确表达':'推断'}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));if(i.group_id&&String(i.group_id)!=='0')item.append(identity('group',String(i.group_id)));itemActions(item,u,i);dialog.append(item)}
+ if(!u.items?.length)dialog.append(el('p','muted','暂无结构化记忆。可通过上方按钮新增。'));
+ dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();close.focus();
+}
