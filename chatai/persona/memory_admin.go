@@ -30,27 +30,8 @@ type MemoryEdit struct {
 
 func (p *Persona) EditMemory(userID int64, edit MemoryEdit, remove bool) error {
 	return p.db.Transaction(func(tx *gorm.DB) error {
-		if edit.Target == "group" {
-			if strings.TrimSpace(edit.Previous) == "" {
-				return errors.New("群印象不存在，不能添加")
-			}
-			if !remove && (strings.TrimSpace(edit.Text) == "" || utf8.RuneCountInString(edit.Text) > 4000) {
-				return errors.New("群印象须为 1–4000 字")
-			}
-			query := tx.Model(&GroupImpression{}).Where("group_id = ? AND content = ?", p.groupID, edit.Previous)
-			var result *gorm.DB
-			if remove {
-				result = query.Delete(&GroupImpression{})
-			} else {
-				result = query.Update("content", edit.Text)
-			}
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return errors.New("群印象已变化，请刷新后重试")
-			}
-			return nil
+		if strings.HasPrefix(edit.Target, "group") {
+			return p.editGroupMemory(tx, edit, remove)
 		}
 		profile, err := readUserMemory(tx, userID)
 		if err != nil {

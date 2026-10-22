@@ -25,7 +25,7 @@ func memoryTestDB(t *testing.T) *gorm.DB {
 	raw, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = raw.Close() })
-	require.NoError(t, db.AutoMigrate(&UserMemory{}, &MemoryCursor{}, &MemoryAudit{}, &PendingMemoryMessage{}, &ChatMessageRecord{}, &UserImpression{}, &favor.FavorRecord{}))
+	require.NoError(t, db.AutoMigrate(&GroupMemory{}, &GroupImpression{}, &UserMemory{}, &MemoryCursor{}, &MemoryAudit{}, &PendingMemoryMessage{}, &ChatMessageRecord{}, &UserImpression{}, &favor.FavorRecord{}))
 	return db
 }
 

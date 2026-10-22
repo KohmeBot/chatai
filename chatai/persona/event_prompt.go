@@ -12,6 +12,7 @@ import (
 // model. User-controlled text remains data inside this envelope instead of
 // being mixed with natural-language harness instructions.
 type agentEventEnvelope struct {
+	GroupMemory   *GroupProfile      `json:"group_memory,omitempty"`
 	Kind          string             `json:"kind"`
 	CurrentTime   string             `json:"current_time"`
 	GroupID       int64              `json:"group_id"`
@@ -43,6 +44,15 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string, selfUserID int
 			UserID: msg.User.UserId, Nickname: msg.User.Nickname,
 			IsSelf: selfUserID > 0 && msg.User.UserId == selfUserID,
 		},
+	}
+	if p.db != nil {
+		profile, err := readGroupMemory(p.db, p.groupID)
+		if err != nil {
+			logrus.Warnf("[Memory] 读取群记忆失败: %v", err)
+		} else {
+			profile = visibleGroupProfile(profile, time.Now(), 8)
+			envelope.GroupMemory = &profile
+		}
 	}
 	if p.db != nil && msg.User.UserId > 0 && msg.User.UserId != selfUserID {
 		profile, err := readUserMemory(p.db, msg.User.UserId)

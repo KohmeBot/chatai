@@ -45,9 +45,9 @@ func (p *Persona) MemorySnapshot(offset int) (any, error) {
 		profile = visibleUserProfile(profile, p.groupID, time.Now(), int(^uint(0)>>1))
 		users = append(users, map[string]any{"user_id": strconv.FormatInt(row.UserID, 10), "summary": profile.Summary, "items": profile.Items, "relationship": profile.Relationship, "version": profile.Version, "updated_at": row.UpdatedAt})
 	}
-	group, err := new(GroupImpression).Get(p.db, p.groupID)
+	group, err := readGroupMemory(p.db, p.groupID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"short_enabled": p.opts.ConversationMemory, "short": p.ShortMemorySnapshot(), "users": users, "group_impression": group.Content, "has_more": more, "offset": offset}, nil
+	return map[string]any{"short_enabled": p.opts.ConversationMemory, "short": p.ShortMemorySnapshot(), "users": users, "group_memory": visibleGroupProfile(group, time.Now(), 30), "group_impression": group.Summary, "has_more": more, "offset": offset}, nil
 }

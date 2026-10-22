@@ -46,7 +46,7 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 				return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
 			}
 			var userID int64
-			if edit.Target != "group" {
+			if edit.Target != "group" && edit.Target != "group_profile" && edit.Target != "group_item" && edit.Target != "group_item_create" {
 				userID, err = strconv.ParseInt(edit.UserID, 10, 64)
 				if err != nil || userID <= 0 {
 					return nil, fmt.Errorf("无效用户 ID")

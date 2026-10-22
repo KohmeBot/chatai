@@ -183,6 +183,11 @@ func applyMemoryChange(profile UserProfile, change MemoryChange, messages []Chat
 		}
 		selected[id] = msg
 	}
+	return applyMemoryContent(profile, change, selected, groupID, now)
+}
+
+// Shared bounded merging for user and group memory contents.
+func applyMemoryContent(profile UserProfile, change MemoryChange, selected map[uint]ChatMessageRecord, groupID int64, now time.Time) (UserProfile, error) {
 	if change.Summary != nil {
 		if utf8.RuneCountInString(*change.Summary) > 600 {
 			return profile, errors.New("summary exceeds 600 characters")

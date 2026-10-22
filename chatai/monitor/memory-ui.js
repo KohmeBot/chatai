@@ -14,21 +14,36 @@ function memoryActions(c,u){
  const add=el('div','actions');add.append(action('新增结构化记忆',()=>addMemoryItem(u)));c.append(add);
  const row=el('div','actions');row.append(action('编辑简介与关系',()=>editProfile(u)),action('清空长期记忆',()=>confirmMemory('清空该用户全部长期记忆？','此操作会清空简介、关系和所有群中的结构化条目，影响所有群聊。之后仍可从新消息形成记忆。',{target:'profile',user_id:u.user_id,version:u.version}),true));c.append(row);
 }
-function addMemoryItem(u){openMemoryDialog('新增结构化记忆','事实、偏好、边界跨群共享；近期状态和共同经历仅在当前群可见。',form=>{
- form.append(identity('user',u.user_id));
+function addMemoryItem(u){openMemoryDialog('新增结构化记忆',u.is_group?'群记忆仅在当前群生效；个人意见不等于群体共识。':'事实、偏好、边界跨群共享；近期状态和共同经历仅在当前群可见。',form=>{
+ form.append(identity(u.is_group?'group':'user',u.is_group?$('group').value:u.user_id));
  const key=field(form,'记忆键（唯一标识）','','text',64);key.required=true;
  const kind=field(form,'类型','fact','select');kind.replaceChildren();for(const [v,t]of [['fact','事实'],['preference','偏好'],['boundary','边界'],['state','近期状态'],['experience','共同经历']]){const o=el('option','',t);o.value=v;kind.append(o)}
  const text=field(form,'记忆内容','','textarea',200);text.required=true;
  const confidence=field(form,'可信度','explicit','select'),expiry=field(form,'到期时间（近期状态必填，含时区）','','text');expiry.placeholder='2026-12-31T23:59:59+08:00';kind.onchange=()=>{expiry.required=kind.value==='state'};
- return()=>{if(expiry.value&&!Number.isFinite(Date.parse(expiry.value)))throw Error('请输入有效的到期时间，例如 2026-12-31T23:59:59+08:00');return{target:'item_create',user_id:u.user_id,version:u.version,key:key.value.trim(),kind:kind.value,text:text.value,confidence:confidence.value,expires_at:expiry.value?new Date(expiry.value).toISOString():null}};
+ return()=>{if(expiry.value&&!Number.isFinite(Date.parse(expiry.value)))throw Error('请输入有效的到期时间，例如 2026-12-31T23:59:59+08:00');return{target:u.is_group?'group_item_create':'item_create',user_id:u.user_id,version:u.version,key:key.value.trim(),kind:kind.value,text:text.value,confidence:confidence.value,expires_at:expiry.value?new Date(expiry.value).toISOString():null}};
  })}
-function groupActions(c,content){if(!content)return;const row=el('div','actions');row.append(action('修改群印象',()=>openMemoryDialog('修改群印象','只修改已有群印象。',form=>{const text=field(form,'群印象',content,'textarea',4000);return()=>({target:'group',previous:content,text:text.value})})),action('删除',()=>confirmMemory('删除该群印象？','删除后将不再向 Agent 提供这段群印象。',{target:'group',previous:content}),true));c.append(row)}
+function groupMemoryCard(g){
+ const c=identifyCard(card('群',g.summary||'尚未形成群简介','群长期记忆'),'group',$('group').value);
+ c.append(el('div','meta',`版本 ${g.version} · ${(g.items||[]).length} 条记忆`));
+ c.append(action('查看与管理 →',()=>showGroupMemory(g)));return c;
+}
+function showGroupMemory(g){
+ const u={...g,is_group:true},dialog=el('dialog','memory-dialog memory-detail'),head=el('div','row'),heading=el('h2');
+ heading.id='group-memory-title';heading.append(identity('group',$('group').value));dialog.setAttribute('aria-labelledby',heading.id);
+ const close=action('关闭',()=>dialog.close());head.append(heading,close);dialog.append(head,el('h3','','群简介'),el('p','memory-full-summary',g.summary||'尚未形成群简介'),el('div','meta',`版本 ${g.version} · 更新 ${g.version?time(g.updated_at):'尚未保存'}`));
+ const actions=el('div','actions');actions.append(action('编辑群简介',()=>openMemoryDialog('编辑群简介','仅保存稳定的群体认识；条目请逐条修改。',form=>{const text=field(form,'群简介',g.summary||'','textarea',600);return()=>({target:'group_profile',version:g.version,summary:text.value})})),action('新增结构化记忆',()=>addMemoryItem(u)),action('清空群记忆',()=>confirmMemory('清空当前群全部记忆？','清空群简介和所有条目；之后仍可从新消息形成记忆。',{target:'group_profile',version:g.version}),true));dialog.append(actions);
+ const kinds={fact:'事实 / 群梗',preference:'群体偏好',boundary:'互动边界',state:'近期状态',experience:'共同事件'};
+ dialog.append(el('h3','section-heading',`结构化记忆 · ${(g.items||[]).length}`));
+ for(const i of g.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 ${i.source_id?'#'+i.source_id:'人工添加'} · ${i.confidence==='explicit'?'明确表达':'推断'} · 记录 ${time(i.observed_at)}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));itemActions(item,u,i);dialog.append(item)}
+ if(!g.items?.length)dialog.append(el('p','muted','暂无结构化群记忆。'));
+ dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();close.focus();
+}
 function itemActions(node,u,item){const row=el('div','actions');row.append(action('修改',()=>openMemoryDialog('修改结构化记忆','键、类型、来源和所属群保持不变。',form=>{
  form.append(el('p','muted',`键：${item.key} · 类型：${item.kind} · 来源 #${item.source_id}`),identity('group',String(item.group_id)));
  const text=field(form,'记忆内容',item.text,'textarea',200),confidence=field(form,'可信度',item.confidence,'select');
  const expiry=field(form,'到期时间（可选，含时区）',item.expires_at||'','text');expiry.placeholder='2026-12-31T23:59:59+08:00';
- return()=>{if(expiry.value&&!Number.isFinite(Date.parse(expiry.value)))throw Error('请输入有效的到期时间，例如 2026-12-31T23:59:59+08:00');return{target:'item',user_id:u.user_id,version:u.version,key:item.key,kind:item.kind,text:text.value,confidence:confidence.value,expires_at:expiry.value?new Date(expiry.value).toISOString():null}};
- })),action('删除',()=>confirmMemory('删除这条记忆？',`“${item.text}”将被删除。简介独立保存，如有重复内容，请同时修改简介。`,{target:'item',user_id:u.user_id,version:u.version,key:item.key}),true));node.append(row)}
+ return()=>{if(expiry.value&&!Number.isFinite(Date.parse(expiry.value)))throw Error('请输入有效的到期时间，例如 2026-12-31T23:59:59+08:00');return{target:u.is_group?'group_item':'item',user_id:u.user_id,version:u.version,key:item.key,kind:item.kind,text:text.value,confidence:confidence.value,expires_at:expiry.value?new Date(expiry.value).toISOString():null}};
+ })),action('删除',()=>confirmMemory('删除这条记忆？',`“${item.text}”将被删除。简介独立保存，如有重复内容，请同时修改简介。`,{target:u.is_group?'group_item':'item',user_id:u.user_id,version:u.version,key:item.key}),true));node.append(row)}
 function editProfile(u){openMemoryDialog('编辑用户简介与关系','用户简介与关系跨群共享。结构化条目请在卡片中逐条修改。',form=>{
  form.append(identity('user',u.user_id));const summary=field(form,'核心简介',u.summary||'','textarea',600),score=field(form,'好感度（-100 至 1000）',u.relationship.score,'number');score.min=-100;score.max=1000;score.step=1;score.required=true;
  const description=field(form,'关系描述',u.relationship.description||'','textarea',200),reason=field(form,'关系原因',u.relationship.reason||'','textarea',200);

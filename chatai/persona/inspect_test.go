@@ -22,6 +22,7 @@ func TestInspectMemoryUsesCanonicalStoreAndVisibility(t *testing.T) {
 	expired := time.Now().Add(-time.Hour)
 	require.NoError(t, writeUserMemory(db, UserProfile{UserID: 1, Summary: "canonical", Items: []MemoryItem{{Key: "a", Kind: "preference", Text: "shared", GroupID: 20}, {Key: "b", Kind: "state", Text: "other group", GroupID: 20}, {Key: "c", Kind: "state", Text: "expired", GroupID: 10, ExpiresAt: &expired}}}))
 	require.NoError(t, db.Create(&GroupImpression{GroupID: 10, Content: "group ten"}).Error)
+	require.NoError(t, MigrateGroupMemories(db))
 	p := memoryPersona()
 	p.db = db
 	value, err := p.MemorySnapshot(0)

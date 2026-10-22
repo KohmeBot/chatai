@@ -24,7 +24,7 @@ func (p *Persona) memoryTools() []agent.Tool {
 			Handler:     p.handleReadUserImpression,
 		},
 		{
-			Definition:  agent.Function("read_group_impression", "读取对当前群的长期印象", map[string]any{}),
+			Definition:  agent.Function("read_group_impression", "兼容工具：读取群简介和结构化群记忆；优先使用read_group_memory", map[string]any{}),
 			Namespace:   "memory",
 			ReadOnly:    true,
 			Idempotent:  true,
@@ -58,15 +58,15 @@ func (p *Persona) memoryTools() []agent.Tool {
 	}
 	if p.opts.ImpressionUpdateEnable {
 		tools = append(tools, agent.Tool{
-			Definition: agent.Function("update_impression", "更新当前群或某位群友的长期印象。先读取对应旧印象，把读取到的 content 原样传入 previous_content；content 必须是融合新旧信息后的完整内容，不是追加片段。只记录稳定、长期有用的信息，忽略一次性事件和闲聊", map[string]any{
+			Definition: agent.Function("update_impression", "兼容工具：更新某位群友简介；群记忆请使用update_group_memory。先读取对应旧印象，把读取到的 content 原样传入 previous_content；content 必须是融合新旧信息后的完整内容，不是追加片段。只记录稳定、长期有用的信息，忽略一次性事件和闲聊", map[string]any{
 				"scope": map[string]any{
 					"type":        "string",
-					"enum":        []string{"group", "user"},
-					"description": "group 表示当前群印象，user 表示群友印象",
+					"enum":        []string{"user"},
+					"description": "user 表示群友印象；群记忆使用 update_group_memory",
 				},
 				"user_id":          integerProperty("群友 QQ 号；scope=user 时必填"),
-				"previous_content": stringProperty("read_group_impression 或 read_user_impression 刚返回的 content，必须原样传入；没有旧印象时传空字符串"),
-				"content":          stringProperty("融合原内容后的完整长期印象；群印象最多400字，群友印象最多300字"),
+				"previous_content": stringProperty("read_user_impression 刚返回的 content，必须原样传入；没有旧印象时传空字符串"),
+				"content":          stringProperty("融合原内容后的完整长期印象；群友印象最多300字"),
 				"reason":           stringProperty("本次更新所依据的长期有效信息"),
 			}, "scope", "previous_content", "content", "reason"),
 			Namespace:   "memory",
@@ -92,11 +92,11 @@ func (p *Persona) handleReadUserImpression(_ *agent.RunContext, raw json.RawMess
 }
 
 func (p *Persona) handleReadGroupImpression(_ *agent.RunContext, _ json.RawMessage) (any, error) {
-	impression, err := new(GroupImpression).Get(p.db, p.groupID)
+	impression, err := readGroupMemory(p.db, p.groupID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"scope": "group", "group_id": impression.GroupID, "content": impression.Content}, nil
+	return map[string]any{"scope": "group", "group_id": impression.GroupID, "content": impression.Summary, "memory": visibleGroupProfile(impression, time.Now(), 30)}, nil
 }
 
 func (p *Persona) handleUpdateImpression(_ *agent.RunContext, raw json.RawMessage) (any, error) {
@@ -122,34 +122,7 @@ func (p *Persona) handleUpdateImpression(_ *agent.RunContext, raw json.RawMessag
 
 	switch input.Scope {
 	case "group":
-		if utf8.RuneCountInString(input.Content) > 400 {
-			return nil, errors.New("group impression content must not exceed 400 characters")
-		}
-		before, err := new(GroupImpression).Get(p.db, p.groupID)
-		if err != nil {
-			return nil, err
-		}
-		if before.Content != input.PreviousContent {
-			return nil, errors.New("group impression changed; read it again before updating")
-		}
-		if before.Content == input.Content {
-			return map[string]any{"scope": "group", "group_id": p.groupID, "changed": false, "content": input.Content, "reason": input.Reason}, nil
-		}
-		// Compare at the write itself: a monitor edit/delete may happen after
-		// the read above, and must not be overwritten by this stale tool call.
-		result := p.db.Model(&GroupImpression{}).Where("group_id = ? AND content = ?", p.groupID, input.PreviousContent).Update("content", input.Content)
-		if result.Error != nil {
-			return nil, result.Error
-		}
-		if result.RowsAffected == 0 {
-			if input.PreviousContent != "" {
-				return nil, errors.New("group impression changed; read it again before updating")
-			}
-			if err := p.db.Create(&GroupImpression{GroupID: p.groupID, Content: input.Content}).Error; err != nil {
-				return nil, err
-			}
-		}
-		return map[string]any{"scope": "group", "group_id": p.groupID, "changed": true, "before": before.Content, "after": input.Content, "reason": input.Reason}, nil
+		return nil, errors.New("use read_group_memory and update_group_memory with version and source evidence")
 	case "user":
 		if err := validateUserID(input.UserID); err != nil {
 			return nil, err

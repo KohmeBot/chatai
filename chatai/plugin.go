@@ -107,7 +107,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	tables := []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
 		&persona.ChatMessageRecord{}, &model.TokenUsage{},
-		&persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
+		&persona.GroupMemory{}, &persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
 	}
 	tables = append(tables, skill.Models()...)
 	for _, table := range tables {
@@ -117,6 +117,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 	if err := persona.MigrateUserMemories(db); err != nil {
 		return fmt.Errorf("migrate user memory: %w", err)
+	}
+	if err := persona.MigrateGroupMemories(db); err != nil {
+		return fmt.Errorf("migrate group memory: %w", err)
 	}
 	if c.conf.Impression.Enable {
 		route := c.conf.Routes.Impression
@@ -317,4 +320,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.4.7" }
+func (c *ChatPlugin) Version() string      { return "v1.4.8" }
