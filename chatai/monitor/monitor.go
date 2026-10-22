@@ -43,8 +43,6 @@ type Run struct {
 	Error        string        `json:"error,omitempty"`
 	Truncated    bool          `json:"truncated"`
 	Events       []agent.Event `json:"events,omitempty"`
-	bytes        int
-	requestBytes int
 }
 
 type Store struct {
@@ -116,27 +114,14 @@ func (s *Store) Observe(e agent.Event) {
 		r.Error = clip(e.Error)
 		r.DurationMS = e.DurationMS
 	}
-	for _, field := range []*string{&e.Summary, &e.UserName, &e.Text, &e.Result, &e.Reasoning, &e.Error, &e.Name, &e.Model, &e.CallID} {
+	for _, field := range []*string{&e.Summary, &e.UserName, &e.Text, &e.Arguments, &e.Result, &e.Reasoning, &e.Error, &e.Name, &e.Model, &e.CallID} {
 		if len(*field) > 8192 {
 			r.Truncated = true
 		}
 		*field = clip(*field)
 	}
-	data, _ := json.Marshal(e)
-	withinBudget := r.bytes+len(data) <= 512*1024
-	if e.Kind == "tool_started" {
-		withinBudget = r.requestBytes+len(data) <= 8*1024*1024
-	}
-	if len(r.Events) < 512 && withinBudget {
-		r.Events = append(r.Events, e)
-		if e.Kind == "tool_started" {
-			r.requestBytes += len(data)
-		} else {
-			r.bytes += len(data)
-		}
-	} else {
-		r.Truncated = true
-	}
+	// Bound individual payloads, but retain every event so the timeline stays complete.
+	r.Events = append(r.Events, e)
 	for listener := range s.listeners {
 		select {
 		case listener <- struct{}{}:

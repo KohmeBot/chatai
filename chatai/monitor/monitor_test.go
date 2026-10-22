@@ -61,7 +61,9 @@ func TestCapacityAndConcurrency(t *testing.T) {
 	require.EqualValues(t, 1000, r.InputTokens)
 	require.Equal(t, "error", r.Status)
 	require.Equal(t, "final error", r.Error)
-	require.LessOrEqual(t, r.bytes, 512*1024)
+	require.Len(t, r.Events, 1002) // Keep the entire timeline past the old count and byte limits.
+	require.Equal(t, "run_started", r.Events[0].Kind)
+	require.Equal(t, "run_finished", r.Events[len(r.Events)-1].Kind)
 }
 
 func login(t *testing.T, h http.Handler) *http.Cookie {

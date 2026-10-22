@@ -71,7 +71,7 @@ func TestMemoryMutationRequiresSessionAndJSON(t *testing.T) {
 	require.Equal(t, 405, w.Code)
 }
 
-func TestOriginalRequestsAreDiscardedAndToolArgumentsKeepSeparateBudget(t *testing.T) {
+func TestOriginalRequestsAreDiscardedAndLongToolArgumentsKeepEvents(t *testing.T) {
 	s := New(1)
 	s.Observe(agent.Event{RunID: 1, Kind: "run_started", Time: time.Now()})
 	body := `{"messages":"` + strings.Repeat("原文", 200000) + `"}`
@@ -81,10 +81,10 @@ func TestOriginalRequestsAreDiscardedAndToolArgumentsKeepSeparateBudget(t *testi
 	s.Observe(agent.Event{RunID: 1, Kind: "tool_started", Arguments: strings.Repeat("x", 8*1024*1024)})
 	s.Observe(agent.Event{RunID: 1, Kind: "run_finished", Text: "done", Summary: "本轮处理已结束。"})
 	r := s.snapshot("1")[0]
-	require.Len(t, r.Events, 3)
-	require.Equal(t, args, r.Events[1].Arguments)
+	require.Len(t, r.Events, 4)
+	require.Equal(t, clip(args), r.Events[1].Arguments)
+	require.Equal(t, clip(strings.Repeat("x", 8*1024*1024)), r.Events[2].Arguments)
 	require.Equal(t, "本轮处理已结束。", r.Summary)
 	require.True(t, r.Truncated)
-	require.Equal(t, "run_finished", r.Events[2].Kind)
-	require.LessOrEqual(t, r.requestBytes, 8*1024*1024)
+	require.Equal(t, "run_finished", r.Events[3].Kind)
 }
