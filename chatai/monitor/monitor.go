@@ -24,6 +24,9 @@ var page []byte
 //go:embed memory-ui.js
 var memoryUI []byte
 
+//go:embed schedule-ui.js
+var scheduleUI []byte
+
 //go:embed glass.css
 var glassCSS []byte
 
@@ -157,6 +160,10 @@ func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
 	cookieValue := hex.EncodeToString(hash[:])
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /schedule-ui.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(scheduleUI)
+	})
 	mux.HandleFunc("GET /memory-ui.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(memoryUI)
@@ -206,8 +213,8 @@ func (s *Store) Handler(token string) http.Handler {
 		json.NewEncoder(w).Encode(items[0])
 	}))
 	mux.HandleFunc("GET /api/events", auth(s.stream))
-	for _, method := range []string{"PATCH", "DELETE"} {
-		mux.HandleFunc(method+" /api/inspect/memory", auth(func(w http.ResponseWriter, r *http.Request) {
+	for _, route := range []struct{ method, section string }{{"PATCH", "memory"}, {"DELETE", "memory"}, {"POST", "schedules"}, {"DELETE", "schedules"}} {
+		mux.HandleFunc(route.method+" /api/inspect/"+route.section, auth(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 				http.Error(w, "仅支持同站 JSON 请求", http.StatusForbidden)
 				return
@@ -217,7 +224,7 @@ func (s *Store) Handler(token string) http.Handler {
 				return
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
-			r.SetPathValue("section", "memory")
+			r.SetPathValue("section", route.section)
 			value, err := s.Inspect(r)
 			if err != nil {
 				http.Error(w, err.Error(), 400)

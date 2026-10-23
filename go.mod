@@ -11,6 +11,7 @@ require (
 	github.com/kohmebot/pkg v1.0.2
 	github.com/kohmebot/plugin/v2 v2.0.4
 	github.com/kohmebot/pyrunner v0.1.1
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0

@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/persona"
+	"github.com/kohmebot/chatai/chatai/schedule"
 	"github.com/kohmebot/chatai/chatai/skill"
+	zero "github.com/wdvxdr1123/ZeroBot"
 )
 
 func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
@@ -32,6 +34,59 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		return nil, fmt.Errorf("该群未启用 Agent")
 	}
 	switch section {
+	case "schedules":
+		if c.scheduler == nil {
+			return nil, fmt.Errorf("定时任务未启用")
+		}
+		if r.Method == http.MethodGet {
+			offset := 0
+			if raw := r.URL.Query().Get("offset"); raw != "" {
+				offset, err = strconv.Atoi(raw)
+			}
+			if err != nil || offset < 0 || offset > 1000000 {
+				return nil, fmt.Errorf("无效分页参数")
+			}
+			items, err := c.scheduler.List(id, 0, offset)
+			bots := []string{}
+			zero.RangeBot(func(id int64, _ *zero.Ctx) bool { bots = append(bots, strconv.FormatInt(id, 10)); return true })
+			sort.Strings(bots)
+			return map[string]any{"items": items, "bots": bots, "has_more": len(items) == 50}, err
+		}
+		var input struct {
+			schedule.Input
+			TaskID uint   `json:"task_id"`
+			UserID string `json:"user_id"`
+			BotID  string `json:"bot_id"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			return nil, fmt.Errorf("无效任务数据: %w", err)
+		}
+		if decoder.Decode(new(any)) != io.EOF {
+			return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
+		}
+		if r.Method == http.MethodDelete {
+			if input.TaskID == 0 {
+				return nil, fmt.Errorf("无效任务 ID")
+			}
+			if err := c.scheduler.Delete(id, 0, input.TaskID); err != nil {
+				return nil, err
+			}
+			return map[string]bool{"deleted": true}, nil
+		}
+		if r.Method != http.MethodPost {
+			return nil, fmt.Errorf("不支持的请求方法")
+		}
+		user, err := strconv.ParseInt(input.UserID, 10, 64)
+		if err != nil || user <= 0 {
+			return nil, fmt.Errorf("无效用户 ID")
+		}
+		bot, err := strconv.ParseInt(input.BotID, 10, 64)
+		if err != nil || bot <= 0 {
+			return nil, fmt.Errorf("无效机器人 ID")
+		}
+		return c.scheduler.Create(id, user, bot, input.Input)
 	case "tools":
 		return p.ToolCatalog(), nil
 	case "memory":

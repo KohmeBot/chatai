@@ -18,6 +18,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/chatai/chatai/pkg/search"
 	factory2 "github.com/kohmebot/chatai/chatai/pkg/search/factory"
+	"github.com/kohmebot/chatai/chatai/schedule"
 	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
@@ -26,6 +27,7 @@ import (
 )
 
 type ChatPlugin struct {
+	scheduler     *schedule.Service
 	monitor       *monitor.Store
 	monitorServer *http.Server
 	conf          Config
@@ -112,6 +114,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		&persona.GroupMemory{}, &persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
 	}
 	tables = append(tables, skill.Models()...)
+	tables = append(tables, schedule.Models()...)
 	for _, table := range tables {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
@@ -228,6 +231,15 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		observer = c.monitor.Observe
 	}
 	c.personaMap = make(map[int64]*persona.Persona)
+	c.scheduler = schedule.New(db)
+	c.scheduler.Ready = func(t schedule.Task) bool { return c.personaMap[t.GroupID] != nil && zero.GetBot(t.BotID) != nil }
+	c.scheduler.Execute = func(t schedule.Task) error {
+		p := c.personaMap[t.GroupID]
+		if p == nil {
+			return fmt.Errorf("该群未启用 Agent")
+		}
+		return p.RunScheduled(t)
+	}
 	var workRoot string
 	if c.conf.Agent.Work.Enable {
 		dataDir, err := env.FilePath()
@@ -269,6 +281,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
+			Scheduler:     c.scheduler,
 			WorkDirectory: workDir, WorkCommandEnable: c.conf.Agent.Work.CommandEnable,
 			ContinuationWindow:   time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second,
 			ContinuationModel:    c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true),
@@ -284,8 +297,8 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			RunTimeout:       time.Duration(c.conf.Agent.RunTimeoutSeconds) * time.Second,
 			ContextLimit:     c.conf.Agent.ContextLimit,
 			WebBrowserEnable: c.conf.Agent.WebBrowserEnable, WebBrowserAddress: c.conf.Agent.WebBrowserAddress,
-			ScheduleMaxSec: c.conf.Agent.ScheduleMaxSec, ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
-			ProgressTips: c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
+			ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
+			ProgressTips:  c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
 			RepeatEnable: c.conf.Repeat.Enable,
 			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionUpdateEnable: c.conf.Impression.Enable,
 			ExtraTools: c.extraTools,
@@ -305,6 +318,11 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 }
 
 func (c *ChatPlugin) OnBoot() {
+	if c.scheduler != nil {
+		if err := c.scheduler.Start(context.Background()); err != nil {
+			logrus.Errorf("[ChatAI][Schedule] 启动失败: %v", err)
+		}
+	}
 	c.memory.Start(context.Background())
 	names := map[string]bool{"search_tools": true}
 	for _, p := range c.personaMap {

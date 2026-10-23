@@ -11,6 +11,7 @@ import (
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/pkg/search"
+	"github.com/kohmebot/chatai/chatai/schedule"
 	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/kohmebot/plugin/v2"
 	"github.com/sirupsen/logrus"
@@ -45,6 +46,7 @@ const agentRules = `
 func AgentRules() string { return agentRules }
 
 type Options struct {
+	Scheduler              *schedule.Service
 	WorkDirectory          string
 	WorkCommandEnable      bool
 	ContinuationWindow     time.Duration
@@ -63,7 +65,6 @@ type Options struct {
 	ContextLimit           int
 	WebBrowserEnable       bool
 	WebBrowserAddress      string
-	ScheduleMaxSec         int
 	ProgressAfter          time.Duration
 	ProgressTips           []string
 	WebSearchPrefer        time.Duration
@@ -119,9 +120,6 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 	}
 	if opts.RunTimeout <= 0 {
 		opts.RunTimeout = 3 * time.Minute
-	}
-	if opts.ScheduleMaxSec <= 0 {
-		opts.ScheduleMaxSec = 86400
 	}
 	if opts.ProgressAfter <= 0 {
 		opts.ProgressAfter = 15 * time.Second

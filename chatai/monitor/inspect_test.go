@@ -30,6 +30,39 @@ func TestInspectRequiresSession(t *testing.T) {
 	require.JSONEq(t, `{"section":"tools"}`, w.Body.String())
 }
 
+func TestScheduleMutationRequiresSessionAndJSON(t *testing.T) {
+	s := New(1)
+	called := false
+	s.Inspect = func(r *http.Request) (any, error) {
+		called = true
+		require.Equal(t, "schedules", r.PathValue("section"))
+		return map[string]bool{"ok": true}, nil
+	}
+	h := s.Handler("secret")
+	cookie := login(t, h)
+	for _, method := range []string{"POST", "DELETE"} {
+		for _, tc := range []struct {
+			auth              bool
+			contentType, site string
+			status            int
+		}{
+			{false, "application/json", "same-origin", 401}, {true, "text/plain", "same-origin", 403}, {true, "application/json", "cross-site", 403}, {true, "application/json", "same-origin", 200},
+		} {
+			called = false
+			r := httptest.NewRequest(method, "/api/inspect/schedules?group=10", strings.NewReader(`{}`))
+			if tc.auth {
+				r.AddCookie(cookie)
+			}
+			r.Header.Set("Content-Type", tc.contentType)
+			r.Header.Set("Sec-Fetch-Site", tc.site)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			require.Equal(t, tc.status, w.Code)
+			require.Equal(t, tc.status == 200, called)
+		}
+	}
+}
+
 func TestMemoryMutationRequiresSessionAndJSON(t *testing.T) {
 	s := New(1)
 	called := false
