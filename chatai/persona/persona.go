@@ -45,6 +45,8 @@ const agentRules = `
 func AgentRules() string { return agentRules }
 
 type Options struct {
+	WorkDirectory          string
+	WorkCommandEnable      bool
 	ContinuationWindow     time.Duration
 	ContinuationModel      model.LargeModel
 	Observer               agent.Observer

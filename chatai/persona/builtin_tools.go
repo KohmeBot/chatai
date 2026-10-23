@@ -9,6 +9,7 @@ import (
 // registerBuiltinTools 汇总各领域的内建工具。工具定义和处理逻辑放在对应领域文件中。
 func (p *Persona) registerBuiltinTools() {
 	groups := [][]agent.Tool{
+		p.workTools(),
 		p.groupMemberTools(),
 		p.contextTools(),
 		p.imageTools(),

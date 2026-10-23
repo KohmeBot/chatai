@@ -538,3 +538,22 @@ skills/report/
 快照拒绝路径穿越、符号链接和特殊文件，最多 1000 个文件、合计 10 MiB。执行默认超时 60 秒，可设置 1–180 秒，并受 Agent 本轮剩余时间限制；依赖安装也计入超时。沙箱后端、网络、资源和输出限制由 pyrunner 配置决定，Python 依赖安装阶段可能联网。依赖与脚本应来自可信来源。
 
 返回 `success`、`stdout`、`stderr`、`output`、`exit_code`、`timed_out`、`output_truncated`、`duration_ms`、`environment`、`sandbox_backend` 和 `dependencies_installed`。失败时仍保留 SDK 提供的诊断信息。运行结束清理临时副本，不改写原 Skill，也不持久化生成文件；需交给 Agent 的结果应输出至 stdout。
+
+### 持久工作能力
+
+在 `agent` 下配置（默认关闭）：
+
+```yaml
+agent:
+  work:
+    enable: true
+    command_enable: true
+```
+
+`enable` 提供 `work_info`、`list_work_files`、`read_work_file`、`write_work_file` 和 `send_file`。数据保存在 `env.FilePath()/work/<群号>`，重启后保留，不依赖 skills 开关。文件工具使用相对路径，拒绝越界访问；写入默认不覆盖，支持 UTF-8 和 base64，单次读写最多 4 MiB。目录列表最多200项，可进入子目录继续查看。
+
+`command_enable` 额外提供 `execute_command`，Windows 使用 PowerShell，其他系统使用 `/bin/sh`。命令默认在当前群工作目录执行，可以调用已安装的 Python 等程序生成文档、图片或其他产物，再通过 `send_file` 上传。工具可通过 `search_tools` 按“生成文件”“执行命令”“发送文件”发现。
+
+命令以机器人进程权限运行，**不是沙箱**；按群工作目录只是文件组织方式，不能隔离命令访问。仅在可信部署中启用命令执行。默认60秒、最多180秒，并受 Agent 本轮超时约束；合并输出最多64 KiB，返回退出码及截断/超时标志。取消会终止直接启动的 shell，但不保证终止所有派生或脱离的子进程，不应用此工具启动后台服务。已有的 `run_skill_script` 仍使用 pyrunner 临时沙箱。
+
+`send_file` 使用 OneBot 的 `upload_group_file` 上传到当前群；只有 `status=ok` 且 `retcode=0` 才记为成功交付。OneBot 实现必须支持该接口，并能访问机器人传入的绝对文件路径；分机或容器部署需要共享目录和相同挂载路径。文件不会自动清理，需要按部署需求管理磁盘占用。

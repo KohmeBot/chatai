@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -226,7 +228,25 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		observer = c.monitor.Observe
 	}
 	c.personaMap = make(map[int64]*persona.Persona)
+	var workRoot string
+	if c.conf.Agent.Work.Enable {
+		dataDir, err := env.FilePath()
+		if err != nil {
+			return fmt.Errorf("get work data directory: %w", err)
+		}
+		workRoot, err = filepath.Abs(filepath.Join(dataDir, "work"))
+		if err != nil {
+			return err
+		}
+	}
 	for group := range env.Groups().RangeGroup() {
+		var workDir string
+		if workRoot != "" {
+			workDir = filepath.Join(workRoot, fmt.Sprint(group))
+			if err := os.MkdirAll(workDir, 0700); err != nil {
+				return fmt.Errorf("create work directory: %w", err)
+			}
+		}
 		var vision model.LargeModel
 		if c.conf.Routes.Vision.Configured() {
 			// 带图事件由视觉模型直接完成整轮 Agent 决策，因此它需要与文本
@@ -249,6 +269,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
+			WorkDirectory: workDir, WorkCommandEnable: c.conf.Agent.Work.CommandEnable,
 			ContinuationWindow:   time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second,
 			ContinuationModel:    c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true),
 			Observer:             observer,
@@ -320,4 +341,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.4.8" }
+func (c *ChatPlugin) Version() string      { return "v1.4.9" }

@@ -62,6 +62,7 @@ type ConfiguredSkill struct {
 }
 
 type AgentConfig struct {
+	Work                   WorkConfig               `yaml:"work" jsonschema:"description=持久工作目录及宿主命令执行"`
 	ContinuationSeconds    int                      `yaml:"continuation_seconds" jsonschema:"description=连续对话存留秒数，默认60,minimum=1"`
 	ConversationMemory     ConversationMemoryConfig `yaml:"conversation_memory" jsonschema:"description=按群和用户隔离的短期对话记忆"`
 	MaxSteps               int                      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大模型决策轮数,minimum=1,maximum=20"`
@@ -78,6 +79,11 @@ type AgentConfig struct {
 	UseSearchAPI       bool              `yaml:"use_search_api" jsonschema:"description=是否启用搜索API"`
 	SearchProviderName string            `yaml:"search_provider_name" jsonschema:"description=搜索API提供商名称,enum=bocha,enum=deepseek"`
 	SearchProviders    []SearchAPIConfig `yaml:"search_providers" jsonschema:"description=搜索API提供商配置"`
+}
+
+type WorkConfig struct {
+	Enable        bool `yaml:"enable" jsonschema:"description=启用按群持久保存的工作目录和文件发送工具"`
+	CommandEnable bool `yaml:"command_enable" jsonschema:"description=允许以机器人进程权限执行宿主命令（非沙箱），默认关闭"`
 }
 
 type ConversationMemoryConfig struct {
