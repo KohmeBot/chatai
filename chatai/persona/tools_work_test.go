@@ -80,3 +80,21 @@ func TestWorkOutputIsBounded(t *testing.T) {
 	require.Len(t, b.data, 64<<10)
 	require.True(t, b.truncated)
 }
+
+func TestWorkCommandTemporaryFilesStayInWorkspace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell test")
+	}
+	p := &Persona{opts: Options{WorkDirectory: t.TempDir(), WorkCommandEnable: true}}
+	_, err := p.handleExecuteCommand(nil, json.RawMessage(`{"command":"printf temp > \"$TMPDIR/test.tmp\"; test \"$TMPDIR\" = \"$TEMP\" && test \"$TMP\" = \"$TEMP\""}`))
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(p.opts.WorkDirectory, ".tmp", "test.tmp"))
+	tools := p.workTools()
+	info, err := tools[0].Handler(nil, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, 7, info.(map[string]any)["retention_days"])
+	p.opts.WorkRetentionDays = 30
+	info, err = tools[0].Handler(nil, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, 30, info.(map[string]any)["retention_days"])
+}

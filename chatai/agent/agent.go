@@ -1042,6 +1042,10 @@ func logValue(value string) string {
 }
 
 func Function(name, description string, properties map[string]any, required ...string) model.Tool {
+	// JSON Schema requires properties to be an object, including for zero-argument tools.
+	if properties == nil {
+		properties = map[string]any{}
+	}
 	params := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
 	if len(required) > 0 {
 		params["required"] = required

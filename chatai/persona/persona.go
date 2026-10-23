@@ -47,6 +47,7 @@ func AgentRules() string { return agentRules }
 
 type Options struct {
 	Scheduler              *schedule.Service
+	WorkRetentionDays      int
 	WorkDirectory          string
 	WorkCommandEnable      bool
 	ContinuationWindow     time.Duration

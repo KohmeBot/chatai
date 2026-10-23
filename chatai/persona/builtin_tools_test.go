@@ -52,6 +52,9 @@ func TestBuiltinToolSearchFindsWorkflowsByIntent(t *testing.T) {
 		{"读取原始消息 合并转发", "read_raw_message"},
 		{"发送原始消息段", "send_raw_message"},
 		{"发送最终回复", "send_message"},
+		{"发送视频", "send_video"},
+		{"发送语音条", "send_record"},
+		{"音乐分享卡片", "send_music"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			require.Contains(t, searchNames(p.tools.Search(tc.query, 5)), tc.want)

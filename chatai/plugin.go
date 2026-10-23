@@ -27,11 +27,13 @@ import (
 )
 
 type ChatPlugin struct {
-	scheduler     *schedule.Service
-	monitor       *monitor.Store
-	monitorServer *http.Server
-	conf          Config
-	env           plugin.Env
+	workCleanupCancel context.CancelFunc
+	workCleanupDone   chan struct{}
+	scheduler         *schedule.Service
+	monitor           *monitor.Store
+	monitorServer     *http.Server
+	conf              Config
+	env               plugin.Env
 
 	joinGroupModel model.LargeModel
 	otherModel     model.LargeModel
@@ -102,6 +104,12 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
 	if err := env.GetConf(&c.conf); err != nil {
 		return err
+	}
+	if c.conf.Agent.Work.RetentionDays < 0 || c.conf.Agent.Work.RetentionDays > 36500 {
+		return fmt.Errorf("agent.work.retention_days must be 0..36500")
+	}
+	if c.conf.Agent.Work.RetentionDays == 0 {
+		c.conf.Agent.Work.RetentionDays = 7
 	}
 	db, err := env.GetDB()
 	if err != nil {
@@ -283,6 +291,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
 			Scheduler:     c.scheduler,
 			WorkDirectory: workDir, WorkCommandEnable: c.conf.Agent.Work.CommandEnable,
+			WorkRetentionDays:    c.conf.Agent.Work.RetentionDays,
 			ContinuationWindow:   time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second,
 			ContinuationModel:    c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true),
 			Observer:             observer,
@@ -314,6 +323,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnUsage(engine)
+	if workRoot != "" {
+		c.startWorkCleanup(workRoot)
+	}
 	return nil
 }
 
@@ -359,4 +371,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.4.9" }
+func (c *ChatPlugin) Version() string      { return "v1.5.0" }

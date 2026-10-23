@@ -69,6 +69,9 @@ func TestEverySendToolRejectsZeroIDBeforeRecordingOrMarkingDelivery(t *testing.T
 		args    string
 	}{
 		"text":     {p.handleSendMessage, `{"text":"hello"}`},
+		"video":    {p.handleSendVideo, `{"url":"https://example.com/a.mp4"}`},
+		"record":   {p.handleSendRecord, `{"url":"https://example.com/a.mp3"}`},
+		"music":    {p.handleSendMusic, `{"type":"qq","id":"123"}`},
 		"image":    {p.handleSendImage, `{"url":"https://example.com/a.png"}`},
 		"at":       {p.handleAtUser, `{"user_id":1,"text":"hello"}`},
 		"batch":    {p.handleSendMessages, `{"messages":["first","second"]}`},

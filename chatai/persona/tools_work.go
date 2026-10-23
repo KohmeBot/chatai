@@ -25,8 +25,8 @@ func (p *Persona) workTools() []agent.Tool {
 	}
 	path := map[string]any{"path": stringProperty("相对当前群工作目录的路径，不允许越界")}
 	tools := []agent.Tool{
-		{Definition: agent.Function("work_info", "查看持久工作目录绝对路径、操作系统和命令执行是否可用；生成的文件保留，可用 send_file 交付", nil), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"工作目录", "环境", "生成文件", "workspace"}, Handler: func(_ *agent.RunContext, _ json.RawMessage) (any, error) {
-			return map[string]any{"directory": p.opts.WorkDirectory, "os": runtime.GOOS, "command_enabled": p.opts.WorkCommandEnable}, nil
+		{Definition: agent.Function("work_info", "查看持久工作目录绝对路径、操作系统和命令执行是否可用；文件按 retention_days 自动过期清理，可用 send_file 交付", nil), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"工作目录", "环境", "生成文件", "workspace"}, Handler: func(_ *agent.RunContext, _ json.RawMessage) (any, error) {
+			return map[string]any{"directory": p.opts.WorkDirectory, "os": runtime.GOOS, "command_enabled": p.opts.WorkCommandEnable, "retention_days": p.workRetentionDays()}, nil
 		}},
 		{Definition: agent.Function("list_work_files", "列出工作目录下指定文件夹的直接子项，最多200项；默认根目录", path), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"目录", "文件", "list files"}, Handler: p.handleListWorkFiles},
 		{Definition: agent.Function("read_work_file", "读取工作目录文件，最多4MiB；encoding 默认 utf8，二进制用 base64", map[string]any{"path": path["path"], "encoding": stringProperty("utf8 或 base64")}, "path"), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"读取文件", "read file"}, Handler: p.handleReadWorkFile},
@@ -293,7 +293,21 @@ func (p *Persona) handleExecuteCommand(rc *agent.RunContext, raw json.RawMessage
 	} else {
 		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", in.Command)
 	}
+	root, err := p.openWorkRoot()
+	if err != nil {
+		return nil, err
+	}
+	err = root.MkdirAll(".tmp", 0700)
+	root.Close()
+	if err != nil {
+		return nil, err
+	}
+	tmpDir, err := p.absoluteWorkPath(".tmp")
+	if err != nil {
+		return nil, err
+	}
 	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(), "TMPDIR="+tmpDir, "TMP="+tmpDir, "TEMP="+tmpDir)
 	cmd.WaitDelay = time.Second
 	output := new(workOutput)
 	cmd.Stdout = output
@@ -306,4 +320,11 @@ func (p *Persona) handleExecuteCommand(rc *agent.RunContext, raw json.RawMessage
 	}
 	result := map[string]any{"success": err == nil, "exit_code": code, "output": string(output.data), "output_truncated": output.truncated, "timed_out": ctx.Err() == context.DeadlineExceeded, "duration_ms": time.Since(start).Milliseconds()}
 	return result, err
+}
+
+func (p *Persona) workRetentionDays() int {
+	if p.opts.WorkRetentionDays <= 0 {
+		return 7
+	}
+	return p.opts.WorkRetentionDays
 }

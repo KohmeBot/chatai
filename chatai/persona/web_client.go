@@ -202,6 +202,7 @@ type webContextWindow struct {
 
 // limitWebContent leaves small pages untouched. For large pages it returns
 // the metadata plus the most relevant, non-overlapping context windows.
+// Empty queries and queries without matches return the complete content.
 func limitWebContent(content, query string, maxBytes int) string {
 	if strings.TrimSpace(query) == "" {
 		return content
@@ -213,8 +214,7 @@ func limitWebContent(content, query string, maxBytes int) string {
 	header, body := splitWebMarkdownBody(content)
 	matches := findWebQueryMatches(body, webQueryTerms(query))
 	if len(matches) == 0 {
-		fallback := header + "> 网页内容较长，未找到与查询“" + displayWebQuery(query) + "”直接匹配的片段，以下返回正文开头。\n\n" + body
-		return truncateWebContent(fallback, maxBytes, "\n\n> 网页内容已截取")
+		return content
 	}
 
 	radius := min(webContextRadiusBytes, max(64, maxBytes/8))

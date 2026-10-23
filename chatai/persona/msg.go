@@ -21,6 +21,8 @@ const (
 	MsgTypeReply   = "reply"
 	MsgTypeForward = "forward"
 	MsgTypeRecord  = "record"
+	MsgTypeVideo   = "video"
+	MsgTypeMusic   = "music"
 	MsgTypeJson    = "json"
 )
 
@@ -33,6 +35,8 @@ func HasMsgType(typ string) bool {
 		MsgTypeReply,
 		MsgTypeForward,
 		MsgTypeRecord,
+		MsgTypeVideo,
+		MsgTypeMusic,
 		MsgTypeJson,
 	}, typ)
 }
@@ -53,6 +57,10 @@ func MsgTypeString(typ string) string {
 		return "转发(搬屎)"
 	case MsgTypeRecord:
 		return "语音"
+	case MsgTypeVideo:
+		return "视频"
+	case MsgTypeMusic:
+		return "音乐分享卡片"
 	case MsgTypeJson:
 		return "分享内容(搬屎)"
 	}
@@ -387,6 +395,10 @@ func formatMessage(msg GroupMessage) string {
 		action = "转了一条消息(搬屎)"
 	case MsgTypeRecord:
 		action = "发了条语音"
+	case MsgTypeVideo:
+		action = "发了个视频"
+	case MsgTypeMusic:
+		action = "分享了一张音乐卡片"
 	case MsgTypeJson:
 		action = "分享了一条内容(搬屎)"
 	}

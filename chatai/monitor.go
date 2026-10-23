@@ -52,6 +52,10 @@ func (c *ChatPlugin) startMonitor() error {
 
 // Close releases the optional monitor listener for hosts that support unloading.
 func (c *ChatPlugin) Close() error {
+	if c.workCleanupCancel != nil {
+		c.workCleanupCancel()
+		<-c.workCleanupDone
+	}
 	if c.scheduler != nil {
 		c.scheduler.Close()
 	}

@@ -532,3 +532,18 @@ func toolNames(tools []model.Tool) []string {
 	}
 	return names
 }
+
+func TestFunctionWithoutParametersSerializesObject(t *testing.T) {
+	for _, properties := range []map[string]any{nil, {}, {"path": map[string]any{"type": "string"}}} {
+		tool := Function("work_info", "test", properties)
+		data, err := json.Marshal(tool)
+		require.NoError(t, err)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(data, &decoded))
+		params := decoded["function"].(map[string]any)["parameters"].(map[string]any)
+		require.Equal(t, "object", params["type"])
+		object, ok := params["properties"].(map[string]any)
+		require.True(t, ok, "%s", data)
+		require.Len(t, object, len(properties))
+	}
+}

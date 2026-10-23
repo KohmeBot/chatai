@@ -82,6 +82,7 @@ type AgentConfig struct {
 }
 
 type WorkConfig struct {
+	RetentionDays int  `yaml:"retention_days" jsonschema:"description=工作产物和临时文件保留天数，0或未配置默认7天,minimum=0,maximum=36500"`
 	Enable        bool `yaml:"enable" jsonschema:"description=启用按群持久保存的工作目录和文件发送工具"`
 	CommandEnable bool `yaml:"command_enable" jsonschema:"description=允许以机器人进程权限执行宿主命令（非沙箱），默认关闭"`
 }

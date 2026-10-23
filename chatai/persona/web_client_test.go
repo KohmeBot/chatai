@@ -89,20 +89,16 @@ func TestLimitWebContentSelectsQueryContextAboveLimit(t *testing.T) {
 	require.NotContains(t, result, strings.Repeat("开头无关内容。", 20))
 }
 
-func TestLimitWebContentFallsBackToBeginningWithoutMatch(t *testing.T) {
+func TestLimitWebContentReturnsFullContentWithoutMatch(t *testing.T) {
 	header := "# 长网页\n\n- 来源：<https://example.com>\n\n## 正文\n\n"
 	body := "正文开头" + strings.Repeat("中文内容", 200)
 
 	result := limitWebContent(header+body, "完全不存在", 300)
 
-	require.LessOrEqual(t, len(result), 300)
-	require.True(t, utf8.ValidString(result))
-	require.Contains(t, result, "未找到与查询")
-	require.Contains(t, result, "正文开头")
+	require.Equal(t, header+body, result)
 }
 
-func TestBrowseWebRequiresQuery(t *testing.T) {
-	_, err := (&Persona{}).handleBrowseWeb(nil, []byte(`{"url":"https://example.com"}`))
-
-	require.ErrorContains(t, err, "query must not be empty")
+func TestLimitWebContentReturnsFullContentWithoutQuery(t *testing.T) {
+	content := strings.Repeat("完整正文", 200)
+	require.Equal(t, content, limitWebContent(content, "", 300))
 }

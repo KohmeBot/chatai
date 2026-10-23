@@ -19,7 +19,7 @@ func (p *Persona) rawMessageTools() []agent.Tool {
 				"message": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{
 					"type": "object", "additionalProperties": false, "required": []string{"type", "data"},
 					"properties": map[string]any{
-						"type": stringProperty("OneBot 消息段类型，如 text、at、image、face、forward、node"),
+						"type": stringProperty("OneBot 消息段类型，如 text、at、image、video、record、music、face、forward、node"),
 						"data": map[string]any{"type": []string{"object", "null"}, "additionalProperties": map[string]any{"type": "string"}},
 					},
 				}},
