@@ -27,6 +27,9 @@ var memoryUI []byte
 //go:embed schedule-ui.js
 var scheduleUI []byte
 
+//go:embed run-overview.js
+var runOverviewUI []byte
+
 //go:embed glass.css
 var glassCSS []byte
 
@@ -160,6 +163,10 @@ func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
 	cookieValue := hex.EncodeToString(hash[:])
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /run-overview.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(runOverviewUI)
+	})
 	mux.HandleFunc("GET /schedule-ui.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(scheduleUI)
