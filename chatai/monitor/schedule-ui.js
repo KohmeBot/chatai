@@ -36,18 +36,18 @@ function createSchedule(bots){
  const zone=field(form,'Cron 时区','Asia/Shanghai','text',100);
  const hint=el('p','muted','示例：0 9 * * 1-5 = 工作日 9 点；*/30 * * * * = 每半小时。');form.append(hint);
  const toggle=()=>{const periodic=mode.value==='cron';at.parentElement.hidden=periodic;at.required=!periodic;cron.parentElement.hidden=!periodic;zone.parentElement.hidden=!periodic;hint.hidden=!periodic;cron.required=periodic;zone.required=periodic};mode.onchange=toggle;toggle();
- const buttons=el('div','actions'),save=el('button','primary','创建任务');save.type='submit';buttons.append(action('取消',()=>dialog.close()),save);form.append(error,buttons);
+ const buttons=el('div','actions'),save=el('button','primary','创建任务');save.type='submit';buttons.append(action('取消',()=>ConsoleMotion.closeDialog(dialog)),save);form.append(error,buttons);
  form.onsubmit=async e=>{e.preventDefault();save.disabled=true;error.textContent='';try{
   const payload={name:name.value,instruction:instruction.value,user_id:user.value.trim(),bot_id:bot.value.trim()};
   if(mode.value==='cron'){payload.cron=cron.value.trim();payload.timezone=zone.value.trim()}else{const date=new Date(at.value);if(!Number.isFinite(date.getTime())||date<=new Date())throw Error('请选择未来的执行时间');payload.run_at=date.toISOString()}
-  await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});dialog.close();if(currentView==='schedules'&&$('group').value===group){offset=0;await loadCatalog()}
+  await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});ConsoleMotion.closeDialog(dialog);if(currentView==='schedules'&&$('group').value===group){offset=0;await loadCatalog()}
  }catch(e){error.textContent=e.message}finally{save.disabled=false}};
- dialog.showModal();name.focus();
+ ConsoleMotion.openDialog(dialog);name.focus();
 }
 function deleteSchedule(task){
  const group=$('group').value,{dialog,form,error}=scheduleDialog('删除任务');form.append(el('p','',`确认删除「${task.name}」？后续将不再触发，已经开始的执行可能仍会完成。`));
- const buttons=el('div','actions'),remove=el('button','danger','确认删除');remove.type='submit';buttons.append(action('取消',()=>dialog.close()),remove);form.append(error,buttons);
- form.onsubmit=async e=>{e.preventDefault();remove.disabled=true;try{await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id})});dialog.close();if(currentView==='schedules'&&$('group').value===group)await loadCatalog()}catch(e){error.textContent=e.message}finally{remove.disabled=false}};dialog.showModal();
+ const buttons=el('div','actions'),remove=el('button','danger','确认删除');remove.type='submit';buttons.append(action('取消',()=>ConsoleMotion.closeDialog(dialog)),remove);form.append(error,buttons);
+ form.onsubmit=async e=>{e.preventDefault();remove.disabled=true;try{await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id})});ConsoleMotion.closeDialog(dialog);if(currentView==='schedules'&&$('group').value===group)await loadCatalog()}catch(e){error.textContent=e.message}finally{remove.disabled=false}};ConsoleMotion.openDialog(dialog);
 }
 // Refresh only the schedule view, without interrupting open forms.
 setInterval(async()=>{

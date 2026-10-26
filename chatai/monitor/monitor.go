@@ -33,6 +33,9 @@ var runOverviewUI []byte
 //go:embed glass.css
 var glassCSS []byte
 
+//go:embed glass-motion.js
+var glassMotion []byte
+
 type Run struct {
 	Summary      string        `json:"summary,omitempty"`
 	UserName     string        `json:"user_name,omitempty"`
@@ -163,6 +166,10 @@ func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
 	cookieValue := hex.EncodeToString(hash[:])
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /glass-motion.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(glassMotion)
+	})
 	mux.HandleFunc("GET /run-overview.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(runOverviewUI)

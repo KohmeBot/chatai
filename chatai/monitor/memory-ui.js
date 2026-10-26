@@ -30,13 +30,13 @@ function groupMemoryCard(g){
 function showGroupMemory(g){
  const u={...g,is_group:true},dialog=el('dialog','memory-dialog memory-detail'),head=el('div','row'),heading=el('h2');
  heading.id='group-memory-title';heading.append(identity('group',$('group').value));dialog.setAttribute('aria-labelledby',heading.id);
- const close=action('关闭',()=>dialog.close());head.append(heading,close);dialog.append(head,el('h3','','群简介'),el('p','memory-full-summary',g.summary||'尚未形成群简介'),el('div','meta',`版本 ${g.version} · 更新 ${g.version?time(g.updated_at):'尚未保存'}`));
+ const close=action('关闭',()=>ConsoleMotion.closeDialog(dialog));head.append(heading,close);dialog.append(head,el('h3','','群简介'),el('p','memory-full-summary',g.summary||'尚未形成群简介'),el('div','meta',`版本 ${g.version} · 更新 ${g.version?time(g.updated_at):'尚未保存'}`));
  const actions=el('div','actions');actions.append(action('编辑群简介',()=>openMemoryDialog('编辑群简介','仅保存稳定的群体认识；条目请逐条修改。',form=>{const text=field(form,'群简介',g.summary||'','textarea',600);return()=>({target:'group_profile',version:g.version,summary:text.value})})),action('新增结构化记忆',()=>addMemoryItem(u)),action('清空群记忆',()=>confirmMemory('清空当前群全部记忆？','清空群简介和所有条目；之后仍可从新消息形成记忆。',{target:'group_profile',version:g.version}),true));dialog.append(actions);
  const kinds={fact:'事实 / 群梗',preference:'群体偏好',boundary:'互动边界',state:'近期状态',experience:'共同事件'};
  dialog.append(el('h3','section-heading',`结构化记忆 · ${(g.items||[]).length}`));
  for(const i of g.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 ${i.source_id?'#'+i.source_id:'人工添加'} · ${i.confidence==='explicit'?'明确表达':'推断'} · 记录 ${time(i.observed_at)}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));itemActions(item,u,i);dialog.append(item)}
  if(!g.items?.length)dialog.append(el('p','muted','暂无结构化群记忆。'));
- dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();close.focus();
+ dialog.onclose=()=>dialog.remove();document.body.append(dialog);ConsoleMotion.openDialog(dialog);close.focus();
 }
 function itemActions(node,u,item){const row=el('div','actions');row.append(action('修改',()=>openMemoryDialog('修改结构化记忆','键、类型、来源和所属群保持不变。',form=>{
  form.append(el('p','muted',`键：${item.key} · 类型：${item.kind} · 来源 #${item.source_id}`),identity('group',String(item.group_id)));
@@ -58,10 +58,10 @@ function confirmMemory(title,description,payload){openMemoryDialog(title,descrip
 function openMemoryDialog(title,description,build,remove=false){
  const group=$('group').value,dialog=el('dialog','memory-dialog'),form=el('form'),heading=el('h2','',title),error=el('p','form-error'),buttons=el('div','actions');
  heading.id='memory-dialog-title';dialog.setAttribute('aria-labelledby',heading.id);error.setAttribute('role','alert');form.append(heading,el('p','muted',description));const payload=build(form);
- const cancel=action('取消',()=>dialog.close()),save=el('button',remove?'danger':'primary',remove?'确认删除':'保存修改');save.type='submit';buttons.append(cancel,save);form.append(error,buttons);dialog.append(form);document.body.append(dialog);
+ const cancel=action('取消',()=>ConsoleMotion.closeDialog(dialog)),save=el('button',remove?'danger':'primary',remove?'确认删除':'保存修改');save.type='submit';buttons.append(cancel,save);form.append(error,buttons);dialog.append(form);document.body.append(dialog);
  let busy=false;dialog.oncancel=e=>{if(busy)e.preventDefault()};dialog.onclose=()=>dialog.remove();
- form.onsubmit=async e=>{e.preventDefault();if(busy)return;try{const data=payload();busy=true;save.disabled=cancel.disabled=true;save.textContent='正在保存…';error.textContent='';await api(`/api/inspect/memory?group=${encodeURIComponent(group)}`,{method:remove?'DELETE':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(15000)});dialog.close();document.querySelectorAll('.memory-detail').forEach(d=>d.close());if(authenticated&&currentView==='memory'&&$('group').value===group)await loadCatalog();notifyMemory(remove?'记忆已删除':'修改已保存')}catch(err){error.textContent=err.message+'；如数据已变化，请取消并刷新后重试。'}finally{busy=false;save.disabled=cancel.disabled=false;save.textContent=remove?'确认删除':'保存修改'}};
- dialog.showModal();(remove?cancel:form.querySelector('textarea,input,select')||cancel).focus();
+ form.onsubmit=async e=>{e.preventDefault();if(busy)return;try{const data=payload();busy=true;save.disabled=cancel.disabled=true;save.textContent='正在保存…';error.textContent='';await api(`/api/inspect/memory?group=${encodeURIComponent(group)}`,{method:remove?'DELETE':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(15000)});ConsoleMotion.closeDialog(dialog);document.querySelectorAll('.memory-detail').forEach(d=>ConsoleMotion.closeDialog(d));if(authenticated&&currentView==='memory'&&$('group').value===group)await loadCatalog();notifyMemory(remove?'记忆已删除':'修改已保存')}catch(err){error.textContent=err.message+'；如数据已变化，请取消并刷新后重试。'}finally{busy=false;save.disabled=cancel.disabled=false;save.textContent=remove?'确认删除':'保存修改'}};
+ ConsoleMotion.openDialog(dialog);(remove?cancel:form.querySelector('textarea,input,select')||cancel).focus();
 }
 function notifyMemory(message){const toast=el('div','toast',message);toast.setAttribute('role','status');document.body.append(toast);setTimeout(()=>toast.remove(),3500)}
 function updateGroupIdentity(){const target=$('group-identity');target.replaceChildren();if($('group').value)target.append(identity('group',$('group').value));else target.textContent='暂无可选群聊';renderGroupOptions()}
@@ -96,7 +96,7 @@ function userMemoryCard(u){
 function showUserMemory(u){
  const dialog=el('dialog','memory-dialog memory-detail'),heading=el('h2'),head=el('div','row');
  heading.id='user-memory-title';heading.append(identity('user',u.user_id));dialog.setAttribute('aria-labelledby',heading.id);
- const close=action('关闭',()=>dialog.close());head.append(heading,close);dialog.append(head,el('h3','','用户简介'),el('p','memory-full-summary',u.summary||'尚未形成用户简介'));
+ const close=action('关闭',()=>ConsoleMotion.closeDialog(dialog));head.append(heading,close);dialog.append(head,el('h3','','用户简介'),el('p','memory-full-summary',u.summary||'尚未形成用户简介'));
  const rel=u.relationship||{};dialog.append(el('h3','','关系'),el('p','',`${rel.level||'暂无'} · ${rel.score??0}${rel.description?' · '+rel.description:''}`));
  if(rel.reason)dialog.append(el('p','muted',rel.reason));
  dialog.append(el('div','meta',`版本 ${u.version} · 更新 ${time(u.updated_at)}`));
@@ -104,5 +104,5 @@ function showUserMemory(u){
  const kinds={fact:'事实',preference:'偏好',boundary:'边界',state:'近期状态',experience:'共同经历'};
  for(const i of u.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 #${i.source_id} · ${i.confidence==='explicit'?'明确表达':'推断'}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));if(i.group_id&&String(i.group_id)!=='0')item.append(identity('group',String(i.group_id)));itemActions(item,u,i);dialog.append(item)}
  if(!u.items?.length)dialog.append(el('p','muted','暂无结构化记忆。可通过上方按钮新增。'));
- dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();close.focus();
+ dialog.onclose=()=>dialog.remove();document.body.append(dialog);ConsoleMotion.openDialog(dialog);close.focus();
 }
