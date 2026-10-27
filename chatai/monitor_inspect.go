@@ -124,8 +124,27 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		if c.skills == nil || c.skills.Directory == nil {
 			return nil, fmt.Errorf("Skills 未启用")
 		}
-		content, err := c.skills.Directory.Read(r.URL.Query().Get("name"), "SKILL.md")
-		return map[string]any{"content": content}, err
+		name := r.URL.Query().Get("name")
+		metadata, err := c.skills.Directory.List()
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range metadata {
+			if m.Name == name {
+				content, err := c.skills.Directory.Read(name, "SKILL.md")
+				return map[string]any{"content": content, "triggers": m.Triggers, "non_triggers": m.NonTriggers, "required_tools": m.Tools}, err
+			}
+		}
+		return nil, fmt.Errorf("未找到可用 Skill")
+	case "skill-files", "skill-file":
+		if c.skills == nil || c.skills.Directory == nil {
+			return nil, fmt.Errorf("Skills 未启用")
+		}
+		name := r.URL.Query().Get("name")
+		if section == "skill-files" {
+			return c.skills.Directory.Files(r.Context(), name)
+		}
+		return c.skills.Directory.MonitorPreview(name, r.URL.Query().Get("file"))
 	case "skills":
 		items := []map[string]any{}
 		if c.skills == nil {
@@ -136,7 +155,7 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 			return nil, err
 		}
 		for _, s := range summaries {
-			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "path": s.Path, "source": "目录 Skill"})
+			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "path": s.Path, "source": "目录 Skill", "triggers": s.Triggers, "non_triggers": s.NonTriggers})
 		}
 		var records []skill.Record
 		err = c.db.Where("status = ? AND (scope = ? OR (scope = ? AND group_id = ?))", skill.StatusActive, skill.ScopeGlobal, skill.ScopeGroup, id).Order("name").Find(&records).Error
@@ -147,7 +166,7 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 			if s.Source == skill.SourceGenerated && !s.ExpiresAt.After(time.Now()) {
 				continue
 			}
-			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "source": s.Source, "content": s.MarkdownText(), "triggers": s.Triggers(), "required_tools": s.RequiredTools()})
+			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "source": s.Source, "content": s.MarkdownText(), "triggers": s.Triggers(), "non_triggers": s.NonTriggers(), "required_tools": s.RequiredTools(), "scope": s.Scope, "version": s.Version, "updated_at": s.UpdatedAt})
 		}
 		return map[string]any{"enabled": true, "items": items}, nil
 	}

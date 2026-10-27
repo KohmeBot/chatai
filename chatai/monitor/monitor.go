@@ -27,6 +27,9 @@ var memoryUI []byte
 //go:embed schedule-ui.js
 var scheduleUI []byte
 
+//go:embed catalog-ui.js
+var catalogUI []byte
+
 //go:embed run-overview.js
 var runOverviewUI []byte
 
@@ -166,6 +169,10 @@ func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
 	cookieValue := hex.EncodeToString(hash[:])
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /catalog-ui.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(catalogUI)
+	})
 	mux.HandleFunc("GET /glass-motion.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(glassMotion)
@@ -266,7 +273,7 @@ func (s *Store) Handler(token string) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' https://q1.qlogo.cn https://p.qlogo.cn; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https://q1.qlogo.cn https://p.qlogo.cn; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
 		mux.ServeHTTP(w, r)
 	})
 }
