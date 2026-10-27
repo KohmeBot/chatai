@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,35 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestDirectoryDeclaredToolsAndMemeExample(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "examples", "skills", "meme-router", "SKILL.md"))
+	require.NoError(t, err)
+	d, err := NewDirectory(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, d.Save("meme-router", "", string(content), false))
+	items, err := d.List()
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, []string{"execute_command", "send_image"}, items[0].Tools)
+	// Validate the embedded manifest, including the intentionally invisible keys.
+	start := strings.LastIndex(string(content), "```json\n")
+	require.NotEqual(t, -1, start)
+	manifest, _, found := strings.Cut(string(content)[start+len("```json\n"):], "\n```")
+	require.True(t, found)
+	var data struct {
+		Categories map[string]struct {
+			Description string `json:"description"`
+		} `json:"categories"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(manifest), &data))
+	require.Len(t, data.Categories, 27)
+	for _, key := range []string{"\u200c_kg", "_\u200clkll", "\u200c_lksl"} {
+		require.Contains(t, data.Categories, key)
+	}
+	invalid := "---\nname: invalid\ndescription: demo\ntools: run_skill_script\n---\nbody"
+	require.Error(t, d.Save("invalid", "", invalid, false))
+}
 
 func TestDirectoryMultiSkillSearchAndExactName(t *testing.T) {
 	d, err := NewDirectory(t.TempDir())

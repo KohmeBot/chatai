@@ -34,6 +34,7 @@ type Metadata struct {
 	Description string   `yaml:"description" json:"description"`
 	Triggers    []string `yaml:"triggers" json:"triggers,omitempty"`
 	NonTriggers []string `yaml:"non_triggers" json:"non_triggers,omitempty"`
+	Tools       []string `yaml:"tools" json:"tools,omitempty"`
 	Path        string   `yaml:"-" json:"path"`
 }
 

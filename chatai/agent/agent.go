@@ -771,6 +771,9 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				callErr = fmt.Errorf("tool %q is not active; call search_tools first", call.Function.Name)
 			} else {
 				result, callErr = r.Tools.execute(ctx, call)
+				if callErr == nil && call.Function.Name == "read_skill" {
+					r.activateReadSkillTools(result, activeTools)
+				}
 				if callErr == nil && groupAction {
 					ctx.MarkActionPerformed()
 					ctx.MarkResponseDelivered("tool:" + call.Function.Name)

@@ -36,7 +36,7 @@ func (p *Persona) listSkillFilesTool() agent.Tool {
 
 func (p *Persona) runSkillScriptTool() agent.Tool {
 	return agent.Tool{
-		Definition: agent.Function("run_skill_script", "通过 pyrunner 沙箱运行目录 Skill 的 Python 脚本。先读取 SKILL.md 和相关脚本。file 必须是该 Skill 内的 .py 相对路径；工作目录为整个 Skill 的临时副本，支持辅助模块、资源及根目录依赖清单。返回输出、退出码、超时与沙箱信息；运行产生的文件不持久保存，需交付的结果输出到 stdout。依赖声明在根目录 requirements.txt、pyproject.toml 或入口 PEP 723；检查 success、exit_code、stderr、timed_out 和 output_truncated 判断结果是否完整。默认60秒，最多180秒且受本轮剩余时间限制", map[string]any{
+		Definition: agent.Function("run_skill_script", "通过 pyrunner 沙箱运行目录 Skill 的 Python 脚本。先读取 SKILL.md；说明已明确入口、参数和输出契约且当前任务需要执行时，直接调用本工具，无需先读取脚本源码、列目录或再次搜索已暴露的工具。仅在说明不足、排错或审查时按需读取相关脚本。file 必须是该 Skill 内的 .py 相对路径；工作目录为整个 Skill 的临时副本，支持辅助模块、资源及根目录依赖清单。返回输出、退出码、超时与沙箱信息；运行产生的文件不持久保存，需交付的结果输出到 stdout。依赖声明在根目录 requirements.txt、pyproject.toml 或入口 PEP 723；检查 success、exit_code、stderr、timed_out 和 output_truncated 判断结果是否完整。默认60秒，最多180秒且受本轮剩余时间限制", map[string]any{
 			"name":            stringProperty("Skill 文件夹名"),
 			"file":            stringProperty("Python 入口相对路径，例如 scripts/report.py"),
 			"args":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "传给脚本的命令行参数，不经过 shell"},

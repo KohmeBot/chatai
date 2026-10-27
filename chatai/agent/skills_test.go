@@ -89,3 +89,100 @@ func TestSearchUsesMultipleSkillsAndFocusedQuery(t *testing.T) {
 	require.Equal(t, 5, searcher.limit)
 	require.Equal(t, []uint{1, 2}, rc.Trace().UsedSkillIDs)
 }
+
+func TestSkillToolNames(t *testing.T) {
+	registry := NewRegistry()
+	for _, name := range []string{"run_skill_script", "send_image", "other_tool"} {
+		require.NoError(t, registry.Register(Tool{
+			Definition: Function(name, "图片 脚本", map[string]any{}),
+			Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+				t.Fatal("discovering tools must not execute them")
+				return nil, nil
+			},
+		}))
+	}
+	for _, tc := range []struct {
+		name, content string
+		want          []string
+	}{
+		{"declared", "---\nname: demo\ntools: [send_image, missing_tool, run_skill_script, send_image]\n---\nother_tool", []string{"run_skill_script", "send_image"}},
+		{"empty", "---\ntools: []\n---\nsend_image", nil},
+		{"fallback", "---\nname: demo\ndescription: other_tool\n---\n调用 `run_skill_script`，再 send_image(url)。", []string{"run_skill_script", "send_image"}},
+		{"null", "---\ntools: null\n---\nsend_image", []string{"send_image"}},
+		{"reference", "参考文档：`send_image`，重复 send_image。", []string{"send_image"}},
+		{"whole names only", "send_image_extra prefix_send_image x-send_image send_images SEND_IMAGE 图片 脚本", nil},
+		{"crlf", "---\r\ntools:\r\n  - send_image\r\n---\r\n", []string{"send_image"}},
+		{"invalid declaration", "---\ntools: send_image\n---\nrun_skill_script", nil},
+		{"unclosed header", "---\ntools: [send_image]\nrun_skill_script", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ElementsMatch(t, tc.want, registry.skillToolNames(tc.content))
+		})
+	}
+}
+
+func TestReadSkillActivatesToolsForNextDecision(t *testing.T) {
+	for _, declared := range []bool{false, true} {
+		for _, readFails := range []bool{false, true} {
+			registry := NewRegistry()
+			content := "---\nname: demo\ndescription: demo\n"
+			if declared {
+				content += "tools: [run_skill_script, send_image]\n"
+			}
+			content += "---\n调用 run_skill_script，然后 send_image。"
+			require.NoError(t, registry.Register(Tool{
+				Definition: Function("read_skill", "read", map[string]any{}),
+				Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+					result := map[string]any{"name": "demo", "file": "SKILL.md", "content": content}
+					if readFails {
+						return result, errors.New("read failed")
+					}
+					return result, nil
+				},
+			}))
+			executed := 0
+			for _, name := range []string{"run_skill_script", "send_image"} {
+				require.NoError(t, registry.Register(Tool{
+					Definition: Function(name, name, map[string]any{}),
+					Handler: func(_ *RunContext, _ json.RawMessage) (any, error) {
+						executed++
+						return "ok", nil
+					},
+				}))
+			}
+			llm := &scriptedModel{steps: []model.Response{
+				{ToolCalls: []model.ToolCall{call("read", "read_skill", `{"name":"demo"}`)}},
+				{ToolCalls: []model.ToolCall{call("run", "run_skill_script", `{"name":"demo","file":"scripts/main.py"}`)}},
+				{Answer: "done"},
+			}}
+			runner := &Runner{Tools: registry, Model: llm, Skills: &catalogSearcher{items: []SkillSummary{{Name: "demo", Description: "demo"}}}}
+			_, err := runner.Run(&RunContext{}, "demo", "", "")
+			require.NoError(t, err)
+			require.NotContains(t, toolNames(llm.requests[0].Tools), "run_skill_script")
+			if readFails {
+				require.NotContains(t, toolNames(llm.requests[1].Tools), "run_skill_script")
+				require.NotContains(t, toolNames(llm.requests[1].Tools), "send_image")
+				require.Zero(t, executed)
+			} else {
+				require.Contains(t, toolNames(llm.requests[1].Tools), "run_skill_script")
+				require.Contains(t, toolNames(llm.requests[1].Tools), "send_image")
+				require.Equal(t, 1, executed) // Loading never runs the sending tool.
+				var payload struct {
+					Result struct {
+						LoadedTools []string `json:"loaded_tools"`
+					} `json:"result"`
+				}
+				history := llm.requests[1].History
+				require.NoError(t, json.Unmarshal([]byte(history[len(history)-1].Content.(string)), &payload))
+				require.Equal(t, []string{"run_skill_script", "send_image"}, payload.Result.LoadedTools)
+			}
+			// Reusing the Runner and registry does not leak activation into a new run.
+			fresh := &scriptedModel{steps: []model.Response{{Answer: "done"}}}
+			runner.Model = fresh
+			_, err = runner.Run(&RunContext{}, "another task", "", "")
+			require.NoError(t, err)
+			require.NotContains(t, toolNames(fresh.requests[0].Tools), "run_skill_script")
+			require.NotContains(t, toolNames(fresh.requests[0].Tools), "send_image")
+		}
+	}
+}

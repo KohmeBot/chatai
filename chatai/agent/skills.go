@@ -2,11 +2,80 @@ package agent
 
 import (
 	"encoding/json"
+	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
+
+// Tool identifiers are matched as whole tokens, not fuzzy search keywords.
+var skillToolToken = regexp.MustCompile(`[A-Za-z0-9_-]+`)
+
+// skillToolNames resolves an explicit tools list, falling back to references in
+// the body only when the list is absent. An empty list opts out of discovery.
+// Resolution only exposes already registered tools; it never executes them.
+func (r *Registry) skillToolNames(content string) []string {
+	body := content
+	var declared []string
+	line, rest, _ := strings.Cut(content, "\n")
+	if strings.TrimSpace(line) == "---" {
+		var header strings.Builder
+		closed := false
+		for rest != "" && header.Len() <= 16*1024 {
+			line, rest, _ = strings.Cut(rest, "\n")
+			if strings.TrimSpace(line) == "---" {
+				closed = true
+				body = rest
+				break
+			}
+			header.WriteString(line + "\n")
+		}
+		var metadata struct {
+			Tools []string `yaml:"tools"`
+		}
+		if !closed || yaml.Unmarshal([]byte(header.String()), &metadata) != nil {
+			return nil
+		}
+		declared = metadata.Tools
+	}
+	candidates := declared
+	if declared == nil {
+		candidates = skillToolToken.FindAllString(body, -1)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, name := range candidates {
+		if _, ok := r.tools[name]; ok && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// activateReadSkillTools runs only after a successful read_skill call. It keeps
+// activation local to this run and returns the resolved names alongside the text.
+func (r *Runner) activateReadSkillTools(result any, active map[string]bool) {
+	document, ok := result.(map[string]any)
+	if !ok {
+		return
+	}
+	content, ok := document["content"].(string)
+	if !ok {
+		return
+	}
+	names := r.Tools.skillToolNames(content)
+	for _, name := range names {
+		active[name] = true
+	}
+	document["loaded_tools"] = names
+}
 
 // SkillSummary contains routing metadata only, never instructions or scripts.
 type SkillSummary struct {

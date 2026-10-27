@@ -11,7 +11,7 @@ import (
 )
 
 const maxProjectFiles = 1000
-const maxProjectBytes = 10 * 1024 * 1024
+const maxProjectBytes = 20 * 1024 * 1024
 
 type FileInfo struct {
 	Path string `json:"path"`

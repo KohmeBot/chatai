@@ -45,7 +45,7 @@ func (p *Persona) skillTools() []agent.Tool {
 			Handler:     func(_ *agent.RunContext, _ json.RawMessage) (any, error) { return d.List() },
 		},
 		{
-			Definition: agent.Function("read_skill", "按需读取一个 Skill 文件；默认 SKILL.md，先读 SKILL.md，再按当前步骤读取辅助文件，路径相对于该 Skill 目录，不要一次读取整个目录；仅返回文本，不执行脚本", map[string]any{"name": stringProperty("Skill 文件夹名"), "file": stringProperty("相对路径，默认 SKILL.md，例如 references/examples.md")}, "name"),
+			Definition: agent.Function("read_skill", "按需读取一个 Skill 文件；默认 SKILL.md，先读 SKILL.md，再按当前步骤读取辅助文件，路径相对于该 Skill 目录，不要一次读取整个目录。读取成功后自动暴露 front matter 的 tools 清单中已注册的工具；未声明 tools 时精确匹配正文中的完整工具名，loaded_tools 返回匹配结果，无需再次搜索这些工具。读取不会执行脚本", map[string]any{"name": stringProperty("Skill 文件夹名"), "file": stringProperty("相对路径，默认 SKILL.md，例如 references/examples.md")}, "name"),
 			Namespace:  "skill", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow,
 			SearchTerms: []string{"读取技能", "加载技能", "skill", "参考文件"},
 			Handler: func(_ *agent.RunContext, raw json.RawMessage) (any, error) {

@@ -539,11 +539,27 @@ skills/report/
     input.json
 ```
 
-`SKILL.md` 使用 `name: report` 的 front matter，并说明脚本入口、参数和输出。Agent 先读取说明及相关脚本，再调用：
+`SKILL.md` 使用 `name: report` 的 front matter，并说明脚本入口、参数和输出。Agent 读取说明后，若契约明确且当前任务需要执行，直接调用脚本工具；只有说明不足、排错或审查时才按需读取源码，无需先列目录：
 
 ```json
 {"name":"report","file":"scripts/main.py","args":["--format","json"],"timeout_seconds":60}
 ```
+
+Skill 可以在 YAML front matter 中主动声明需要暴露的工具：
+
+```yaml
+---
+name: report
+description: 生成报告
+tools:
+  - run_skill_script
+  - send_file
+---
+```
+
+`read_skill` 成功后，Agent 会将清单中当前已注册的工具加入本轮可用工具，下一次模型请求即可调用，不必再 `search_tools`。未声明 `tools`（或为 null）时，从已读取的正文中精确匹配完整工具名；不使用宽泛关键词匹配，不扫描未读取的文件。显式清单优先于正文，`tools: []` 禁用该文件的自动发现；未知工具忽略，重复工具去重。工具结果中的 `loaded_tools` 返回本次匹配的已注册工具名。读取失败不加载工具，读取和暴露本身不执行任何工具，也不影响其他会话。初始 Skill 摘要和目录搜索不会提前暴露这些工具。
+
+表情包场景可参考 [meme-router 示例](examples/skills/meme-router/SKILL.md)，通过 `execute_command` 在原 Skill 目录中运行 `python3 scripts/pick_meme.py`，再用 `send_image` 发送返回的图片路径；需要启用 `agent.work.enable` 和 `agent.work.command_enable`。示例只包含 Skill 说明，脚本、manifest 和图片沿用部署目录中的现有文件。
 
 调用会创建整个 Skill 的临时快照，再通过 `pyrunnersdk.Invoker.Run` 以 `Path` 和 `EntryPoint` 运行。工作目录是项目根目录，保留辅助模块及资源的相对路径；脚本可按标准 Python 规则导入模块。项目根目录的 `requirements.txt`、入口 PEP 723 依赖或 `pyproject.toml` 交由 pyrunner 安装。无需将源代码拼入 shell，也不暴露任意宿主路径参数。
 
