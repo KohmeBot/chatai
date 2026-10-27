@@ -9,6 +9,9 @@ function identity(kind,id,name=''){
  box.append(avatar,el('span','',`${kind==='group'?'群':'用户'} ${name?name+' · ':''}${id}`));return box;
 }
 function identifyCard(c,kind,id){c.querySelector('h3').replaceChildren(identity(kind,id));return c}
+function hasMemorySource(item){return item.source_id!=null&&String(item.source_id)!=='0'&&String(item.source_id)!==''}
+function memorySource(item){return hasMemorySource(item)?`#${item.source_id}`:'自行添加'}
+function appendMemorySourceGroup(node,item){if(hasMemorySource(item)&&item.group_id&&String(item.group_id)!=='0')node.append(identity('group',String(item.group_id)))}
 function action(text,fn,danger=false){const b=el('button',danger?'danger':'',text);b.type='button';b.onclick=fn;return b}
 function memoryActions(c,u){
  const add=el('div','actions');add.append(action('新增结构化记忆',()=>addMemoryItem(u)));c.append(add);
@@ -34,12 +37,12 @@ function showGroupMemory(g){
  const actions=el('div','actions');actions.append(action('编辑群简介',()=>openMemoryDialog('编辑群简介','仅保存稳定的群体认识；条目请逐条修改。',form=>{const text=field(form,'群简介',g.summary||'','textarea',600);return()=>({target:'group_profile',version:g.version,summary:text.value})})),action('新增结构化记忆',()=>addMemoryItem(u)),action('清空群记忆',()=>confirmMemory('清空当前群全部记忆？','清空群简介和所有条目；之后仍可从新消息形成记忆。',{target:'group_profile',version:g.version}),true));dialog.append(actions);
  const kinds={fact:'事实 / 群梗',preference:'群体偏好',boundary:'互动边界',state:'近期状态',experience:'共同事件'};
  dialog.append(el('h3','section-heading',`结构化记忆 · ${(g.items||[]).length}`));
- for(const i of g.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 ${i.source_id?'#'+i.source_id:'人工添加'} · ${i.confidence==='explicit'?'明确表达':'推断'} · 记录 ${time(i.observed_at)}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));itemActions(item,u,i);dialog.append(item)}
+ for(const i of g.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 ${memorySource(i)} · ${i.confidence==='explicit'?'明确表达':'推断'} · 记录 ${time(i.observed_at)}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));itemActions(item,u,i);dialog.append(item)}
  if(!g.items?.length)dialog.append(el('p','muted','暂无结构化群记忆。'));
  dialog.onclose=()=>dialog.remove();document.body.append(dialog);ConsoleMotion.openDialog(dialog);close.focus();
 }
 function itemActions(node,u,item){const row=el('div','actions');row.append(action('修改',()=>openMemoryDialog('修改结构化记忆','键、类型、来源和所属群保持不变。',form=>{
- form.append(el('p','muted',`键：${item.key} · 类型：${item.kind} · 来源 #${item.source_id}`),identity('group',String(item.group_id)));
+ form.append(el('p','muted',`键：${item.key} · 类型：${item.kind} · 来源 ${memorySource(item)}`));appendMemorySourceGroup(form,item);
  const text=field(form,'记忆内容',item.text,'textarea',200),confidence=field(form,'可信度',item.confidence,'select');
  const expiry=field(form,'到期时间（可选，含时区）',item.expires_at||'','text');expiry.placeholder='2026-12-31T23:59:59+08:00';
  return()=>{if(expiry.value&&!Number.isFinite(Date.parse(expiry.value)))throw Error('请输入有效的到期时间，例如 2026-12-31T23:59:59+08:00');return{target:u.is_group?'group_item':'item',user_id:u.user_id,version:u.version,key:item.key,kind:item.kind,text:text.value,confidence:confidence.value,expires_at:expiry.value?new Date(expiry.value).toISOString():null}};
@@ -102,7 +105,7 @@ function showUserMemory(u){
  dialog.append(el('div','meta',`版本 ${u.version} · 更新 ${time(u.updated_at)}`));
  memoryActions(dialog,u);dialog.append(el('h3','section-heading',`结构化记忆 · ${(u.items||[]).length}`));
  const kinds={fact:'事实',preference:'偏好',boundary:'边界',state:'近期状态',experience:'共同经历'};
- for(const i of u.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 #${i.source_id} · ${i.confidence==='explicit'?'明确表达':'推断'}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));if(i.group_id&&String(i.group_id)!=='0')item.append(identity('group',String(i.group_id)));itemActions(item,u,i);dialog.append(item)}
+ for(const i of u.items||[]){const item=el('div','memory-item');item.append(el('span','badge',kinds[i.kind]||i.kind),el('p','',i.text),el('div','meta',`来源 ${memorySource(i)} · ${i.confidence==='explicit'?'明确表达':'推断'}${i.expires_at?' · 到期 '+time(i.expires_at):''}`));appendMemorySourceGroup(item,i);itemActions(item,u,i);dialog.append(item)}
  if(!u.items?.length)dialog.append(el('p','muted','暂无结构化记忆。可通过上方按钮新增。'));
  dialog.onclose=()=>dialog.remove();document.body.append(dialog);ConsoleMotion.openDialog(dialog);close.focus();
 }
