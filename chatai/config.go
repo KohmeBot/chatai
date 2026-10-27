@@ -7,10 +7,11 @@ import (
 )
 
 type MonitorConfig struct {
-	Enable      bool      `yaml:"enable" jsonschema:"description=启用 Agent 实时监控网页"`
-	Listen      string    `yaml:"listen" jsonschema:"description=监听地址，默认127.0.0.1:9086"`
-	AccessToken ui.Secret `yaml:"access_token" jsonschema:"description=监控访问口令，启用时必填"`
-	MaxRuns     int       `yaml:"max_runs" jsonschema:"description=内存保留运行数量，默认200，最大2000,minimum=1,maximum=2000"`
+	Enable        bool      `yaml:"enable" jsonschema:"description=启用 Agent 实时监控网页"`
+	Listen        string    `yaml:"listen" jsonschema:"description=监听地址，默认127.0.0.1:9086"`
+	AccessToken   ui.Secret `yaml:"access_token" jsonschema:"description=监控访问口令，启用时必填"`
+	MaxRuns       int       `yaml:"max_runs" jsonschema:"description=内存缓存运行数量，默认200，最大2000；不限制数据库历史数量,minimum=1,maximum=2000"`
+	RetentionDays int       `yaml:"retention_days" jsonschema:"description=监控记录保留天数，0或未配置默认7天,minimum=0,maximum=36500"`
 }
 
 type Config struct {

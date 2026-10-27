@@ -28,12 +28,14 @@ func TestObserverPreservesLoopOrderAndPayloads(t *testing.T) {
 		require.False(t, e.Time.IsZero())
 		require.NotEmpty(t, e.Summary)
 	}
-	require.Equal(t, []string{"run_started", "model_started", "model_finished", "tool_started", "tool_finished", "model_started", "model_finished", "tool_started", "tool_finished", "skill_loaded", "model_started", "model_finished", "run_finished"}, kinds)
+	require.Equal(t, []string{"run_started", "model_started", "model_finished", "tool_planned", "tool_started", "tool_finished", "model_started", "model_finished", "tool_planned", "tool_started", "tool_finished", "skill_loaded", "model_started", "model_finished", "run_finished"}, kinds)
 	require.Equal(t, "user input", events[0].Text)
-	require.Equal(t, "provider reasoning", events[6].Reasoning)
-	require.EqualValues(t, 10, events[6].InputTokens)
-	require.JSONEq(t, `{"name":"example"}`, events[7].Arguments)
-	require.Equal(t, `"skill contents"`, events[8].Result)
+	require.Equal(t, "provider reasoning", events[7].Reasoning)
+	require.EqualValues(t, 10, events[7].InputTokens)
+	require.Equal(t, "r", events[8].CallID)
+	require.Equal(t, "read_skill", events[8].Name)
+	require.JSONEq(t, `{"name":"example"}`, events[9].Arguments)
+	require.Equal(t, `"skill contents"`, events[10].Result)
 	for _, request := range llm.requests {
 		require.Nil(t, request.ObserveRequest, "agent logs must not collect raw request bodies")
 	}

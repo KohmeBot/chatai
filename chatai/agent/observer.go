@@ -47,6 +47,8 @@ func (r *RunContext) emit(event Event) {
 			} else {
 				event.Summary = "正在检查上一步结果，确定下一步操作。"
 			}
+		case "tool_planned":
+			event.Summary = "计划调用：" + event.Name
 		case "tool_started":
 			event.Summary = "正在调用：" + event.Name
 		case "tool_finished":

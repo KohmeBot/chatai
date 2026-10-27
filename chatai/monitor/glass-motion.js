@@ -7,8 +7,10 @@ window.ConsoleMotion = (() => {
   const active = new Set();
   const entrances = new WeakMap();
   const counts = new Map();
+  const dialogs = new WeakSet();
+  let graphNodes = new Set();
   let previousRuns = new Set(), detailID = '', navFrame = 0;
-  const ease = 'cubic-bezier(.22, 1, .36, 1)';
+  const ease = 'cubic-bezier(.16, 1, .3, 1)';
 
   function animate(node, frames, options = {}) {
     if (!node || reduced.matches || !node.animate) return null;
@@ -49,7 +51,15 @@ window.ConsoleMotion = (() => {
     previousRuns = next;
   }
   function detail(root, id) {
-    if (id !== detailID) reveal(root.querySelector('.detail-body'), 0, 8);
+    if (id !== detailID) {
+      graphNodes.clear();
+      reveal(root.querySelector('.detail-body'), 0, 8);
+    }
+    let index = 0;
+    for (const node of root.querySelectorAll('.dag-node')) {
+      if (!graphNodes.has(node.dataset.node) && index < 15) reveal(node, index++ * 30, 7);
+      graphNodes.add(node.dataset.node);
+    }
     detailID = id;
   }
   function stat(node, value) {
@@ -59,7 +69,7 @@ window.ConsoleMotion = (() => {
     }
     counts.set(node.id, value);
   }
-  function reset() { previousRuns.clear(); detailID = ''; counts.clear(); }
+  function reset() { previousRuns.clear(); graphNodes.clear(); detailID = ''; counts.clear(); }
 
   async function busy(button, work) {
     if (button.disabled) return;
@@ -75,17 +85,19 @@ window.ConsoleMotion = (() => {
     const animation = animate(dialog, [
       { opacity: 1, transform: 'translateY(0) scale(1)' },
       { opacity: 0, transform: 'translateY(12px) scale(.97)' }
-    ], { duration: 160, easing: 'ease-in', fill: 'forwards' });
-    const finish = () => { delete dialog.dataset.closing; if (dialog.open) dialog.close(); dialog.inert = false; };
+    ], { duration: 200, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' });
+    const finish = () => { delete dialog.dataset.closing; if (dialog.open) dialog.close(); animation?.cancel(); dialog.inert = false; };
     if (animation) animation.finished.then(finish, finish); else finish();
   }
   function openDialog(dialog) {
-    dialog.addEventListener('cancel', event => {
+    if (dialog.open || dialog.dataset.closing) return;
+    if (!dialogs.has(dialog)) dialog.addEventListener('cancel', event => {
       // Respect the form's existing in-flight-save guard.
       if (event.defaultPrevented) return;
       event.preventDefault();
       closeDialog(dialog);
     });
+    dialogs.add(dialog);
     dialog.showModal();
   }
 

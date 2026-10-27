@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
+	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 //go:embed index.html
@@ -32,6 +34,9 @@ var catalogUI []byte
 
 //go:embed run-overview.js
 var runOverviewUI []byte
+
+//go:embed run-dag.js
+var runDAGUI []byte
 
 //go:embed glass.css
 var glassCSS []byte
@@ -55,6 +60,7 @@ type Run struct {
 	Error        string        `json:"error,omitempty"`
 	Truncated    bool          `json:"truncated"`
 	Events       []agent.Event `json:"events,omitempty"`
+	persisted    int
 }
 
 type Store struct {
@@ -64,6 +70,12 @@ type Store struct {
 	runs      map[uint64]*Run
 	limit     int
 	listeners map[chan struct{}]struct{}
+	db        *gorm.DB
+	session   string
+	retention time.Duration
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func New(limit int) *Store {
@@ -100,12 +112,17 @@ func (s *Store) Observe(e agent.Event) {
 				}
 			}
 			// Keep active runs; refuse new observations if every slot is active.
-			if oldest == 0 {
+			if oldest == 0 && s.db == nil {
 				return
 			}
-			delete(s.runs, oldest)
+			if old := s.runs[oldest]; old != nil && (s.db == nil || old.persisted == len(old.Events)) {
+				delete(s.runs, oldest)
+			}
 		}
 		r = &Run{UserName: clip(e.UserName), ID: strconv.FormatUint(e.RunID, 10), GroupID: strconv.FormatInt(e.GroupID, 10), UserID: strconv.FormatInt(e.UserID, 10), Model: e.Model, Prompt: clip(e.Text), StartedAt: e.Time, Status: "running"}
+		if s.db != nil {
+			r.ID = s.session + "-" + r.ID
+		}
 		s.runs[e.RunID] = r
 	}
 	if r == nil {
@@ -134,6 +151,12 @@ func (s *Store) Observe(e agent.Event) {
 	}
 	// Bound individual payloads, but retain every event so the timeline stays complete.
 	r.Events = append(r.Events, e)
+	if s.db != nil {
+		if err := s.persist(r); err != nil {
+			logrus.Errorf("[ChatAI][Monitor] persist run %s (will retry): %v", r.ID, err)
+		}
+		s.trimCache()
+	}
 	for listener := range s.listeners {
 		select {
 		case listener <- struct{}{}:
@@ -169,6 +192,10 @@ func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
 	cookieValue := hex.EncodeToString(hash[:])
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /run-dag.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(runDAGUI)
+	})
 	mux.HandleFunc("GET /catalog-ui.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(catalogUI)
@@ -221,11 +248,20 @@ func (s *Store) Handler(token string) http.Handler {
 		w.WriteHeader(204)
 	}))
 	mux.HandleFunc("GET /api/runs", auth(func(w http.ResponseWriter, r *http.Request) {
+		items, err := s.readSnapshot("")
+		if err != nil {
+			http.Error(w, "读取运行记录失败，请稍后重试", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(s.snapshot(""))
+		json.NewEncoder(w).Encode(items)
 	}))
 	mux.HandleFunc("GET /api/runs/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
-		items := s.snapshot(r.PathValue("id"))
+		items, err := s.readSnapshot(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "读取运行记录失败，请稍后重试", 500)
+			return
+		}
 		if len(items) == 0 {
 			http.NotFound(w, r)
 			return
@@ -234,6 +270,10 @@ func (s *Store) Handler(token string) http.Handler {
 		json.NewEncoder(w).Encode(items[0])
 	}))
 	mux.HandleFunc("GET /api/events", auth(s.stream))
+	mux.HandleFunc("GET /api/retention", auth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"persistent": s.db != nil, "days": int(s.retention / (24 * time.Hour))})
+	}))
 	for _, route := range []struct{ method, section string }{{"PATCH", "memory"}, {"DELETE", "memory"}, {"POST", "schedules"}, {"DELETE", "schedules"}} {
 		mux.HandleFunc(route.method+" /api/inspect/"+route.section, auth(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {

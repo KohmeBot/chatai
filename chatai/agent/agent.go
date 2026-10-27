@@ -640,6 +640,11 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			return "", responseErr
 		}
 		ctx.recordModelStep(response)
+		// Observe the actual tool plan before any call begins. Never infer a plan
+		// from reasoning text; calls may subsequently fail or remain unexecuted.
+		for _, call := range response.ToolCalls {
+			ctx.emit(Event{Kind: "tool_planned", Step: i + 1, CallID: call.ID, Name: call.Function.Name})
+		}
 		logrus.Infof("[Agent][run=%d][模型决策] step=%d/%d tool_calls=%v answer=%q", runID, i+1, steps, toolCallNames(response.ToolCalls), response.Answer)
 		if response.Reasoning != "" {
 			logrus.Infof("[Agent][run=%d][模型推理] step=%d/%d reasoning=%q", runID, i+1, steps, response.Reasoning)

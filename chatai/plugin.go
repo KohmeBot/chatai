@@ -232,7 +232,10 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		memoryModel = c.routeModel(route, persona.ConversationMemorySystemPrompt(), true)
 	}
 	if c.conf.Monitor.Enable {
-		c.monitor = monitor.New(c.conf.Monitor.MaxRuns)
+		c.monitor, err = monitor.NewPersistent(db, c.conf.Monitor.MaxRuns, c.conf.Monitor.RetentionDays)
+		if err != nil {
+			return fmt.Errorf("initialize monitor storage: %w", err)
+		}
 	}
 	var observer agent.Observer
 	if c.monitor != nil {
@@ -371,4 +374,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.5.4" }
+func (c *ChatPlugin) Version() string      { return "v1.5.5" }

@@ -37,9 +37,14 @@ func (c *ChatPlugin) startMonitor() error {
 		return fmt.Errorf("start agent monitor: %w", err)
 	}
 	if c.monitor == nil {
-		c.monitor = monitor.New(c.conf.Monitor.MaxRuns)
+		c.monitor, err = monitor.NewPersistent(c.db, c.conf.Monitor.MaxRuns, c.conf.Monitor.RetentionDays)
+		if err != nil {
+			listener.Close()
+			return fmt.Errorf("initialize monitor storage: %w", err)
+		}
 	}
 	c.monitor.Inspect = c.inspectMonitor
+	c.monitor.StartMaintenance()
 	c.monitorServer = &http.Server{Handler: c.monitor.Handler(string(c.conf.Monitor.AccessToken)), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 	go func() {
 		if err := c.monitorServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -52,6 +57,13 @@ func (c *ChatPlugin) startMonitor() error {
 
 // Close releases the optional monitor listener for hosts that support unloading.
 func (c *ChatPlugin) Close() error {
+	if c.monitor != nil {
+		defer func() {
+			if err := c.monitor.Close(); err != nil {
+				logrus.Errorf("[ChatAI][Monitor] close: %v", err)
+			}
+		}()
+	}
 	if c.workCleanupCancel != nil {
 		c.workCleanupCancel()
 		<-c.workCleanupDone
