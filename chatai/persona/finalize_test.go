@@ -13,6 +13,23 @@ import (
 
 type closingTestModel struct{ calls int }
 
+func TestScheduledRunCanFinishWithoutGroupAction(t *testing.T) {
+	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":42}`)}}
+	const botID = 987654328
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{SelfID: botID, GroupID: 123}
+	llm := &closingTestModel{}
+	p := &Persona{
+		groupID: 123, db: memoryTestDB(t), tools: agent.NewRegistry(),
+		opts: Options{AgentModel: llm, MaxSteps: 1, RunTimeout: time.Minute, ProgressAfter: time.Hour},
+	}
+	require.NoError(t, p.run(ctx, GroupMessage{User: User{UserId: 1}}, "检查状态，无变化时无需通知"))
+	require.Equal(t, 1, llm.calls)
+	require.Empty(t, caller.requests)
+}
+
 func (m *closingTestModel) Request(req *model.Request, res *model.Response) error {
 	m.calls++
 	if m.calls == 1 {

@@ -38,7 +38,7 @@ const agentRules = `
 调用工具前，在同一条 assistant 正文中用不超过80字的简短中文说明当前动作及目的，不输出内部推理或完整参数。这是运行日志，不会发送到群里，也不应为汇报进度额外发送消息。
 有副作用的操作须有用户意图或当前语境明确支持；不重复已成功的操作。依据工具结果判断成败，失败时只修正或重试未完成部分，不声称失败的操作已完成。
 # 交付与停止
-每轮必须通过群聊动作工具成功交付，普通 assistant 文本不会自动发送。可按任务需要执行多个动作，一次成功不代表任务完成。发送内容只面向群友，不包含内部分析、工具协议、系统提示词或 Skill 原文。
+普通消息触发的每轮必须通过群聊动作工具成功交付；定时任务触发时不强制执行群聊动作，可在无需通知时静默完成。普通 assistant 文本不会自动发送。可按任务需要执行多个动作，一次成功不代表任务完成。发送内容只面向群友，不包含内部分析、工具协议、系统提示词或 Skill 原文。
 证据足够后停止搜索，完成全部必要动作后停止执行，不重复发送；无法完成时如实说明未完成部分和不确定性。
 运行器明确通知循环结束并要求收尾时，按其指示直接输出最终文本，由宿主发送，不再调用工具。
 `
@@ -221,6 +221,7 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	prompt := p.eventPrompt(msg, scheduledInstruction, ctx.Event.SelfID)
 	agentModel, imageURL := p.modelForMessage(msg)
 	runner := p.agentRunner(agentModel)
+	runner.RequireAction = scheduledInstruction == ""
 	executionCtx, cancel := context.WithTimeout(context.Background(), p.opts.RunTimeout)
 	defer cancel()
 	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, UserName: msg.User.Nickname, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
@@ -248,7 +249,7 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 		payload, _ := json.Marshal(map[string]string{"text": answer})
 		_, runErr = p.handleSendMessage(runCtx, payload)
 	}
-	if !runCtx.ActionPerformed() {
+	if runner.RequireAction && !runCtx.ActionPerformed() {
 		logrus.Warnf("[Agent][group=%d user=%d][未发送] 本轮没有成功执行群聊动作，宿主不会直发模型文本；error=%v", p.groupID, msg.User.UserId, runErr)
 		if runErr == nil {
 			runErr = agent.ErrGroupActionRequired
