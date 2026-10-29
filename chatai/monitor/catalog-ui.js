@@ -1,4 +1,4 @@
-// Read-only catalog presentation. All user-controlled content is rendered as DOM text.
+// Catalog presentation. All user-controlled content is rendered as DOM text.
 let resourceDialogSerial=0;
 function resourceDialog(title,description){
  const dialog=el('dialog','memory-dialog resource-detail'),head=el('div','row resource-heading'),heading=el('h2','',title);
@@ -16,7 +16,12 @@ function metadataList(root,label,values){
 }
 function renderSkills(root,data){
  $('catalog-status').textContent=data.enabled?`${data.items.length} 项可用技能 · 未激活、已退役和已过期的经验技能不在此列`:'Skills 功能未启用';
- section(root,'可用技能',data.items,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions');buttons.append(action('详情',()=>showSkillDetail(s)));c.append(buttons);return c});
+ root.append(el('p','muted','常驻技能会在每次运行的首轮请求中带入完整正文并加载关联工具，减少读取技能的额外调用，但会增加输入 token。全局技能的设置对所有群生效，保存后下次运行生效。'));
+ const group=$('group').value;
+ section(root,'可用技能',data.items,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions'),status=el('span','muted');status.setAttribute('role','status');const toggle=action('',async()=>{
+  toggle.disabled=true;status.textContent='保存中…';
+  try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update();status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false}
+ });const update=()=>{toggle.textContent=s.resident?'常驻：已开启':'常驻：未开启';toggle.setAttribute('aria-pressed',String(!!s.resident));toggle.setAttribute('aria-label',`${s.name} 常驻`)};update();buttons.append(action('详情',()=>showSkillDetail(s)),toggle,status);c.append(buttons);return c});
 }
 async function showSkillDetail(skill){
  const group=$('group').value,{dialog,body}=resourceDialog(skill.name,skill.description);

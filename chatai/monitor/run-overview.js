@@ -6,9 +6,15 @@ function overviewJSON(text) {
 
 // Pair starts and finishes so a call is counted once, including unfinished calls.
 function summarizeRun(run) {
-  const skills = new Map(), tools = new Map(), calls = [], outputs = [];
+  const skills = new Map(), tools = new Map(), calls = [], outputs = [], modelCalls = [];
   let finalAnswer = '';
   for (const [index, event] of (run.events || []).entries()) {
+    if (event.kind === 'model_started') modelCalls.push({step: event.step, finished: false});
+    if (event.kind === 'model_finished') {
+      const call = modelCalls.find(c => !c.finished && c.step === event.step);
+      if (call) call.finished = true;
+      else modelCalls.push({step: event.step, finished: true});
+    }
     if (event.kind === 'skill_loaded') {
       const args = overviewJSON(event.arguments);
       const name = event.name === 'read_skill' ? args?.name || 'read_skill（名称未保留）' : event.name;
@@ -45,21 +51,38 @@ function summarizeRun(run) {
       outputs.push({...call, title, text, result: call.end.result, error: call.end.error});
     }
   }
-  return {skills: [...skills], tools: [...tools.values()], calls, outputs, finalAnswer};
+  return {skills: [...skills], tools: [...tools.values()], calls, outputs, finalAnswer, modelCallCount: modelCalls.length};
 }
 
-function renderRunOverview(run, opened) {
+function renderRunOverview(run, opened, mode = 'overview') {
   const data = summarizeRun(run), root = el('section', 'run-overview');
-  root.setAttribute('aria-label', '对话总览');
-  const title = el('div', 'row');
-  title.append(el('h3', '', '对话总览'), badge(run.status));
-  root.append(title, el('p', 'muted', `${data.skills.length} 个 Skill · ${data.tools.length} 种 Tool · ${data.calls.length} 次调用`));
+  root.setAttribute('aria-label', mode === 'overview' ? '对话总览' : '工具与产出');
+  if (mode === 'overview') {
+  const metrics = el('div', 'run-metrics');
+  for (const [label, value] of [['模型调用', `${data.modelCallCount} 次`], ['运行耗时', duration(run.duration_ms)], ['工具调用', `${data.calls.length} 次`], ['已加载技能', `${data.skills.length} 个`], ['Token 用量', number((run.input_tokens || 0) + (run.output_tokens || 0))]]) {
+    const metric = el('div', label === '模型调用' ? 'model-call-metric' : ''); metric.append(el('small', 'muted', label), el('strong', '', value)); metrics.append(metric);
+  }
+  root.append(metrics);
+  root.append(el('p', 'muted token-breakdown', `输入 ${number(run.input_tokens)} / 输出 ${number(run.output_tokens)} token`));
+  const prompt = el('section', 'overview-prompt');
+  prompt.append(el('h4', '', '用户任务'), runPreview(run.prompt || '事件触发', `${run.id}:prompt`, opened));
+  root.append(prompt);
   const result = el('div', 'overview-result');
   result.append(el('h4', '', '执行结果'));
   if (run.error) result.append(el('p', 'warning', run.error));
-  result.append(el('p', 'overview-text', data.finalAnswer || (run.status === 'running' ? '正在执行，尚无最终回复。' : '本轮未记录最终文本回复，可查看下方消息和工具产出。')));
+  result.append(runPreview(data.finalAnswer || (run.status === 'running' ? '正在执行，尚无最终回复。' : '本轮未记录最终文本回复，可在「工具与产出」中查看已发送消息和工具结果。'), `${run.id}:answer`, opened));
   if (run.status === 'running' && run.summary) result.append(el('p', 'stage-summary', run.summary));
-  root.append(result, renderRunTiming(run));
+  root.append(result);
+  const failures = (run.events || []).filter(e => e.error && e.kind !== 'run_finished');
+  if (failures.length) {
+    const alert = el('section', 'run-alert');
+    alert.append(el('strong', '', `${failures.length} 条执行异常`), el('p', 'muted', '过程中出现过错误，最终状态以本轮结果为准。'));
+    alert.append(disclosure('查看异常记录', failures.map(e => `${e.name || e.kind}\n${e.error}`).join('\n\n'), `${run.id}:errors`, opened));
+    root.append(alert);
+  }
+  root.append(el('p', 'muted overview-hint', '想了解执行细节？切换上方标签，查看流程、产出、耗时或完整日志。'));
+  return root;
+  }
   root.append(el('h4', '', 'Skills · 已加载'));
   const skills = el('div', 'overview-tags');
   for (const [name, count] of data.skills) skills.append(el('span', 'badge', `${name} × ${count}`));
@@ -82,12 +105,56 @@ function renderRunOverview(run, opened) {
     const card = el('article', 'overview-output'), heading = el('div', 'row');
     heading.append(el('strong', '', output.title), badge(output.error ? 'error' : 'success'));
     card.append(heading, el('small', 'muted', output.name));
-    if (output.text) card.append(el('p', 'overview-text', output.text));
+    if (output.text) card.append(runPreview(output.text, `${run.id}:output:${output.index}`, opened));
     if (output.error) card.append(el('p', 'warning', output.error));
     if (output.result) card.append(disclosure('查看工具返回', pretty(output.result), `${run.id}:overview:${output.index}`, opened));
     root.append(card);
   }
   if (!data.outputs.length) root.append(el('p', 'muted', '尚无工具产出记录'));
+  return root;
+}
+
+// Keep long responses readable without losing access to any recorded content.
+function runPreview(text, key, opened) {
+  const root = el('div', 'run-preview');
+  const lines = text.split('\n');
+  const preview = lines.slice(0, 6).join('\n').slice(0, 480);
+  root.append(el('p', 'overview-text', preview + (preview.length < text.length ? '…' : '')));
+  if (preview.length < text.length) root.append(disclosure('展开完整内容', text, key, opened));
+  return root;
+}
+
+// Each view is mounted on demand: a long trace never blocks the summary view.
+function renderRunInspector(run, opened, previous, builders) {
+  const root = el('section', 'run-inspector'), tabs = el('div', 'run-tabs'), panels = el('div', 'run-panels');
+  tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '日志详情视图');
+  const entries = [['overview', '概览'], ['flow', '执行流程'], ['outputs', '工具与产出'], ['timing', '耗时分析'], ['logs', `完整日志 · ${(run.events || []).length}`]];
+  const activate = key => {
+    root.dataset.view = key;
+    for (const [name] of entries) {
+      const button = tabs.querySelector(`[data-view="${name}"]`), panel = panels.querySelector(`[data-view="${name}"]`), active = name === key;
+      button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; panel.hidden = !active;
+      if (active && !panel.childNodes.length) panel.append(builders[name]());
+    }
+  };
+  for (const [key, label] of entries) {
+    const button = el('button', '', label), panel = el('section', 'run-tab-panel');
+    button.type = 'button'; button.dataset.view = panel.dataset.view = key;
+    button.dataset.focusKey = `tab:${key}`;
+    button.id = `run-tab-${key}`; panel.id = `run-panel-${key}`;
+    button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', panel.id);
+    panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', button.id); panel.tabIndex = 0;
+    button.onclick = () => activate(key);
+    button.onkeydown = event => {
+      const index = entries.findIndex(([name]) => name === key);
+      const next = event.key === 'ArrowRight' ? (index + 1) % entries.length : event.key === 'ArrowLeft' ? (index + entries.length - 1) % entries.length : event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : -1;
+      if (next < 0) return;
+      event.preventDefault(); activate(entries[next][0]); tabs.children[next].focus();
+    };
+    tabs.append(button); panels.append(panel);
+  }
+  root.append(tabs, panels);
+  activate(entries.some(([key]) => key === previous) ? previous : 'overview');
   return root;
 }
 

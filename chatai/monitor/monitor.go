@@ -274,7 +274,7 @@ func (s *Store) Handler(token string) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"persistent": s.db != nil, "days": int(s.retention / (24 * time.Hour))})
 	}))
-	for _, route := range []struct{ method, section string }{{"PATCH", "memory"}, {"DELETE", "memory"}, {"POST", "schedules"}, {"DELETE", "schedules"}} {
+	for _, route := range []struct{ method, section string }{{"PATCH", "skills"}, {"PATCH", "memory"}, {"DELETE", "memory"}, {"POST", "schedules"}, {"DELETE", "schedules"}} {
 		mux.HandleFunc(route.method+" /api/inspect/"+route.section, auth(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 				http.Error(w, "仅支持同站 JSON 请求", http.StatusForbidden)

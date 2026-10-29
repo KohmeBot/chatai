@@ -146,6 +146,28 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		}
 		return c.skills.Directory.MonitorPreview(name, r.URL.Query().Get("file"))
 	case "skills":
+		if r.Method != http.MethodGet {
+			if r.Method != http.MethodPatch {
+				return nil, fmt.Errorf("不支持的请求方法")
+			}
+			var input struct {
+				Name     string `json:"name"`
+				ID       uint   `json:"id"`
+				Resident *bool  `json:"resident"`
+			}
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&input); err != nil {
+				return nil, fmt.Errorf("无效技能设置: %w", err)
+			}
+			if decoder.Decode(new(any)) != io.EOF || input.Resident == nil {
+				return nil, fmt.Errorf("需要单个 JSON 对象和 resident 布尔值")
+			}
+			if err := c.skills.SetResident(id, input.Name, input.ID, *input.Resident); err != nil {
+				return nil, err
+			}
+			return map[string]bool{"resident": *input.Resident}, nil
+		}
 		items := []map[string]any{}
 		if c.skills == nil {
 			return map[string]any{"enabled": false, "items": items}, nil
@@ -154,8 +176,12 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		resident, err := c.skills.ResidentKeys()
+		if err != nil {
+			return nil, err
+		}
 		for _, s := range summaries {
-			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "path": s.Path, "source": "目录 Skill", "triggers": s.Triggers, "non_triggers": s.NonTriggers})
+			items = append(items, map[string]any{"resident": resident[skill.ResidentKey(s.Name, 0)], "name": s.Name, "description": s.Description, "path": s.Path, "source": "目录 Skill", "triggers": s.Triggers, "non_triggers": s.NonTriggers})
 		}
 		var records []skill.Record
 		err = c.db.Where("status = ? AND (scope = ? OR (scope = ? AND group_id = ?))", skill.StatusActive, skill.ScopeGlobal, skill.ScopeGroup, id).Order("name").Find(&records).Error
@@ -166,7 +192,7 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 			if s.Source == skill.SourceGenerated && !s.ExpiresAt.After(time.Now()) {
 				continue
 			}
-			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "source": s.Source, "content": s.MarkdownText(), "triggers": s.Triggers(), "non_triggers": s.NonTriggers(), "required_tools": s.RequiredTools(), "scope": s.Scope, "version": s.Version, "updated_at": s.UpdatedAt})
+			items = append(items, map[string]any{"id": s.ID, "resident": resident[skill.ResidentKey("", s.ID)], "name": s.Name, "description": s.Description, "source": s.Source, "content": s.MarkdownText(), "triggers": s.Triggers(), "non_triggers": s.NonTriggers(), "required_tools": s.RequiredTools(), "scope": s.Scope, "version": s.Version, "updated_at": s.UpdatedAt})
 		}
 		return map[string]any{"enabled": true, "items": items}, nil
 	}

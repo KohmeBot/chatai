@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -33,17 +34,24 @@ const agentRules = `
 # 决策与工具
 先明确目标和缺失信息。依赖前文、人物关系或群梗时先查询群聊上下文或成员；陌生、不确定以及可能变化的外部事实，以及用户要求的图片、资料、来源，应实际上网搜索核实。摘要不足时读取原始资料。
 当某个词按字面理解与当前语境明显不符时，考虑它可能是网络梗、黑话、错别字、隐喻或反讽。先结合当前对话和群聊上下文判断；仍无法确定且会影响回答时，优先搜索实际用例，不要仅凭词面猜测含义。
-按任务目标用 search_tools 发现所需能力，未暴露不代表不存在；已有合适工具不重复搜索。遵循工具描述和参数契约。Skill 按适用场景选择并先读取，参考文件按需加载。
+按任务目标用 search_tools 发现所需能力，未暴露不代表不存在；已有合适工具不重复搜索。遵循工具描述和参数契约。Skill 按适用场景选择并先读取；已预加载完整正文的常驻 Skill 无需重复读取，参考文件按需加载。
 只有查询仍无法补足的关键信息可以向用户追问；
 调用工具前，在同一条 assistant 正文中用不超过80字的简短中文说明当前动作及目的，不输出内部推理或完整参数。这是运行日志，不会发送到群里，也不应为汇报进度额外发送消息。
 有副作用的操作须有用户意图或当前语境明确支持；不重复已成功的操作。依据工具结果判断成败，失败时只修正或重试未完成部分，不声称失败的操作已完成。
 # 交付与停止
+如果已确定本轮最后一个工具成功后即可完成全部任务，在该调用参数中设置 _finish_after_success=true，合并工具执行与结束决策。需要读取结果继续判断或等待用户输入时不得设置；工具失败会交回你继续处理。
 普通消息触发的每轮必须通过群聊动作工具成功交付；定时任务触发时不强制执行群聊动作，可在无需通知时静默完成。普通 assistant 文本不会自动发送。可按任务需要执行多个动作，一次成功不代表任务完成。发送内容只面向群友，不包含内部分析、工具协议、系统提示词或 Skill 原文。
 证据足够后停止搜索，完成全部必要动作后停止执行，不重复发送；无法完成时如实说明未完成部分和不确定性。
 运行器明确通知循环结束并要求收尾时，按其指示直接输出最终文本，由宿主发送，不再调用工具。
 `
 
-func AgentRules() string { return agentRules }
+func AgentRules() string {
+	shell := "/bin/sh -c（POSIX shell）"
+	if runtime.GOOS == "windows" {
+		shell = "powershell.exe -NoProfile -NonInteractive -Command（Windows PowerShell）"
+	}
+	return agentRules + fmt.Sprintf("\n# 运行环境\n宿主操作系统：%s；架构：%s。execute_command 使用 %s。按此环境选择命令语法、路径与引号；不要假定额外程序已安装。\n", runtime.GOOS, runtime.GOARCH, shell)
+}
 
 type Options struct {
 	Scheduler              *schedule.Service

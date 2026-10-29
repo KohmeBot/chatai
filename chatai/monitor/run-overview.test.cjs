@@ -7,6 +7,14 @@ vm.runInContext(fs.readFileSync(__dirname + '/run-overview.js', 'utf8'), context
 const summarize = run => JSON.parse(JSON.stringify(context.summarizeRun(run)));
 const timing = run => JSON.parse(JSON.stringify(context.runTiming(run)));
 const at = ms => new Date(Date.UTC(2026, 9, 27) + ms).toISOString();
+test('counts model requests once, including failures, repeated steps and pending calls', () => {
+  assert.equal(summarize({events: [
+    {kind: 'model_started', step: 1}, {kind: 'model_finished', step: 1},
+    {kind: 'model_started', step: 1}, {kind: 'model_finished', step: 1, error: 'failed'},
+    {kind: 'model_finished', step: 2}, {kind: 'model_started', step: 3},
+  ]}).modelCallCount, 4);
+  assert.equal(summarize({}).modelCallCount, 0);
+});
 const event = (kind, ms, extra = {}) => ({kind, time: at(ms), ...extra});
 
 test('timing separates each skill file, pairs duplicate tools by ID and avoids double-counting skill notifications', () => {

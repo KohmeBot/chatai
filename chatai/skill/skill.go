@@ -194,7 +194,7 @@ func NewService(db *gorm.DB, reflectionModel model.LargeModel, opts Options) *Se
 }
 
 // Models 返回 Skill 系统需要迁移的数据表。
-func Models() []any { return []any{&Record{}, &Evidence{}} }
+func Models() []any { return []any{&Record{}, &Evidence{}, &Residency{}} }
 
 // Initialize 把第一版群级记录迁移并合并为全局 Skill，然后同步配置声明。
 func (s *Service) Initialize(definitions []Definition) error {

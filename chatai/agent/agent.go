@@ -567,7 +567,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	}()
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
-	question := prompt + r.skillCatalogPrompt(activeTools)
+	question := prompt + r.skillCatalogPrompt(activeTools) + r.residentSkillPrompt(ctx, activeTools)
 	finalize := func(cause error) (string, error) {
 		if errors.Is(runContextError(ctx), context.DeadlineExceeded) {
 			cause = fmt.Errorf("%v: %w", cause, context.DeadlineExceeded)
@@ -609,6 +609,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				activeTools[definition.Function.Name] = true
 			}
 		}
+		definitions = withFinishParameter(definitions)
 		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions))
 		ctx.emit(Event{Kind: "model_started", Step: i + 1, Model: modelName})
 		modelStarted := time.Now()
@@ -692,6 +693,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		history = append(history, model.Message{Role: "assistant", Content: response.Answer, ToolCalls: response.ToolCalls, ReasoningContent: response.Reasoning})
 		boundaryCallIndex, boundaryToolName := -1, ""
 		deliveryFailed := false
+		batchOK, finishRequested := true, false
 		for callIndex, call := range response.ToolCalls {
 			if r.Tools.isDecisionBoundary(call.Function.Name) {
 				boundaryCallIndex, boundaryToolName = callIndex, call.Function.Name
@@ -705,10 +707,16 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			callStarted := time.Now()
 			ctx.emit(Event{Kind: "tool_started", Step: i + 1, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments, Summary: r.Tools.toolProgress(call.Function.Name)})
 			groupAction := r.Tools.isGroupAction(call.Function.Name)
+			executionCall, finish, finishErr := parseFinishParameter(call)
+			if callIndex == len(response.ToolCalls)-1 {
+				finishRequested = finish
+			}
 			if !deliveryFailed {
 				toolCallCount++
 			}
-			if err := runContextError(ctx); err != nil {
+			if finishErr != nil {
+				callErr = finishErr
+			} else if err := runContextError(ctx); err != nil {
 				callErr = err
 			} else if deliveryFailed {
 				callErr = errors.New("tool call skipped: a send failed; wait for a new model decision")
@@ -775,7 +783,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			} else if !activeTools[call.Function.Name] {
 				callErr = fmt.Errorf("tool %q is not active; call search_tools first", call.Function.Name)
 			} else {
-				result, callErr = r.Tools.execute(ctx, call)
+				result, callErr = r.Tools.execute(ctx, executionCall)
 				if callErr == nil && call.Function.Name == "read_skill" {
 					r.activateReadSkillTools(result, activeTools)
 				}
@@ -828,11 +836,18 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				logrus.Infof("[Agent][run=%d][工具结果] step=%d/%d call_id=%s tool=%s ok=true action_done=%t", runID, i+1, steps, call.ID, call.Function.Name, ctx.ActionPerformed())
 			}
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)})
+			batchOK = batchOK && callErr == nil && encodeErr == nil
 		}
 		if deliveryFailed {
 			continue
 		}
-		if (r.StopAfterGroupAction || deliveryFailures > 0) && ctx.ActionPerformed() {
+		if finishRequested && batchOK && boundaryCallIndex < 0 &&
+			(!r.RequireAction || ctx.ActionPerformed()) && !ctx.hasPendingDeliveryFailures() && runContextError(ctx) == nil {
+			logrus.Infof("[Agent][run=%d][完成] step=%d/%d reason=finish_after_success", runID, i+1, steps)
+			ctx.finishTrace("", nil)
+			return "", nil
+		}
+		if !finishRequested && (r.StopAfterGroupAction || deliveryFailures > 0) && ctx.ActionPerformed() {
 			logrus.Infof("[Agent][run=%d][完成] step=%d/%d reason=group_action_delivered", runID, i+1, steps)
 			ctx.finishTrace(response.Answer, postDeliveryErr)
 			return response.Answer, nil
