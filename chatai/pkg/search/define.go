@@ -17,6 +17,7 @@ type SearchResult struct {
 	URL     string
 	Snippet string
 	Summary string
+	Date    string
 }
 
 type Searcher interface {

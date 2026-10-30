@@ -45,22 +45,25 @@ var glassCSS []byte
 var glassMotion []byte
 
 type Run struct {
-	Summary      string        `json:"summary,omitempty"`
-	UserName     string        `json:"user_name,omitempty"`
-	ID           string        `json:"id"`
-	GroupID      string        `json:"group_id"`
-	UserID       string        `json:"user_id"`
-	Model        string        `json:"model"`
-	Prompt       string        `json:"prompt"`
-	Status       string        `json:"status"`
-	StartedAt    time.Time     `json:"started_at"`
-	DurationMS   int64         `json:"duration_ms"`
-	InputTokens  int64         `json:"input_tokens"`
-	OutputTokens int64         `json:"output_tokens"`
-	Error        string        `json:"error,omitempty"`
-	Truncated    bool          `json:"truncated"`
-	Events       []agent.Event `json:"events,omitempty"`
-	persisted    int
+	MetricsVersion int           `json:"metrics_version"`
+	ModelCalls     int           `json:"model_calls"`
+	ToolSkillCount int           `json:"tool_skill_count"`
+	Summary        string        `json:"summary,omitempty"`
+	UserName       string        `json:"user_name,omitempty"`
+	ID             string        `json:"id"`
+	GroupID        string        `json:"group_id"`
+	UserID         string        `json:"user_id"`
+	Model          string        `json:"model"`
+	Prompt         string        `json:"prompt"`
+	Status         string        `json:"status"`
+	StartedAt      time.Time     `json:"started_at"`
+	DurationMS     int64         `json:"duration_ms"`
+	InputTokens    int64         `json:"input_tokens"`
+	OutputTokens   int64         `json:"output_tokens"`
+	Error          string        `json:"error,omitempty"`
+	Truncated      bool          `json:"truncated"`
+	Events         []agent.Event `json:"events,omitempty"`
+	persisted      int
 }
 
 type Store struct {
@@ -128,6 +131,7 @@ func (s *Store) Observe(e agent.Event) {
 	if r == nil {
 		return
 	}
+	r.countEvent(e)
 	if e.Summary != "" {
 		r.Summary = clip(e.Summary)
 	}
@@ -161,6 +165,22 @@ func (s *Store) Observe(e agent.Event) {
 		select {
 		case listener <- struct{}{}:
 		default:
+		}
+	}
+}
+
+// Count attempts, including pending/failed calls. read_skill already counts as
+// a tool call; only skills loaded by other paths add another resource read.
+func (r *Run) countEvent(e agent.Event) {
+	r.MetricsVersion = 1
+	switch e.Kind {
+	case "model_started":
+		r.ModelCalls++
+	case "tool_started":
+		r.ToolSkillCount++
+	case "skill_loaded":
+		if e.Name != "read_skill" {
+			r.ToolSkillCount++
 		}
 	}
 }

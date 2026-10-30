@@ -245,7 +245,23 @@ func getText(msgs message.Message) string {
 		}
 	}
 
-	return msgs.ExtractPlainText()
+	// Keep every mention in place. TargetUser is only a single routing target
+	// (often the Agent itself), so it cannot represent mentions in the body.
+	var text strings.Builder
+	for _, segment := range msgs {
+		switch segment.Type {
+		case MsgTypeText:
+			text.WriteString(segment.Data["text"])
+		case MsgTypeAt:
+			qq := segment.Data["qq"]
+			if qq == "all" {
+				text.WriteString(" @全体成员 ")
+			} else if id, err := strconv.ParseInt(qq, 10, 64); err == nil && id > 0 {
+				text.WriteString(" @" + qq + " ")
+			}
+		}
+	}
+	return text.String()
 }
 func getFileName(msgs message.Message) string {
 	for _, m := range msgs {

@@ -54,6 +54,9 @@ func NewPersistent(db *gorm.DB, limit, days int) (*Store, error) {
 	if err := s.cleanup(time.Now()); err != nil {
 		return nil, err
 	}
+	if err := s.backfillMetrics(); err != nil {
+		return nil, err
+	}
 	// A previous process cannot still be executing these runs. Preserve its last
 	// durable observation instead of displaying an endlessly running operation.
 	var unfinished []monitorRun
@@ -77,6 +80,43 @@ func NewPersistent(db *gorm.DB, limit, days int) (*Store, error) {
 		}
 	}
 	return s, nil
+}
+
+// Upgrade old summaries once, without loading event bodies on every list request.
+func (s *Store) backfillMetrics() error {
+	var rows []monitorRun
+	if err := s.db.Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		var r Run
+		if err := json.Unmarshal(row.Payload, &r); err != nil {
+			return err
+		}
+		if r.MetricsVersion >= 1 {
+			continue
+		}
+		var events []monitorEvent
+		if err := s.db.Where("run_id = ?", row.ID).Order("sequence ASC").Find(&events).Error; err != nil {
+			return err
+		}
+		r.ModelCalls, r.ToolSkillCount, r.MetricsVersion = 0, 0, 1
+		for _, item := range events {
+			var e agent.Event
+			if err := json.Unmarshal(item.Payload, &e); err != nil {
+				return err
+			}
+			r.countEvent(e)
+		}
+		payload, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		if err := s.db.Model(&monitorRun{}).Where("id = ?", row.ID).Update("payload", payload).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Called under mu. Append new events and update summary atomically; failed

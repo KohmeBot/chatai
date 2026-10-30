@@ -35,3 +35,14 @@ func TestRepeatMessageFallsBackToFileWhenImageHasNoURL(t *testing.T) {
 func TestGetURLRecognizesOutboundHTTPImageFile(t *testing.T) {
 	require.Equal(t, "https://example.com/image.jpg", getUrl(message.Message{message.Image("https://example.com/image.jpg")}))
 }
+
+func TestGetTextPreservesAllMentionsInOrder(t *testing.T) {
+	segments := message.Message{message.At(100), message.At(200), message.Text("你觉得怎么样")}
+	require.Equal(t, " @100  @200 你觉得怎么样", getText(segments))
+	formatted := formatMessage(GroupMessage{MsgType: MsgTypeAt, TargetUser: User{UserId: 100, Nickname: selfNickname}, Content: getText(segments)})
+	require.Contains(t, formatted, "@200")
+	require.Equal(t, "前 @200 中 @300 后", getText(message.Message{message.Text("前"), message.At(200), message.Text("中"), message.At(300), message.Text("后")}))
+	require.Equal(t, " @全体成员 ", getText(message.Message{message.AtAll()}))
+	require.Equal(t, "原文 & 内容", getText(message.Message{message.Text("原文 & 内容")}))
+	require.Contains(t, getText(message.Message{message.Image("pic"), message.At(200)}), "@200")
+}

@@ -35,6 +35,7 @@ func (a *API) DoRequest(ctx context.Context, req search.Request) (search.Respons
 			URL:     v.Url,
 			Snippet: v.Snippet,
 			Summary: v.Summary,
+			Date:    v.Date.String(),
 		})
 	}
 

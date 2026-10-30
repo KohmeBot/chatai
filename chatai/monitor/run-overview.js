@@ -1,3 +1,12 @@
+// Lists contain summaries for all retained runs, including persisted history.
+function compareRuns(sort) {
+  const metric = run => sort === 'tokens'
+    ? (Number(run.input_tokens) || 0) + (Number(run.output_tokens) || 0)
+    : ['model_calls', 'tool_skill_count'].includes(sort) ? Number(run[sort]) || 0 : 0;
+  return (a, b) => metric(b) - metric(a)
+    || Date.parse(b.started_at) - Date.parse(a.started_at)
+    || String(b.id).localeCompare(String(a.id), 'en', {numeric: true});
+}
 'use strict';
 
 function overviewJSON(text) {

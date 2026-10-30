@@ -144,3 +144,46 @@ func TestPersistentConcurrentActiveRunsAndRetry(t *testing.T) {
 		require.Equal(t, expected, detail[0].InputTokens)
 	}
 }
+
+func TestRunMetricsPersistAndBackfill(t *testing.T) {
+	db := storageDB(t, filepath.Join(t.TempDir(), "metrics.db"))
+	s, err := NewPersistent(db, 1, 7)
+	require.NoError(t, err)
+	kinds := []agent.Event{
+		{Kind: "run_started"},
+		{Kind: "model_started"}, {Kind: "model_finished", InputTokens: 3, OutputTokens: 4},
+		{Kind: "model_started"}, {Kind: "model_finished", Error: "failed"},
+		{Kind: "tool_started", Name: "read_skill"}, {Kind: "tool_finished", Name: "read_skill"},
+		{Kind: "skill_loaded", Name: "read_skill"},
+		{Kind: "tool_started", Name: "search_tools"},
+		{Kind: "skill_loaded", Name: "report"},
+		{Kind: "tool_started", Name: "pending"},
+		{Kind: "run_finished"},
+	}
+	for _, e := range kinds {
+		e.RunID, e.Time = 1, time.Now()
+		s.Observe(e)
+	}
+	id := s.runs[1].ID
+	check := func(store *Store) {
+		rows, err := store.readSnapshot("")
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Equal(t, 2, rows[0].ModelCalls)
+		require.Equal(t, 4, rows[0].ToolSkillCount)
+		require.EqualValues(t, 7, rows[0].InputTokens+rows[0].OutputTokens)
+		require.Empty(t, rows[0].Events)
+	}
+	check(s)
+	restarted, err := NewPersistent(db, 1, 7)
+	require.NoError(t, err)
+	check(restarted)
+	// Simulate a summary saved before metrics existed.
+	require.NoError(t, db.Model(&monitorRun{}).Where("id = ?", id).Update("payload",
+		[]byte(fmt.Sprintf("{\"id\":%q,\"started_at\":%q,\"status\":\"success\",\"input_tokens\":3,\"output_tokens\":4}", id, time.Now().Format(time.RFC3339Nano)))).Error)
+	upgraded, err := NewPersistent(db, 1, 7)
+	require.NoError(t, err)
+	check(upgraded)
+	require.NoError(t, upgraded.backfillMetrics())
+	check(upgraded)
+}

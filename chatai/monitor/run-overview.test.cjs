@@ -128,3 +128,18 @@ test('keeps script output on failure and handles missing/truncated payloads', ()
   assert.equal(result.tools[0].error, 1);
   assert.deepEqual(summarize({}).outputs, []);
 });
+
+test('sorts summaries by all metrics with newest first on ties', () => {
+  const runs = [
+    {id: '1', started_at: at(0), model_calls: 9, tool_skill_count: 1, input_tokens: 1, output_tokens: 2},
+    {id: '2', started_at: at(1), model_calls: 1, tool_skill_count: 8, input_tokens: 1, output_tokens: 4},
+    {id: '3', started_at: at(2), model_calls: 9, tool_skill_count: 2, input_tokens: 20, output_tokens: 1},
+  ];
+  const ids = sort => runs.slice().sort(context.compareRuns(sort)).map(r => r.id);
+  assert.deepEqual(ids('latest'), ['3', '2', '1']);
+  assert.deepEqual(ids('model_calls'), ['3', '1', '2']);
+  assert.deepEqual(ids('tool_skill_count'), ['2', '3', '1']);
+  assert.deepEqual(ids('tokens'), ['3', '2', '1']);
+  assert.deepEqual(ids('unknown'), ['3', '2', '1']);
+  assert.ok(context.compareRuns('model_calls')({id: '1', started_at: at(0)}, runs[1]) > 0);
+});
