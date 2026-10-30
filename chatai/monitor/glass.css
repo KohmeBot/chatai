@@ -150,10 +150,11 @@ summary { color:var(--muted); }
 /* Refined material and motion. Original implementation inspired by
    rdev/liquid-glass-react and motiondivision/motion; no runtime dependencies. */
 :root,[data-theme="light"] {
-  color-scheme:light; --bg:#f2f3f7; --panel:rgba(255,255,255,.62); --surface:rgba(255,255,255,.65);
-  --line:rgba(43,50,69,.10); --text:#1d2330; --muted:#606b7d; --accent:#0066d6;
-  --accent-fill:#007aff; --on-accent:#fff; --hover:rgba(255,255,255,.85); --selected:rgba(0,112,245,.09);
-  --rim:rgba(255,255,255,.95); --shadow:rgba(31,44,73,.07); --orb-a:#d7e7fa; --orb-b:#e8dff3; --orb-c:#dcece9;
+  color-scheme:light; --bg:#e7edf5; --panel:rgba(255,255,255,.42); --surface:rgba(255,255,255,.48);
+  --line:rgba(48,76,115,.18); --text:#1d2330; --muted:#526178; --accent:#0066d6;
+  --accent-fill:#007aff; --on-accent:#fff; --hover:rgba(255,255,255,.72); --selected:rgba(0,112,245,.13);
+  --rim:rgba(255,255,255,.95); --shadow:rgba(31,58,99,.12); --orb-a:#adcdf2; --orb-b:#d1bfe7; --orb-c:#addbd1;
+  --glass-edge:rgba(65,103,152,.16); --glint-halo:rgba(72,136,220,.16); --lens-edge:rgba(65,103,152,.28);
   --danger:#bd3046; --success:#18744e; --code:rgba(236,240,247,.64); --glint:rgba(255,255,255,.68);
   --ease:cubic-bezier(.16,1,.3,1); --spring:cubic-bezier(.22,1.08,.36,1);
 }
@@ -163,13 +164,14 @@ summary { color:var(--muted); }
   --accent-fill:#0a70e8; --on-accent:#fff; --hover:rgba(99,111,134,.28); --selected:rgba(94,164,255,.14);
   --rim:rgba(255,255,255,.24); --shadow:rgba(0,0,0,.22); --orb-a:#1d3049; --orb-b:#2e263f; --orb-c:#183534;
   --danger:#ff91a0; --success:#77dcad; --code:rgba(13,17,25,.48); --glint:rgba(180,209,255,.12);
+  --glass-edge:rgba(255,255,255,.04); --glint-halo:transparent; --lens-edge:var(--rim);
 }
 body { font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","Microsoft YaHei",sans-serif; -webkit-font-smoothing:antialiased; transition:background-color .4s,color .3s; }
 body::before { background:radial-gradient(ellipse at 8% 5%,var(--orb-a),transparent 52%),radial-gradient(ellipse at 96% 40%,var(--orb-b),transparent 45%),radial-gradient(ellipse at 48% 105%,var(--orb-c),transparent 52%); }
 ::selection { background:var(--selected); color:var(--accent); }
 header,#nav,.panel,.stat,.resource-card,.memory-dialog,.group-options {
   background:linear-gradient(135deg,rgba(255,255,255,.12),transparent 45%,rgba(255,255,255,.025)),var(--panel);
-  box-shadow:inset 0 1px 0 var(--rim),inset 0 -1px 0 rgba(255,255,255,.04),0 2px 4px var(--shadow),0 16px 44px var(--shadow);
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 -1px 0 var(--glass-edge),0 2px 4px var(--shadow),0 16px 44px var(--shadow);
   backdrop-filter:blur(28px) saturate(145%); -webkit-backdrop-filter:blur(28px) saturate(145%);
 }
 header { height:80px; }
@@ -191,8 +193,6 @@ h2 { letter-spacing:-.8px; font-weight:650; font-size:28px; }
 #nav.motion-ready .nav-active { background:transparent; box-shadow:none; }
 .nav-icon { width:17px; height:17px; flex:0 0 17px; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; transition:transform .4s var(--spring); }
 #nav button:hover .nav-icon { transform:translateY(-1px); }
-.nav-lens { position:absolute; top:0; left:0; z-index:0; pointer-events:none; border-radius:20px; opacity:0; background:linear-gradient(145deg,var(--surface),var(--selected)); border:1px solid var(--rim); box-shadow:inset 0 -1px 2px var(--rim),0 3px 10px var(--shadow); }
-.motion-ready .nav-lens { opacity:1; transition:transform .5s var(--spring),width .45s var(--spring),height .3s; }
 .stat { position:relative; overflow:hidden; transition:translate .4s var(--spring),box-shadow .4s; }
 .stat small { display:flex; align-items:center; gap:8px; font-size:12px; }
 .stat small::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--accent); opacity:.8; }
@@ -202,8 +202,6 @@ h2 { letter-spacing:-.8px; font-weight:650; font-size:28px; }
 .stat strong { letter-spacing:-1.2px; font-size:34px; font-weight:600; margin-top:9px; }
 .resource-grid { gap:20px; }
 .resource-card { position:relative; transition:border-color .3s,box-shadow .35s,translate .4s var(--spring); }
-.stat::after,.resource-card::after,#nav::after,.login::after { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; opacity:0; background:radial-gradient(320px circle at var(--light-x,50%) var(--light-y,0%),var(--glint),transparent 70%); transition:opacity .45s; z-index:0; }
-.stat.is-lit::after,.resource-card.is-lit::after,#nav.is-lit::after,.login.is-lit::after { opacity:.55; }
 .resource-card>*,.stat>*,.login>* { position:relative; z-index:1; }
 button,input,select,textarea { transition:border-color .25s,background-color .25s,box-shadow .25s,scale .35s var(--spring); }
 button { min-height:40px; -webkit-tap-highlight-color:transparent; }
@@ -435,3 +433,43 @@ body:has(dialog[open]) { overflow:hidden; }
 }
 @supports not (backdrop-filter:blur(1px)) { .sort-options,.run-dialog,.memory-dialog,.run-tabs { background:var(--bg); } }
 @media(prefers-reduced-transparency:reduce) { .sort-options,.run-dialog,.memory-dialog,.run-tabs { background:var(--bg); backdrop-filter:none; -webkit-backdrop-filter:none; } }
+
+/* Shared segmented control. All variants use the same moving glass lens. */
+.glass-segments { position:relative; isolation:isolate; --segment-radius:20px; }
+.status-segments.glass-segments { --segment-radius:14px; }
+.run-tabs.glass-segments { position:sticky; --segment-radius:16px; }
+.glass-segments>button { position:relative; z-index:1; }
+.glass-lens { position:absolute; top:0; left:0; z-index:0; pointer-events:none; border-radius:var(--segment-radius); opacity:0; background:linear-gradient(145deg,var(--surface),var(--selected)); border:1px solid var(--lens-edge); box-shadow:inset 0 -1px 2px var(--rim),0 3px 10px var(--shadow); }
+.glass-segments.motion-ready>.glass-lens { opacity:1; transition:transform .5s var(--spring),width .45s var(--spring),height .3s var(--ease); }
+#nav.glass-segments.motion-ready>button,.status-segments.glass-segments.motion-ready>button,.run-tabs.glass-segments.motion-ready>button { background:transparent; box-shadow:none; border-color:transparent; }
+
+/* Shared interactive surface, including nested cards inside the top-layer dialog. */
+:is(.stat,.resource-card,.glass-segments,.login,.run-metrics>div,.overview-result,.overview-output,.schema-field,.execution-record,.memory-item,.detail-fields) { position:relative; transition:translate .4s var(--spring),border-color .3s,box-shadow .4s; }
+.run-tabs.glass-segments { position:sticky; }
+:is(.stat,.resource-card,.glass-segments,.login,.run-metrics>div,.overview-result,.overview-output,.schema-field,.execution-record,.memory-item,.detail-fields)::after { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; opacity:0; background:radial-gradient(320px circle at var(--light-x,50%) var(--light-y,0%),var(--glint),transparent 70%),radial-gradient(320px circle at var(--light-x,50%) var(--light-y,0%),transparent 15%,var(--glint-halo) 42%,transparent 70%); transition:opacity .45s var(--ease); }
+:is(.stat,.resource-card,.glass-segments,.login,.run-metrics>div,.overview-result,.overview-output,.schema-field,.execution-record,.memory-item,.detail-fields).is-lit::after { opacity:.55; }
+@media(hover:hover) and (pointer:fine) {
+ :is(.run-metrics>div,.overview-result,.overview-output,.schema-field,.execution-record,.memory-item,.detail-fields):hover { translate:0 -3px; border-color:var(--rim); box-shadow:inset 0 1px 0 var(--rim),0 18px 40px var(--shadow); }
+}
+
+/* Modal shell: header never participates in body scrolling. */
+dialog.glass-dialog { padding:0; overflow:hidden; }
+dialog.glass-dialog[open] { display:flex; flex-direction:column; }
+.glass-dialog>.dialog-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; flex:none; margin:0; padding:22px 28px; border-bottom:1px solid var(--line); background:var(--surface); }
+.glass-dialog .dialog-heading h2 { margin:0; min-width:0; font-size:21px; line-height:1.4; font-weight:650; letter-spacing:-.5px; overflow-wrap:anywhere; }
+.glass-dialog .dialog-heading .identity { flex-wrap:wrap; }
+.glass-dialog .dialog-heading .dialog-close { flex:0 0 36px; width:36px; height:36px; min-height:36px; padding:0; border-radius:50%; font-size:23px; font-weight:300; line-height:1; }
+.glass-dialog>.dialog-body { flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; padding:24px 28px 28px; margin:0; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.glass-dialog>#detail.dialog-body { padding:0; }
+.glass-dialog .dialog-body h3,.glass-dialog .section-heading { margin:24px 0 12px; font-size:15px; line-height:1.5; font-weight:600; letter-spacing:0; }
+.glass-dialog .dialog-body>h3:first-child { margin-top:0; }
+.glass-dialog .dialog-body p { line-height:1.8; }
+.glass-dialog .memory-item { margin:12px 0; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--surface); box-shadow:inset 0 1px 0 var(--rim); }
+@media(max-width:600px) {
+ .glass-dialog>.dialog-heading { padding:18px; gap:12px; }
+ .glass-dialog .dialog-heading h2 { font-size:18px; }
+ .glass-dialog>.dialog-body { padding:18px; }
+}
+@media(prefers-reduced-motion:reduce) {
+ :is(.run-metrics>div,.overview-result,.overview-output,.schema-field,.execution-record,.memory-item,.detail-fields):hover { translate:none; }
+}

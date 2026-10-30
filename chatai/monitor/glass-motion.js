@@ -9,8 +9,87 @@ window.ConsoleMotion = (() => {
   const counts = new Map();
   const dialogs = new WeakSet();
   let graphNodes = new Set();
-  let previousRuns = new Set(), detailID = '', navFrame = 0;
+  let previousRuns = new Set(), detailID = '';
   const ease = 'cubic-bezier(.16, 1, .3, 1)';
+  const glowSurfaces = '.stat, .resource-card, .glass-segments, .login, .run-metrics>div, .overview-result, .overview-output, .schema-field, .execution-record, .memory-item, .detail-fields';
+  const segmentInstances = new Map();
+
+  // One lens component for navigation, filters and dynamically mounted tabs.
+  // Selection stays owned by the caller; this component only presents it.
+  function mountSegments(root) {
+    if (!root || segmentInstances.has(root)) return;
+    root.classList.add('glass-segments');
+    const lens = document.createElement('span');
+    lens.className = 'glass-lens';
+    lens.setAttribute('aria-hidden', 'true');
+    root.append(lens);
+    let frame = 0;
+    const position = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const buttons = [...root.querySelectorAll(':scope > button')];
+        const selected = buttons.find(b => b.matches('.nav-active,[aria-selected="true"],[aria-pressed="true"]'));
+        if (!selected || !root.offsetWidth) return;
+        lens.style.width = `${selected.offsetWidth}px`;
+        lens.style.height = `${selected.offsetHeight}px`;
+        lens.style.transform = `translate(${selected.offsetLeft}px, ${selected.offsetTop}px)`;
+        if (root.id === 'nav') for (const button of buttons) {
+          if (button === selected) button.setAttribute('aria-current', 'page');
+          else button.removeAttribute('aria-current');
+        }
+        root.classList.add('motion-ready');
+      });
+    };
+    const resize = new ResizeObserver(position);
+    resize.observe(root);
+    root.querySelectorAll('button').forEach(button => resize.observe(button));
+    const selection = new MutationObserver(records => {
+      if (records.some(record => record.target.tagName === 'BUTTON')) position();
+    });
+    selection.observe(root, { subtree: true, attributes: true, attributeFilter: ['class', 'aria-selected', 'aria-pressed'] });
+    const keyboard = event => {
+      if (root.getAttribute('role') === 'tablist') return; // Tab owner supplies roving focus.
+      const buttons = [...root.querySelectorAll(':scope > button:not(:disabled)')];
+      const index = buttons.indexOf(event.target);
+      if (index < 0) return;
+      const next = event.key === 'ArrowRight' ? (index + 1) % buttons.length : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : -1;
+      if (next < 0) return;
+      event.preventDefault(); buttons[next].focus(); buttons[next].click();
+    };
+    root.addEventListener('keydown', keyboard);
+    document.fonts?.ready.then(position);
+    position();
+    segmentInstances.set(root, () => {
+      cancelAnimationFrame(frame); resize.disconnect(); selection.disconnect();
+      root.removeEventListener('keydown', keyboard); segmentInstances.delete(root);
+    });
+  }
+
+  // Every modal has one fixed heading and exactly one scrollable content area.
+  function prepareDialog(dialog) {
+    if (dialog.classList.contains('glass-dialog')) return;
+    const heading = dialog.querySelector('h2');
+    if (!heading) return;
+    let head = heading.closest('.row, .run-dialog-toolbar');
+    if (!head || head === dialog) {
+      head = document.createElement('div'); head.append(heading); dialog.prepend(head);
+    }
+    head.classList.add('dialog-heading');
+    let close = head.querySelector('button');
+    if (!close) { close = document.createElement('button'); close.type = 'button'; head.append(close); }
+    close.classList.add('dialog-close');
+    close.textContent = '×'; close.setAttribute('aria-label', '关闭弹窗'); close.title = '关闭';
+    // Route the header button through the same cancellation guard as Escape.
+    close.onclick = () => {
+      if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) closeDialog(dialog);
+    };
+    const content = [...dialog.children].filter(node => node !== head);
+    let body;
+    if (content.length === 1 && content[0].matches('form, .resource-body, #detail')) body = content[0];
+    else { body = document.createElement('div'); body.append(...content); dialog.append(body); }
+    body.classList.add('dialog-body');
+    dialog.classList.add('glass-dialog');
+  }
 
   function animate(node, frames, options = {}) {
     if (!node || reduced.matches || !node.animate) return null;
@@ -98,6 +177,7 @@ window.ConsoleMotion = (() => {
       closeDialog(dialog);
     });
     dialogs.add(dialog);
+    prepareDialog(dialog);
     dialog.showModal();
   }
 
@@ -124,7 +204,7 @@ window.ConsoleMotion = (() => {
       group.append(button);
     }
     const syncStatus = () => {
-      for (const button of group.children) button.setAttribute('aria-pressed', String(button.dataset.status === (status.value || 'all')));
+      for (const button of group.querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.status === (status.value || 'all')));
     };
     status.addEventListener('change', syncStatus);
     syncStatus();
@@ -204,29 +284,15 @@ window.ConsoleMotion = (() => {
       label.textContent = labels[button.dataset.view];
       button.replaceChildren(icon, label);
     }
-    const lens = document.createElement('span');
-    lens.className = 'nav-lens';
-    lens.setAttribute('aria-hidden', 'true');
-    nav.prepend(lens);
-    function positionLens() {
-      cancelAnimationFrame(navFrame);
-      navFrame = requestAnimationFrame(() => {
-        const selected = nav.querySelector('.nav-active');
-        if (!selected || !nav.offsetWidth) return;
-        lens.style.width = `${selected.offsetWidth}px`;
-        lens.style.height = `${selected.offsetHeight}px`;
-        lens.style.transform = `translate(${selected.offsetLeft}px, ${selected.offsetTop}px)`;
-        nav.classList.add('motion-ready');
-        nav.querySelectorAll('button').forEach(button => {
-          if (button === selected) button.setAttribute('aria-current', 'page');
-          else button.removeAttribute('aria-current');
-        });
-      });
-    }
-    new ResizeObserver(positionLens).observe(nav);
-    nav.addEventListener('click', positionLens);
-    document.fonts?.ready.then(positionLens);
-    positionLens();
+    mountSegments(nav);
+    mountSegments(document.querySelector('.status-segments'));
+    // Dispose observers when polling replaces an inspector or a modal closes.
+    const discover = () => {
+      document.querySelectorAll('.run-tabs').forEach(mountSegments);
+      for (const [root, dispose] of segmentInstances) if (!root.isConnected) dispose();
+    };
+    new MutationObserver(discover).observe(document.body, { childList: true, subtree: true });
+    discover();
 
     // A single delegated handler also covers newly rendered cards and dialogs.
     let lightTarget = null, lightFrame = 0, pointerX = 0, pointerY = 0;
@@ -236,7 +302,7 @@ window.ConsoleMotion = (() => {
     }
     document.addEventListener('pointermove', event => {
       if (!fine.matches || reduced.matches || event.pointerType === 'touch') return;
-      const target = event.target.closest('.stat, .resource-card, #nav, .login');
+      const target = event.target.closest(glowSurfaces);
       if (target !== lightTarget) { clearLight(); lightTarget = target; }
       if (!target) return;
       pointerX = event.clientX; pointerY = event.clientY;
@@ -272,5 +338,5 @@ window.ConsoleMotion = (() => {
     }, true);
     reveal(document.getElementById('login'), 50, 18);
   }
-  return { init, view, catalog, runs, detail, stat, reset, busy, openDialog, closeDialog };
+  return { mountSegments, prepareDialog, init, view, catalog, runs, detail, stat, reset, busy, openDialog, closeDialog };
 })();
