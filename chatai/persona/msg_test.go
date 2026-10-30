@@ -1,11 +1,43 @@
 package persona
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 )
+
+func TestIncomingSegmentsRestoresPreprocessedMention(t *testing.T) {
+	for _, native := range []string{
+		`[{"type":"at","data":{"qq":"100"}}]`,
+		`"[CQ:at,qq=100]"`,
+		`[{"type":"at","data":{"qq":"100"}},{"type":"text","data":{"text":" "}}]`,
+	} {
+		t.Run(native, func(t *testing.T) {
+			event := &zero.Event{SelfID: 100, IsToMe: true, NativeMessage: json.RawMessage(native)}
+			segments := incomingSegments(event)
+			require.NotEmpty(t, segments, "a bare @ must not hit newMessage's empty-message guard")
+			require.Equal(t, MsgTypeAt, getMsgType(segments))
+			require.Contains(t, getText(segments), "@100")
+			require.Empty(t, event.Message, "do not mutate the event shared with other plugins")
+		})
+	}
+}
+
+func TestIncomingSegmentsPreservesMixedContentAndFallsBack(t *testing.T) {
+	want := message.Message{message.At(100), message.At(200), message.Text("看看"), message.Image("pic")}
+	native, err := json.Marshal(want)
+	require.NoError(t, err)
+	event := &zero.Event{NativeMessage: native, Message: want[1:]}
+	require.Equal(t, want, incomingSegments(event))
+	for _, native := range []string{"", "null", "[]", "invalid"} {
+		event.NativeMessage = json.RawMessage(native)
+		require.Equal(t, event.Message, incomingSegments(event))
+	}
+	require.Empty(t, incomingSegments(&zero.Event{}), "real empty events remain empty")
+}
 
 func TestRepeatMessageUsesImageURLInsteadOfInboundCacheFile(t *testing.T) {
 	incoming := message.Message{

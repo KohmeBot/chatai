@@ -132,7 +132,7 @@ func (g GroupMessage) IsEmpty() bool {
 }
 
 func newMessage(ctx *zero.Ctx) GroupMessage {
-	segments := ctx.Event.Message
+	segments := incomingSegments(ctx.Event)
 	quoted, quotedRaw := getQuotedMessage(ctx, segments)
 
 	msgType := getMsgType(segments)
@@ -185,6 +185,18 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 		}
 	}
 	return msg
+}
+
+// ZeroBot removes the bot's @ segment unless KeepAtMeMessage is enabled.
+// Read the original OneBot payload without changing the shared event: a lone
+// mention is still a complete message and must reach the explicit-trigger path.
+func incomingSegments(event *zero.Event) message.Message {
+	if json.Valid(event.NativeMessage) {
+		if segments := message.ParseMessage(event.NativeMessage); len(segments) > 0 {
+			return segments
+		}
+	}
+	return event.Message
 }
 
 func getMsgType(msgs message.Message) string {

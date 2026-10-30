@@ -79,6 +79,7 @@ function renderRunDAG(run, previous = {}) {
   title.append(el('h3','','Agent 规划 · DAG'),el('p','muted','真实模型决策 → 计划调用 → 后续决策。分支表示本轮选定的工具，工具仍按顺序执行。'));
   const controls=el('div','dag-controls');
   const minus=el('button','','−'),plus=el('button','','＋'),fit=el('button','','适应');
+  ConsoleControls.iconButton(minus,'minus','缩小');ConsoleControls.iconButton(plus,'plus','放大');ConsoleControls.iconButton(fit,'fit','适应视图');
   minus.dataset.focusKey='dag-minus';plus.dataset.focusKey='dag-plus';fit.dataset.focusKey='dag-fit';
   minus.setAttribute('aria-label','缩小规划图');plus.setAttribute('aria-label','放大规划图');
   controls.append(minus,plus,fit);heading.append(title,controls);root.append(heading);

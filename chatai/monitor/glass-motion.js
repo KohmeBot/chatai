@@ -12,58 +12,7 @@ window.ConsoleMotion = (() => {
   let previousRuns = new Set(), detailID = '';
   const ease = 'cubic-bezier(.16, 1, .3, 1)';
   const glowSurfaces = '.stat, .resource-card, .glass-segments, .login, .run-metrics>div, .overview-result, .overview-output, .schema-field, .execution-record, .memory-item, .detail-fields';
-  const segmentInstances = new Map();
-
-  // One lens component for navigation, filters and dynamically mounted tabs.
-  // Selection stays owned by the caller; this component only presents it.
-  function mountSegments(root) {
-    if (!root || segmentInstances.has(root)) return;
-    root.classList.add('glass-segments');
-    const lens = document.createElement('span');
-    lens.className = 'glass-lens';
-    lens.setAttribute('aria-hidden', 'true');
-    root.append(lens);
-    let frame = 0;
-    const position = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const buttons = [...root.querySelectorAll(':scope > button')];
-        const selected = buttons.find(b => b.matches('.nav-active,[aria-selected="true"],[aria-pressed="true"]'));
-        if (!selected || !root.offsetWidth) return;
-        lens.style.width = `${selected.offsetWidth}px`;
-        lens.style.height = `${selected.offsetHeight}px`;
-        lens.style.transform = `translate(${selected.offsetLeft}px, ${selected.offsetTop}px)`;
-        if (root.id === 'nav') for (const button of buttons) {
-          if (button === selected) button.setAttribute('aria-current', 'page');
-          else button.removeAttribute('aria-current');
-        }
-        root.classList.add('motion-ready');
-      });
-    };
-    const resize = new ResizeObserver(position);
-    resize.observe(root);
-    root.querySelectorAll('button').forEach(button => resize.observe(button));
-    const selection = new MutationObserver(records => {
-      if (records.some(record => record.target.tagName === 'BUTTON')) position();
-    });
-    selection.observe(root, { subtree: true, attributes: true, attributeFilter: ['class', 'aria-selected', 'aria-pressed'] });
-    const keyboard = event => {
-      if (root.getAttribute('role') === 'tablist') return; // Tab owner supplies roving focus.
-      const buttons = [...root.querySelectorAll(':scope > button:not(:disabled)')];
-      const index = buttons.indexOf(event.target);
-      if (index < 0) return;
-      const next = event.key === 'ArrowRight' ? (index + 1) % buttons.length : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : -1;
-      if (next < 0) return;
-      event.preventDefault(); buttons[next].focus(); buttons[next].click();
-    };
-    root.addEventListener('keydown', keyboard);
-    document.fonts?.ready.then(position);
-    position();
-    segmentInstances.set(root, () => {
-      cancelAnimationFrame(frame); resize.disconnect(); selection.disconnect();
-      root.removeEventListener('keydown', keyboard); segmentInstances.delete(root);
-    });
-  }
+  const mountSegments = root => ConsoleControls.mountSegments(root);
 
   // Every modal has one fixed heading and exactly one scrollable content area.
   function prepareDialog(dialog) {
@@ -78,7 +27,7 @@ window.ConsoleMotion = (() => {
     let close = head.querySelector('button');
     if (!close) { close = document.createElement('button'); close.type = 'button'; head.append(close); }
     close.classList.add('dialog-close');
-    close.textContent = '×'; close.setAttribute('aria-label', '关闭弹窗'); close.title = '关闭';
+    ConsoleControls.iconButton(close, 'close', '关闭弹窗');
     // Route the header button through the same cancellation guard as Escape.
     close.onclick = () => {
       if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) closeDialog(dialog);
@@ -104,7 +53,8 @@ window.ConsoleMotion = (() => {
   function reveal(node, delay = 0, distance = 12) {
     entrances.get(node)?.cancel();
     const animation = animate(node, [
-      { opacity: 0, transform: `translateY(${distance}px) scale(.988)` },
+      { opacity: 0, transform: `translateY(${distance}px) scale(.975)` },
+      { opacity: 1, transform: 'translateY(-1px) scale(1.003)', offset: .76 },
       { opacity: 1, transform: 'translateY(0) scale(1)' }
     ], { delay, fill: 'backwards', duration: 480 });
     if (animation) entrances.set(node, animation);
@@ -179,6 +129,7 @@ window.ConsoleMotion = (() => {
     dialogs.add(dialog);
     prepareDialog(dialog);
     dialog.showModal();
+    reveal(dialog, 0, 22);
   }
 
   // Keep the existing selects as the single source of truth for filtering.
@@ -193,10 +144,7 @@ window.ConsoleMotion = (() => {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.status = option.value || 'all';
-      const dot = document.createElement('span');
-      dot.className = 'status-dot';
-      dot.setAttribute('aria-hidden', 'true');
-      button.append(dot, option.value ? option.text : '全部');
+      ConsoleControls.iconButton(button, option.value || 'all', option.value ? option.text : '全部状态');
       button.onclick = () => {
         status.value = option.value;
         status.dispatchEvent(new Event('change', { bubbles: true }));
@@ -214,12 +162,11 @@ window.ConsoleMotion = (() => {
     const picker = document.createElement('details');
     picker.className = 'sort-picker';
     const trigger = document.createElement('summary');
-    const label = document.createElement('span');
     const icon = document.createElement('span');
-    icon.textContent = '↓';
+    icon.append(ConsoleControls.icon('sort'));
     icon.className = 'sort-icon';
     icon.setAttribute('aria-hidden', 'true');
-    trigger.append(icon, label);
+    trigger.append(icon); trigger.classList.add('icon-button');
     const panel = document.createElement('div');
     panel.className = 'sort-options';
     panel.setAttribute('role', 'group');
@@ -243,7 +190,7 @@ window.ConsoleMotion = (() => {
       panel.append(button);
     }
     const syncSort = () => {
-      label.textContent = names[sort.selectedIndex];
+      trigger.title = `排序：${sort.selectedOptions[0].text}`;
       trigger.setAttribute('aria-label', `排序：${sort.selectedOptions[0].text}`);
       for (const button of panel.children) button.setAttribute('aria-pressed', String(button.dataset.value === sort.value));
     };
@@ -262,34 +209,22 @@ window.ConsoleMotion = (() => {
   function init() {
     initFilters();
     const nav = document.getElementById('nav');
-    const icons = {
-      runs: ['M4 5h16v14H4z', 'M8 9h8M8 13h5'],
-      skills: ['m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z'],
-      tools: ['m8 7-5 5 5 5m8-10 5 5-5 5m-3-14-2 18'],
-      memory: ['M9 4H7a3 3 0 0 0-3 3v2m11-5h2a3 3 0 0 1 3 3v2M4 15v2a3 3 0 0 0 3 3h2m6 0h2a3 3 0 0 0 3-3v-2', 'M8 9h8M8 13h8M8 17h4'],
-      schedules: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18', 'M12 7v5l3 2']
-    };
     const labels = { runs: '运行日志', skills: 'Skills', tools: 'Tools', memory: '记忆中心', schedules: '定时任务' };
     for (const button of nav.querySelectorAll('button')) {
-      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      icon.setAttribute('viewBox', '0 0 24 24');
-      icon.setAttribute('class', 'nav-icon');
-      icon.setAttribute('aria-hidden', 'true');
-      for (const data of icons[button.dataset.view]) {
-        const path = document.createElementNS(icon.namespaceURI, 'path');
-        path.setAttribute('d', data);
-        icon.append(path);
-      }
-      const label = document.createElement('span');
-      label.textContent = labels[button.dataset.view];
-      button.replaceChildren(icon, label);
+      ConsoleControls.iconButton(button, button.dataset.view, labels[button.dataset.view]);
     }
+    for (const [id, icon, label] of [
+      ['refresh', 'refresh', '刷新'], ['catalog-refresh', 'refresh', '刷新数据'],
+      ['logout', 'logout', '退出'], ['previous', 'left', '上一页'], ['next', 'right', '下一页'],
+      ['close-run', 'close', '关闭对话详情']
+    ]) ConsoleControls.iconButton(document.getElementById(id), icon, label);
+    ConsoleControls.iconButton(document.querySelector('#login-form button'), 'right', '连接并查看');
     mountSegments(nav);
     mountSegments(document.querySelector('.status-segments'));
     // Dispose observers when polling replaces an inspector or a modal closes.
     const discover = () => {
       document.querySelectorAll('.run-tabs').forEach(mountSegments);
-      for (const [root, dispose] of segmentInstances) if (!root.isConnected) dispose();
+      ConsoleControls.prune();
     };
     new MutationObserver(discover).observe(document.body, { childList: true, subtree: true });
     discover();
@@ -338,5 +273,5 @@ window.ConsoleMotion = (() => {
     }, true);
     reveal(document.getElementById('login'), 50, 18);
   }
-  return { mountSegments, prepareDialog, init, view, catalog, runs, detail, stat, reset, busy, openDialog, closeDialog };
+  return { reveal, mountSegments, prepareDialog, init, view, catalog, runs, detail, stat, reset, busy, openDialog, closeDialog };
 })();

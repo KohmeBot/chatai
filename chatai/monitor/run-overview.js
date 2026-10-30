@@ -148,12 +148,13 @@ function renderRunInspector(run, opened, previous, builders) {
   };
   for (const [key, label] of entries) {
     const button = el('button', '', label), panel = el('section', 'run-tab-panel');
+    ConsoleControls.iconButton(button, key, label);
     button.type = 'button'; button.dataset.view = panel.dataset.view = key;
     button.dataset.focusKey = `tab:${key}`;
     button.id = `run-tab-${key}`; panel.id = `run-panel-${key}`;
     button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', panel.id);
     panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', button.id); panel.tabIndex = 0;
-    button.onclick = () => activate(key);
+    button.onclick = () => { const changed = root.dataset.view !== key; activate(key); if (changed) ConsoleMotion.reveal(panel, 0, 8); };
     button.onkeydown = event => {
       const index = entries.findIndex(([name]) => name === key);
       const next = event.key === 'ArrowRight' ? (index + 1) % entries.length : event.key === 'ArrowLeft' ? (index + entries.length - 1) % entries.length : event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : -1;

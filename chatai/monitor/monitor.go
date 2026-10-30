@@ -44,6 +44,9 @@ var glassCSS []byte
 //go:embed glass-motion.js
 var glassMotion []byte
 
+//go:embed glass-controls.js
+var glassControls []byte
+
 type Run struct {
 	MetricsVersion int           `json:"metrics_version"`
 	ModelCalls     int           `json:"model_calls"`
@@ -223,6 +226,10 @@ func (s *Store) Handler(token string) http.Handler {
 	mux.HandleFunc("GET /glass-motion.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(glassMotion)
+	})
+	mux.HandleFunc("GET /glass-controls.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(glassControls)
 	})
 	mux.HandleFunc("GET /run-overview.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")

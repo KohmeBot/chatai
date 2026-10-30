@@ -12,7 +12,7 @@ function identifyCard(c,kind,id){c.querySelector('h3').replaceChildren(identity(
 function hasMemorySource(item){return item.source_id!=null&&String(item.source_id)!=='0'&&String(item.source_id)!==''}
 function memorySource(item){return hasMemorySource(item)?`#${item.source_id}`:'自行添加'}
 function appendMemorySourceGroup(node,item){if(hasMemorySource(item)&&item.group_id&&String(item.group_id)!=='0')node.append(identity('group',String(item.group_id)))}
-function action(text,fn,danger=false){const b=el('button',danger?'danger':'',text);b.type='button';b.onclick=fn;return b}
+function action(text,fn,danger=false){return ConsoleControls.action(text,fn,danger)}
 function memoryActions(c,u){
  const add=el('div','actions');add.append(action('新增结构化记忆',()=>addMemoryItem(u)));c.append(add);
  const row=el('div','actions');row.append(action('编辑简介与关系',()=>editProfile(u)),action('清空长期记忆',()=>confirmMemory('清空该用户全部长期记忆？','此操作会清空简介、关系和所有群中的结构化条目，影响所有群聊。之后仍可从新消息形成记忆。',{target:'profile',user_id:u.user_id,version:u.version}),true));c.append(row);
@@ -61,9 +61,9 @@ function confirmMemory(title,description,payload){openMemoryDialog(title,descrip
 function openMemoryDialog(title,description,build,remove=false){
  const group=$('group').value,dialog=el('dialog','memory-dialog'),form=el('form'),heading=el('h2','',title),error=el('p','form-error'),buttons=el('div','actions');
  heading.id='memory-dialog-title';dialog.setAttribute('aria-labelledby',heading.id);error.setAttribute('role','alert');form.append(heading,el('p','muted',description));const payload=build(form);
- const cancel=action('取消',()=>ConsoleMotion.closeDialog(dialog)),save=el('button',remove?'danger':'primary',remove?'确认删除':'保存修改');save.type='submit';buttons.append(cancel,save);form.append(error,buttons);dialog.append(form);document.body.append(dialog);
+ const cancel=action('取消',()=>ConsoleMotion.closeDialog(dialog)),save=el('button',remove?'danger':'primary',remove?'确认删除':'保存修改');ConsoleControls.iconButton(save,remove?'trash':'check',remove?'确认删除':'保存修改');save.type='submit';buttons.append(cancel,save);form.append(error,buttons);dialog.append(form);document.body.append(dialog);
  let busy=false;dialog.oncancel=e=>{if(busy)e.preventDefault()};dialog.onclose=()=>dialog.remove();
- form.onsubmit=async e=>{e.preventDefault();if(busy)return;try{const data=payload();busy=true;save.disabled=cancel.disabled=true;save.textContent='正在保存…';error.textContent='';await api(`/api/inspect/memory?group=${encodeURIComponent(group)}`,{method:remove?'DELETE':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(15000)});ConsoleMotion.closeDialog(dialog);document.querySelectorAll('.memory-detail').forEach(d=>ConsoleMotion.closeDialog(d));if(authenticated&&currentView==='memory'&&$('group').value===group)await loadCatalog();notifyMemory(remove?'记忆已删除':'修改已保存')}catch(err){error.textContent=err.message+'；如数据已变化，请取消并刷新后重试。'}finally{busy=false;save.disabled=cancel.disabled=false;save.textContent=remove?'确认删除':'保存修改'}};
+ form.onsubmit=async e=>{e.preventDefault();if(busy)return;try{const data=payload();busy=true;save.disabled=cancel.disabled=true;save.setAttribute('aria-busy','true');error.textContent='';await api(`/api/inspect/memory?group=${encodeURIComponent(group)}`,{method:remove?'DELETE':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(15000)});ConsoleMotion.closeDialog(dialog);document.querySelectorAll('.memory-detail').forEach(d=>ConsoleMotion.closeDialog(d));if(authenticated&&currentView==='memory'&&$('group').value===group)await loadCatalog();notifyMemory(remove?'记忆已删除':'修改已保存')}catch(err){error.textContent=err.message+'；如数据已变化，请取消并刷新后重试。'}finally{busy=false;save.disabled=cancel.disabled=false;save.removeAttribute('aria-busy')}};
  ConsoleMotion.openDialog(dialog);(remove?cancel:form.querySelector('textarea,input,select')||cancel).focus();
 }
 function notifyMemory(message){const toast=el('div','toast',message);toast.setAttribute('role','status');document.body.append(toast);setTimeout(()=>toast.remove(),3500)}
@@ -84,7 +84,7 @@ function renderGroupOptions(){
 function closeGroupPicker(){ $('group-options').hidden=true;$('group-toggle').setAttribute('aria-expanded','false') }
 function initConsoleUI(){
  const toggle=$('theme-toggle');
- function syncTheme(){const dark=document.documentElement.dataset.theme==='dark';toggle.textContent=dark?'☀ 白天':'☾ 黑夜';toggle.setAttribute('aria-label',dark?'切换到白天模式':'切换到黑夜模式')}
+ function syncTheme(){const dark=document.documentElement.dataset.theme==='dark';ConsoleControls.iconButton(toggle,dark?'sun':'moon',dark?'切换到白天模式':'切换到黑夜模式')}
  syncTheme();toggle.onclick=()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;try{localStorage.setItem('chatai-theme',theme)}catch{}syncTheme()};
  $('group-toggle').onclick=()=>{const open=$('group-options').hidden;$('group-options').hidden=!open;$('group-toggle').setAttribute('aria-expanded',String(open));if(open){$('group-search').value='';renderGroupOptions();$('group-search').focus()}};
  $('group-search').oninput=renderGroupOptions;

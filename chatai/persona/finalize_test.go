@@ -1,6 +1,7 @@
 package persona
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -12,6 +13,28 @@ import (
 )
 
 type closingTestModel struct{ calls int }
+
+func TestBareMentionStartsAgentAndPersistsOriginalMessage(t *testing.T) {
+	const botID = 987654330
+	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":42}`)}}
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{SelfID: botID, GroupID: 123, UserID: 1, IsToMe: true,
+		NativeMessage: json.RawMessage(`[{"type":"at","data":{"qq":"987654330"}}]`)}
+	llm := &closingTestModel{}
+	p := &Persona{groupID: 123, db: memoryTestDB(t), tools: agent.NewRegistry(),
+		opts: Options{AgentModel: llm, MaxSteps: 1, RunTimeout: time.Minute, ProgressAfter: time.Hour}}
+	require.NoError(t, p.UpdateContext(ctx))
+	require.Equal(t, 2, llm.calls, "a stripped bare mention must enter the Agent and its final response path")
+	var record ChatMessageRecord
+	require.NoError(t, p.db.Where("user_id = ?", 1).First(&record).Error)
+	require.Equal(t, MsgTypeAt, record.MsgType)
+	require.Contains(t, record.Content, "@987654330")
+	require.EqualValues(t, botID, record.TargetUserID)
+	require.JSONEq(t, string(ctx.Event.NativeMessage), record.RawSegments)
+	require.Empty(t, ctx.Event.Message)
+}
 
 func TestScheduledRunCanFinishWithoutGroupAction(t *testing.T) {
 	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":42}`)}}
