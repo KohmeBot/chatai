@@ -3,7 +3,7 @@ let resourceDialogSerial=0;
 function resourceDialog(title,description){
  const dialog=el('dialog','memory-dialog resource-detail'),head=el('div','row resource-heading'),heading=el('h2','',title);
  heading.id=`resource-title-${++resourceDialogSerial}`;dialog.setAttribute('aria-labelledby',heading.id);
- const close=action('关闭',()=>ConsoleMotion.closeDialog(dialog));head.append(heading,close);
+ const close=action('×',()=>ConsoleMotion.closeDialog(dialog));close.classList.add('dialog-close');close.setAttribute('aria-label','关闭详情');head.append(heading,close);
  const body=el('div','resource-body');dialog.append(head);if(description)body.append(el('p','resource-description',description));dialog.append(body);
  dialog.onclose=()=>dialog.remove();document.body.append(dialog);ConsoleMotion.openDialog(dialog);close.focus();return {dialog,body};
 }
@@ -19,9 +19,9 @@ function renderSkills(root,data){
  root.append(el('p','muted','常驻技能会在每次运行的首轮请求中带入完整正文并加载关联工具，减少读取技能的额外调用，但会增加输入 token。全局技能的设置对所有群生效，保存后下次运行生效。'));
  const group=$('group').value;
  section(root,'可用技能',data.items,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions'),status=el('span','muted');status.setAttribute('role','status');const toggle=action('',async()=>{
-  toggle.disabled=true;status.textContent='保存中…';
-  try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update();status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false}
- });const update=()=>{toggle.textContent=s.resident?'常驻：已开启':'常驻：未开启';toggle.setAttribute('aria-pressed',String(!!s.resident));toggle.setAttribute('aria-label',`${s.name} 常驻`)};update();buttons.append(action('详情',()=>showSkillDetail(s)),toggle,status);c.append(buttons);return c});
+  toggle.disabled=true;toggle.setAttribute('aria-busy','true');status.textContent='保存中…';
+  try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update();status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false;toggle.removeAttribute('aria-busy')}
+ });toggle.classList.add('resident-switch');toggle.setAttribute('role','switch');toggle.append(el('span','switch-track'),el('span','','常驻'));toggle.title='每次运行自动加载；增加输入 Token，保存后下次运行生效';const update=()=>{toggle.setAttribute('aria-checked',String(!!s.resident));toggle.setAttribute('aria-label',`${s.name} 常驻`)};update();buttons.classList.add('skill-actions');const detail=action('查看详情 ↗',()=>showSkillDetail(s));detail.classList.add('detail-link');buttons.append(detail,toggle,status);c.append(buttons);return c});
 }
 async function showSkillDetail(skill){
  const group=$('group').value,{dialog,body}=resourceDialog(skill.name,skill.description);

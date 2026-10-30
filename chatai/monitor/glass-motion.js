@@ -101,7 +101,86 @@ window.ConsoleMotion = (() => {
     dialog.showModal();
   }
 
+  // Keep the existing selects as the single source of truth for filtering.
+  function initFilters() {
+    const status = document.getElementById('status');
+    const sort = document.getElementById('run-sort');
+    const group = document.createElement('div');
+    group.className = 'status-segments';
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', '运行状态');
+    for (const option of status.options) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.status = option.value || 'all';
+      const dot = document.createElement('span');
+      dot.className = 'status-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      button.append(dot, option.value ? option.text : '全部');
+      button.onclick = () => {
+        status.value = option.value;
+        status.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      group.append(button);
+    }
+    const syncStatus = () => {
+      for (const button of group.children) button.setAttribute('aria-pressed', String(button.dataset.status === (status.value || 'all')));
+    };
+    status.addEventListener('change', syncStatus);
+    syncStatus();
+    status.hidden = true;
+    status.after(group);
+
+    const picker = document.createElement('details');
+    picker.className = 'sort-picker';
+    const trigger = document.createElement('summary');
+    const label = document.createElement('span');
+    const icon = document.createElement('span');
+    icon.textContent = '↓';
+    icon.className = 'sort-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    trigger.append(icon, label);
+    const panel = document.createElement('div');
+    panel.className = 'sort-options';
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', '对话记录排序');
+    const names = ['最新优先', '模型调用', '工具 / Skills', 'Token 用量'];
+    for (const [index, option] of [...sort.options].entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.value = option.value;
+      const name = document.createElement('span');
+      name.textContent = names[index];
+      const hint = document.createElement('small');
+      hint.textContent = index ? '从多到少' : '从新到旧';
+      button.append(name, hint);
+      button.onclick = () => {
+        sort.value = option.value;
+        sort.dispatchEvent(new Event('change', { bubbles: true }));
+        picker.open = false;
+        trigger.focus();
+      };
+      panel.append(button);
+    }
+    const syncSort = () => {
+      label.textContent = names[sort.selectedIndex];
+      trigger.setAttribute('aria-label', `排序：${sort.selectedOptions[0].text}`);
+      for (const button of panel.children) button.setAttribute('aria-pressed', String(button.dataset.value === sort.value));
+    };
+    sort.addEventListener('change', syncSort);
+    syncSort();
+    picker.append(trigger, panel);
+    sort.hidden = true;
+    sort.after(picker);
+    document.addEventListener('click', event => { if (!picker.contains(event.target)) picker.open = false; });
+    picker.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); picker.open = false; trigger.focus(); }
+    });
+    picker.addEventListener('focusout', event => { if (!picker.contains(event.relatedTarget)) picker.open = false; });
+  }
+
   function init() {
+    initFilters();
     const nav = document.getElementById('nav');
     const icons = {
       runs: ['M4 5h16v14H4z', 'M8 9h8M8 13h5'],
