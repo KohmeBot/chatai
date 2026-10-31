@@ -73,7 +73,8 @@ function fixture(reducedMotion = false) {
 test('drag previews without committing, then activates the nearest segment exactly once', () => {
   const f = fixture(); f.pointer('pointerdown', 35); f.pointer('pointermove', 117); f.frame();
   assert.deepEqual(f.calls, []); assert.equal(f.root.capture, 1);
-  assert.match(f.lens.style.transform, /scale\(1\.[1-9]/, 'the moving lens stretches');
+  const stretch = Number(f.lens.style.transform.match(/scale\(([^,]+)/)[1]);
+  assert.ok(stretch > 1 && stretch < 1.12, 'the moving lens stretches subtly');
   f.pointer('pointerup', 117); assert.deepEqual(f.calls, [1]);
   assert.equal(f.root.emit('click', {detail: 1}).prevented, true, 'suppress native release click');
   f.settle(); assert.equal(f.lens.style.transform, 'translate3d(71px,5px,0) scale(1,1)');
@@ -88,11 +89,31 @@ test('cancel, lost capture, Escape and window blur restore selection without act
     const f = fixture(); f.pointer('pointerdown', 35); f.pointer('pointermove', 204); f.frame();
     if (reason === 'Escape') f.root.emit('keydown', {key: reason});
     else if (reason === 'blur') f.window.emit(reason);
-    else f.pointer(reason, 204);
+    else f.pointer(reason, 204, {target: f.root});
     f.settle(); assert.deepEqual(f.calls, [], reason);
     assert.equal(f.root.classList.contains('is-held'), false, reason);
     assert.equal(f.lens.style.transform, 'translate3d(5px,5px,0) scale(1,1)');
   }
+});
+
+test('touch capture transfers from the button to the root without cancelling the drag', () => {
+  const f = fixture();
+  const touch = (type, x, extras = {}) => f.pointer(type, x, {pointerType: 'touch', ...extras});
+  touch('pointerdown', 35);
+  touch('pointermove', 65);
+  // Touch implicitly captures the button. On the next event, transferring
+  // capture to the root emits a bubbling lostpointercapture from that button.
+  touch('lostpointercapture', 65);
+  assert.equal(f.root.classList.contains('is-dragging'), true);
+  assert.equal(f.root.hasPointerCapture(1), true);
+  touch('pointermove', 204, {target: f.root});
+  assert.deepEqual(f.calls, [], 'only preview while the finger is moving');
+  touch('pointerup', 204, {target: f.root});
+  touch('lostpointercapture', 204, {target: f.root});
+  assert.equal(f.root.emit('click', {detail: 1}).prevented, true);
+  f.settle();
+  assert.deepEqual(f.calls, [2], 'activate the release destination exactly once');
+  assert.equal(f.lens.style.transform, 'translate3d(169px,5px,0) scale(1,1)');
 });
 
 test('vertical touch scrolling and secondary pointers do not activate a segment', () => {
@@ -114,6 +135,32 @@ test('rapid reversal is continuous and settles at the latest selection at 120 Hz
   const f = fixture(); f.buttons[2].click(); f.frame(1000 / 120); const before = f.lens.style.transform;
   f.buttons[0].click(); assert.equal(f.lens.style.transform, before, 'retarget without jumping');
   f.settle(1000 / 120); assert.equal(f.lens.style.transform, 'translate3d(5px,5px,0) scale(1,1)');
+});
+
+test('selection responds immediately and settles gently at 60 and 120 Hz', () => {
+  for (const hz of [60, 120]) {
+    const f = fixture(); f.buttons[2].click();
+    assert.deepEqual(f.calls, [2], 'activation never waits for the spring');
+    const position = () => Number(f.lens.style.transform.match(/translate3d\(([^p]+)/)[1]);
+    let previous = position();
+    for (let i = 0; i < hz; i++) {
+      f.frame(1000 / hz);
+      const x = position();
+      assert.ok(x >= previous - .02 && x <= 169.2, 'no visible recoil or overshoot');
+      if (i === Math.round(hz / 10) - 1) assert.ok(x > 30 && x < 100, 'visible response without rushing to the destination');
+      if (i === Math.round(hz / 2) - 1) assert.ok(Math.abs(x - 169) < 2, 'effectively at rest within half a second');
+      previous = x;
+    }
+    f.settle(1000 / hz);
+    assert.equal(position(), 169);
+  }
+});
+
+test('enabling reduced motion during travel immediately releases the animation loop', () => {
+  const f = fixture(); f.buttons[2].click(); f.frame();
+  f.preference.matches = true; f.preference.emit('change');
+  assert.equal(f.frames.size, 0);
+  assert.equal(f.lens.style.transform, 'translate3d(169px,5px,0) scale(1,1)');
 });
 
 test('reduced motion keeps dragging functional without stretching or animation frames', () => {

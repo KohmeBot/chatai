@@ -10,7 +10,10 @@ window.ConsoleMotion = (() => {
   const dialogs = new WeakSet();
   let graphNodes = new Set();
   let previousRuns = new Set(), detailID = '';
-  const ease = 'cubic-bezier(.16, 1, .3, 1)';
+  // Gentler initial velocity, followed by a long, monotonic settle. Keep in sync
+  // with --ease in glass.css; feedback and exits intentionally finish sooner.
+  const ease = 'cubic-bezier(.28, .72, .22, 1)';
+  const timing = { surface: 520, dialog: 560, feedback: 220, exit: 220 };
   const glowSurfaces = '.stat, .resource-card, .glass-segments, .login, .run-metrics>div, .overview-result, .overview-output, .schema-field, .execution-record, .memory-item, .detail-fields';
   const mountSegments = root => ConsoleControls.mountSegments(root);
 
@@ -42,7 +45,7 @@ window.ConsoleMotion = (() => {
 
   function animate(node, frames, options = {}) {
     if (!node || reduced.matches || !node.animate) return null;
-    const animation = node.animate(frames, { duration: 420, easing: ease, ...options });
+    const animation = node.animate(frames, { duration: timing.surface, easing: ease, ...options });
     active.add(animation);
     animation.finished.catch(() => {}).finally(() => active.delete(animation));
     return animation;
@@ -50,32 +53,34 @@ window.ConsoleMotion = (() => {
   reduced.addEventListener('change', () => {
     if (reduced.matches) for (const animation of active) animation.cancel();
   });
-  function reveal(node, delay = 0, distance = 12) {
-    entrances.get(node)?.cancel();
+  function reveal(node, delay = 0, distance = 8, duration = timing.surface) {
+    if (!node) return;
+    const previous = entrances.get(node);
+    const current = previous && previous.playState !== 'finished' ? getComputedStyle(node) : null;
+    const from = current ? { opacity: current.opacity, transform: current.transform }
+      : { opacity: 0, transform: `translateY(${distance}px)` };
+    previous?.cancel();
     const animation = animate(node, [
-      { opacity: 0, transform: `translateY(${distance}px) scale(.975)` },
-      { opacity: 1, transform: 'translateY(-1px) scale(1.003)', offset: .76 },
-      { opacity: 1, transform: 'translateY(0) scale(1)' }
-    ], { delay, fill: 'backwards', duration: 480 });
+      from,
+      { opacity: 1, transform: 'translateY(0)' }
+    ], { delay: current ? 0 : delay, fill: 'backwards', duration });
     if (animation) entrances.set(node, animation);
   }
   function view(node) {
-    reveal(node, 0, 10);
-    if (node.id === 'run-view') {
-      node.querySelectorAll('.stat').forEach((card, i) => reveal(card, 45 + i * 45));
-    }
+    // Animate the view once: nested entrances multiply opacity and movement.
+    reveal(node);
   }
   function catalog(root) {
     // Only explicit navigation/reloads animate; polling never replays the grid.
     [...root.querySelectorAll('.resource-card')].slice(0, 16)
-      .forEach((card, i) => reveal(card, Math.min(i * 35, 210)));
+      .forEach((card, i) => reveal(card, Math.min(i * 24, 120)));
   }
   function runs(root) {
     const next = new Set();
     let index = 0;
     for (const row of root.querySelectorAll('[data-run-id]')) {
       next.add(row.dataset.runId);
-      if (!previousRuns.has(row.dataset.runId) && index < 12) reveal(row, index++ * 28, 8);
+      if (!previousRuns.has(row.dataset.runId) && index < 12) reveal(row, Math.min(index++ * 20, 120), 6);
     }
     previousRuns = next;
   }
@@ -86,7 +91,7 @@ window.ConsoleMotion = (() => {
     }
     let index = 0;
     for (const node of root.querySelectorAll('.dag-node')) {
-      if (!graphNodes.has(node.dataset.node) && index < 15) reveal(node, index++ * 30, 7);
+      if (!graphNodes.has(node.dataset.node) && index < 15) reveal(node, Math.min(index++ * 20, 120), 5);
       graphNodes.add(node.dataset.node);
     }
     detailID = id;
@@ -94,7 +99,9 @@ window.ConsoleMotion = (() => {
   function stat(node, value) {
     if (node.textContent !== value) node.textContent = value;
     if (counts.has(node.id) && counts.get(node.id) !== value) {
-      reveal(node, 0, 4);
+      entrances.get(node)?.cancel();
+      const animation = animate(node, [{ opacity: .65 }, { opacity: 1 }], { duration: timing.feedback });
+      if (animation) entrances.set(node, animation);
     }
     counts.set(node.id, value);
   }
@@ -111,10 +118,14 @@ window.ConsoleMotion = (() => {
     if (!dialog.open || dialog.dataset.closing) return;
     dialog.dataset.closing = 'true';
     dialog.inert = true;
+    // Closing during entry starts at the visible pose, without snapping to full size.
+    const current = getComputedStyle(dialog);
+    const from = { opacity: current.opacity, transform: current.transform };
+    entrances.get(dialog)?.cancel();
     const animation = animate(dialog, [
-      { opacity: 1, transform: 'translateY(0) scale(1)' },
-      { opacity: 0, transform: 'translateY(12px) scale(.97)' }
-    ], { duration: 200, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' });
+      from,
+      { opacity: 0, transform: 'translateY(8px)' }
+    ], { duration: timing.exit, easing: 'cubic-bezier(.4, 0, .7, 1)', fill: 'forwards' });
     const finish = () => { delete dialog.dataset.closing; if (dialog.open) dialog.close(); animation?.cancel(); dialog.inert = false; };
     if (animation) animation.finished.then(finish, finish); else finish();
   }
@@ -129,7 +140,7 @@ window.ConsoleMotion = (() => {
     dialogs.add(dialog);
     prepareDialog(dialog);
     dialog.showModal();
-    reveal(dialog, 0, 22);
+    reveal(dialog, 0, 16, timing.dialog);
   }
 
   // Keep the existing selects as the single source of truth for filtering.
@@ -258,11 +269,7 @@ window.ConsoleMotion = (() => {
     document.addEventListener('click', event => {
       const summary = event.target.closest('summary');
       if (summary) toggledByUser.add(summary.parentElement);
-      const button = event.target.closest('button');
-      if (!button || button.disabled || button.classList.contains('run')) return;
-      animate(button, [
-        { scale: '.96' }, { scale: '1.025', offset: .6 }, { scale: '1' }
-      ], { duration: 340 });
+      // CSS :active owns press/release, so repeated clicks never stack bounces.
     });
     document.addEventListener('toggle', event => {
       if (!toggledByUser.has(event.target)) return;
@@ -271,7 +278,7 @@ window.ConsoleMotion = (() => {
         for (const child of event.target.children) if (child.tagName !== 'SUMMARY') reveal(child, 0, 5);
       }
     }, true);
-    reveal(document.getElementById('login'), 50, 18);
+    reveal(document.getElementById('login'), 0, 12);
   }
   return { reveal, mountSegments, prepareDialog, init, view, catalog, runs, detail, stat, reset, busy, openDialog, closeDialog };
 })();

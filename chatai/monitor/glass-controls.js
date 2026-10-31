@@ -64,6 +64,9 @@ window.ConsoleControls = (() => {
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const instances = new Map();
+  // Near-critical damping avoids a rubbery overshoot on selection. Direct
+  // manipulation stays firmer so the lens still follows the pointer promptly.
+  const spring = { settle: { stiffness: 220, damping: 29 }, drag: { stiffness: 600, damping: 44 } };
   const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
   const rubber = (value, lo, hi) => value < lo ? lo - 14 * (1 - Math.exp((value - lo) / 45)) : value > hi ? hi + 14 * (1 - Math.exp((hi - value) / 45)) : value;
 
@@ -79,9 +82,9 @@ window.ConsoleControls = (() => {
     const bounds = b => ({x: b.offsetLeft + b.offsetWidth / 2, y: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight});
     function paint() {
       const lift = reduced.matches ? 0 : state.lift;
-      const stretch = reduced.matches ? 0 : Math.min(.22, Math.abs(velocity.x) / 2400);
+      const stretch = reduced.matches ? 0 : Math.min(.09, Math.abs(velocity.x) / 4800);
       lens.style.width = `${state.w}px`; lens.style.height = `${state.h}px`;
-      lens.style.transform = `translate3d(${state.x - state.w / 2}px,${state.y}px,0) scale(${1 + stretch + lift * .065},${1 - stretch * .36 + lift * .12})`;
+      lens.style.transform = `translate3d(${state.x - state.w / 2}px,${state.y}px,0) scale(${1 + stretch + lift * .025},${1 - stretch * .36 + lift * .05})`;
       lens.style.borderRadius = `${Math.max(14, state.h / 2 - stretch * 24)}px / ${Math.max(12, state.h / 2 + stretch * 18)}px`;
       lens.style.setProperty('--lens-light', `${50 - clamp(velocity.x / 18, -35, 35)}%`);
       lens.style.setProperty('--lens-lift', state.lift);
@@ -91,11 +94,12 @@ window.ConsoleControls = (() => {
       if (!root.isConnected) { dispose(); return; }
       let dt = Math.min((now - (lastTime || now - 16)) / 1000, .04); lastTime = now;
       let moving = false;
+      const { stiffness, damping } = drag ? spring.drag : spring.settle;
       // Small integration steps keep springs stable at 60/120 Hz and after stalls.
       while (dt > 0) {
         const step = Math.min(dt, 1 / 240); dt -= step;
         for (const key of Object.keys(state)) {
-          velocity[key] += ((target[key] - state[key]) * (drag ? 600 : 360) - velocity[key] * (drag ? 36 : 25)) * step;
+          velocity[key] += ((target[key] - state[key]) * stiffness - velocity[key] * damping) * step;
           state[key] += velocity[key] * step;
         }
       }
@@ -154,6 +158,12 @@ window.ConsoleControls = (() => {
     }
     function up(event) { if (event.pointerId === drag?.id) finish(true); }
     function cancel(event) { if (!event || event.type === 'blur' || event.pointerId === drag?.id) finish(false); }
+    function lostCapture(event) {
+      // Touch implicitly captures the pressed button. Its lost capture bubbles
+      // when motion transfers capture to root; only losing root's capture ends
+      // our drag, not that normal handoff from a descendant.
+      if (event.target === root) cancel(event);
+    }
     function click(event) {
       // The release click must not activate the original or captured element again.
       if (event.detail && performance.now() < suppressUntil) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -173,7 +183,7 @@ window.ConsoleControls = (() => {
     });
     selection.observe(root, {subtree: true, attributes: true, attributeFilter: ['class', 'aria-selected', 'aria-pressed', 'disabled', 'hidden']});
     const preference = () => { finish(false); sync(); };
-    const listeners = {pointerdown: down, pointermove: motion, pointerup: up, pointercancel: cancel, lostpointercapture: cancel, keydown: keyboard};
+    const listeners = {pointerdown: down, pointermove: motion, pointerup: up, pointercancel: cancel, lostpointercapture: lostCapture, keydown: keyboard};
     for (const [type, listener] of Object.entries(listeners)) root.addEventListener(type, listener);
     root.addEventListener('click', click, true); window.addEventListener('blur', cancel); reduced.addEventListener('change', preference);
     // A tap can end outside without ever crossing the drag threshold.
