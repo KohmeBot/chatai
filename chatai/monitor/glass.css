@@ -78,6 +78,13 @@ summary { color:var(--muted); }
 .actions button { font-size:12px; padding:7px 12px; }
 .danger { color:var(--danger); border-color:rgba(205,85,115,.3); background:rgba(205,85,115,.08); }
 .filters { align-items:center; flex-wrap:wrap; gap:12px; }
+.run-date-filter { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; }
+.run-date-filter .status-segments { flex:0 0 auto; max-width:100%; }
+.run-date-filter>p { margin:0; font-size:12px; }
+.run-date-custom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; width:100%; }
+.run-date-custom .field { flex:1 1 160px; max-width:240px; }
+.run-date-custom>button { margin-bottom:12px; }
+.run-date-custom>p { flex-basis:100%; margin:0; }
 .filters input { min-width:180px; }
 .group-picker { position:relative; z-index:5; }
 #group-toggle { display:flex; align-items:center; justify-content:space-between; gap:22px; min-width:220px; }
@@ -252,7 +259,7 @@ details[open]>summary { color:var(--text); }
 .login { position:relative; padding:36px; border-radius:30px; }
 .login h2 { font-size:26px; }
 .login input { padding:13px 15px; }
-.login .primary { width:100%; min-height:46px; }
+.login .primary { display:flex; margin-left:auto; }
 .runs,#detail,pre,.memory-dialog,#group-list { scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
 /* Spacious independent run inspector, with a fixed toolbar and one scroll area. */
 .layout { grid-template-columns:minmax(0,1fr); }
@@ -275,7 +282,8 @@ body:has(.run-dialog[open]) { overflow:hidden; }
 .run-dag>.row { padding:20px 22px 8px; align-items:flex-start; }
 .run-dag h3 { margin:0 0 6px; font-size:18px; }
 .run-dag p { margin:5px 0; font-size:12px; }
-.dag-controls { display:flex; gap:6px; flex-shrink:0; }
+.dag-controls { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.dag-zoom { min-width:4ch; text-align:center; font-size:12px; font-variant-numeric:tabular-nums; color:var(--muted); }
 .dag-controls button { padding:6px 12px; border-radius:14px; }
 .dag-legend { display:flex; flex-wrap:wrap; gap:16px; padding:4px 22px 16px; font-size:11px; }
 .dag-state { background:none; }

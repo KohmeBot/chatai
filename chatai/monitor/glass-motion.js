@@ -231,7 +231,7 @@ window.ConsoleMotion = (() => {
     ]) ConsoleControls.iconButton(document.getElementById(id), icon, label);
     ConsoleControls.iconButton(document.querySelector('#login-form button'), 'right', '连接并查看');
     mountSegments(nav);
-    mountSegments(document.querySelector('.status-segments'));
+    document.querySelectorAll('.status-segments').forEach(mountSegments);
     // Dispose observers when polling replaces an inspector or a modal closes.
     const discover = () => {
       document.querySelectorAll('.run-tabs').forEach(mountSegments);

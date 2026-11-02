@@ -80,9 +80,11 @@ function renderRunDAG(run, previous = {}) {
   const controls=el('div','dag-controls');
   const minus=el('button','','−'),plus=el('button','','＋'),fit=el('button','','适应');
   ConsoleControls.iconButton(minus,'minus','缩小');ConsoleControls.iconButton(plus,'plus','放大');ConsoleControls.iconButton(fit,'fit','适应视图');
+  const zoomReadout=el('output','dag-zoom','100%');
+  zoomReadout.setAttribute('aria-label','当前缩放比例');
   minus.dataset.focusKey='dag-minus';plus.dataset.focusKey='dag-plus';fit.dataset.focusKey='dag-fit';
   minus.setAttribute('aria-label','缩小规划图');plus.setAttribute('aria-label','放大规划图');
-  controls.append(minus,plus,fit);heading.append(title,controls);root.append(heading);
+  controls.append(minus,zoomReadout,plus,fit);heading.append(title,controls);root.append(heading);
   if (!graph.nodes.length) { root.append(el('p','empty','暂无规划事件；运行开始后自动生成。')); return root; }
   const legend=el('div','dag-legend');
   const states={planned:'待执行',running:'运行中',success:'已完成',error:'失败',skipped:'未执行',interrupted:'已中断',unknown:'未知'};
@@ -127,7 +129,7 @@ function renderRunDAG(run, previous = {}) {
   function scale(value){
     zoom=Math.max(.25,Math.min(1.5,value));root.dataset.zoom=zoom;
     canvas.style.transform=`scale(${zoom})`;spacer.style.width=graph.width*zoom+'px';spacer.style.height=graph.height*zoom+'px';
-    minus.disabled=zoom<=.25;plus.disabled=zoom>=1.5;fit.textContent=`适应 · ${Math.round(zoom*100)}%`;
+    minus.disabled=zoom<=.25;plus.disabled=zoom>=1.5;zoomReadout.textContent=`${Math.round(zoom*100)}%`;
   }
   minus.onclick=()=>scale(zoom-.15);plus.onclick=()=>scale(zoom+.15);fit.onclick=()=>scale(Math.min(1,(viewport.clientWidth-24)/graph.width));
   scale(zoom);inspect(nodeMap.get(chosen)||graph.nodes.findLast(n=>n.state==='running')||graph.nodes[graph.nodes.length-1]);

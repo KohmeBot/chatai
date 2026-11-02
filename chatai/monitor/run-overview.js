@@ -1,3 +1,35 @@
+// Calendar boundaries use the same browser timezone as the displayed run times.
+function runDateRange(preset = 'today', start = '', end = '', now = new Date()) {
+  const parse = value => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+  };
+  let from, until;
+  if (preset === 'custom') {
+    from = parse(start); until = parse(end);
+    if (!from || !until || from > until) return null;
+  } else {
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    until = new Date(from);
+    from.setDate(from.getDate() - ({today: 1, three: 3, week: 7}[preset] || 1) + 1);
+  }
+  until.setDate(until.getDate() + 1);
+  return {start: from.getTime(), end: until.getTime()};
+}
+
+function filterRuns(runs, range, query = '', status = '') {
+  const search = query.trim().toLowerCase();
+  return runs.filter(run => {
+    const started = Date.parse(run.started_at);
+    return range && started >= range.start && started < range.end
+      && (!status || run.status === status)
+      && [run.prompt, run.group_id, run.user_id, run.user_name, run.model]
+        .some(value => String(value || '').toLowerCase().includes(search));
+  });
+}
+
 // Lists contain summaries for all retained runs, including persisted history.
 function compareRuns(sort) {
   const metric = run => sort === 'tokens'

@@ -7,6 +7,29 @@ vm.runInContext(fs.readFileSync(__dirname + '/run-overview.js', 'utf8'), context
 const summarize = run => JSON.parse(JSON.stringify(context.summarizeRun(run)));
 const timing = run => JSON.parse(JSON.stringify(context.runTiming(run)));
 const at = ms => new Date(Date.UTC(2026, 9, 27) + ms).toISOString();
+
+test('date presets include today and cross month/year boundaries using local calendar days', () => {
+  const now = new Date(2026, 0, 2, 18);
+  for (const [preset, start] of [['today', new Date(2026, 0, 2)], ['three', new Date(2025, 11, 31)], ['week', new Date(2025, 11, 27)]]) {
+    const range = context.runDateRange(preset, '', '', now);
+    assert.equal(range.start, start.getTime());
+    assert.equal(range.end, new Date(2026, 0, 3).getTime());
+  }
+  assert.equal(context.runDateRange('today', '', '', new Date(2026, 0, 3)).start, new Date(2026, 0, 3).getTime());
+});
+
+test('custom dates validate ranges and include the entire last day', () => {
+  for (const [start, end] of [['', '2026-01-01'], ['2026-02-30', '2026-03-01'], ['2026-02-02', '2026-02-01']]) {
+    assert.equal(context.runDateRange('custom', start, end), null);
+  }
+  const range = context.runDateRange('custom', '2026-02-01', '2026-02-01');
+  const runs = [range.start - 1, range.start, range.end - 1, range.end].map((t, id) => ({id, started_at: new Date(t).toISOString(), status: 'success', model: 'Example'}));
+  const ids = list => Array.from(list, r => r.id);
+  assert.deepEqual(ids(context.filterRuns(runs, range)), [1, 2]);
+  assert.deepEqual(ids(context.filterRuns(runs, range, ' EXAMPLE ', 'success')), [1, 2]);
+  assert.deepEqual(ids(context.filterRuns(runs, range, '', 'error')), []);
+  assert.deepEqual(ids(context.filterRuns(runs, range, 'missing')), []);
+});
 test('counts model requests once, including failures, repeated steps and pending calls', () => {
   assert.equal(summarize({events: [
     {kind: 'model_started', step: 1}, {kind: 'model_finished', step: 1},
