@@ -5,6 +5,7 @@
 // https://developer.apple.com/design/human-interface-guidelines/motion
 window.ConsoleControls = (() => {
   const paths = {
+    calendar: 'M4 5h16v16H4zM8 3v4m8-4v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01',
     runs: 'M4 5h16v14H4z M8 9h8M8 13h5',
     skills: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z',
     tools: 'm8 7-5 5 5 5m8-10 5 5-5 5m-3-14-2 18',
@@ -199,5 +200,87 @@ window.ConsoleControls = (() => {
     instances.set(root, dispose); document.fonts?.ready.then(() => { if (instances.get(root) === dispose && root.isConnected) sync(); }); sync();
   }
   function prune() { for (const [root, dispose] of instances) if (!root.isConnected) dispose(); }
-  return {icon, iconButton, action, mountSegments, prune};
+  // Draft values live in the dialog. Only the owner's submit handler commits them.
+  function dateRangePicker(dialog) {
+    const find = suffix => dialog.querySelector('#run-date-' + suffix);
+    const start = find('start'), end = find('end'), grid = find('calendar');
+    const value = date => `${String(date.getFullYear()).padStart(4,'0')}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    const parse = text => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+      const [y,m,d] = text.split('-').map(Number), date = new Date(y,m-1,d);
+      return value(date) === text ? date : null;
+    };
+    let month = new Date(), editing = start, cursor = value(month);
+    const monthStart = date => new Date(date.getFullYear(), date.getMonth(), 1);
+    function render(animate = false) {
+      find('month').textContent = month.toLocaleDateString('zh-CN', {year:'numeric',month:'long'});
+      find('hint').textContent = editing === start ? '选择开始日期 · 或输入 YYYY-MM-DD' : '选择结束日期 · 或输入 YYYY-MM-DD';
+      start.parentElement.classList.toggle('is-editing', editing === start);
+      end.parentElement.classList.toggle('is-editing', editing === end);
+      grid.replaceChildren();
+      const header = document.createElement('div'); header.className = 'date-week'; header.setAttribute('role','row');
+      for (const day of ['一','二','三','四','五','六','日']) {
+        const cell = document.createElement('span'); cell.textContent = day; cell.setAttribute('role','columnheader'); header.append(cell);
+      }
+      grid.append(header);
+      const first = new Date(month); first.setDate(1 - (first.getDay()+6)%7);
+      const valid = Boolean(parse(start.value) && parse(end.value) && start.value <= end.value);
+      for (let row = 0; row < 6; row++) {
+        const week = document.createElement('div'); week.className = 'date-week'; week.setAttribute('role','row');
+        for (let col = 0; col < 7; col++) {
+          const date = new Date(first); date.setDate(first.getDate()+row*7+col);
+          const key = value(date), selected = key === start.value || key === end.value;
+          const cell = document.createElement('div'); cell.setAttribute('role','gridcell'); cell.setAttribute('aria-selected',String(selected || (valid && key > start.value && key < end.value)));
+          cell.className = 'date-cell';
+          cell.classList.toggle('in-range',!!valid && key >= start.value && key <= end.value);
+          cell.classList.toggle('range-start',key === start.value); cell.classList.toggle('range-end',key === end.value);
+          const button = document.createElement('button'); button.type = 'button'; button.textContent = date.getDate(); button.dataset.date = key;
+          button.className = 'date-day'; button.tabIndex = key === cursor ? 0 : -1;
+          button.classList.toggle('outside-month',date.getMonth() !== month.getMonth());
+          button.setAttribute('aria-label',date.toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'}) + (key === start.value ? '，开始' : '') + (key === end.value ? '，结束' : ''));
+          if (key === value(new Date())) button.setAttribute('aria-current','date');
+          button.onclick = () => {
+            if (editing === start) { start.value = key; end.value = ''; editing = end; }
+            else { end.value = key; if (start.value > key) [start.value,end.value] = [key,start.value]; editing = start; }
+            find('error').textContent = ''; cursor = key; month = monthStart(date); render(); focusDay();
+          };
+          cell.append(button); week.append(cell);
+        }
+        grid.append(week);
+      }
+      if (animate) ConsoleMotion.reveal(grid,0,4);
+    }
+    function focusDay() { grid.querySelector(`[data-date="${cursor}"]`)?.focus({preventScroll:true}); }
+    function shiftMonth(amount) {
+      const next = new Date(month.getFullYear(),month.getMonth()+amount,1);
+      if(next.getFullYear()<100 || next.getFullYear()>9999) return;
+      month=next; cursor=value(month); render(true);
+    }
+    for (const [id,name,label] of [['prev','left','上个月'],['next','right','下个月'],['today','sun','回到本月'],['apply','check','应用日期范围']]) iconButton(find(id),name,label);
+    find('prev').onclick = () => shiftMonth(-1); find('next').onclick = () => shiftMonth(1);
+    find('today').onclick = () => { month=monthStart(new Date());cursor=value(new Date());render(true); };
+    for(const input of [start,end]) {
+      input.addEventListener('focus',()=>{editing=input;const date=parse(input.value);if(date){month=monthStart(date);cursor=value(date)}render()});
+      input.addEventListener('input',()=>{find('error').textContent='';const date=parse(input.value);if(date){month=monthStart(date);cursor=value(date)}render()});
+    }
+    grid.addEventListener('keydown',event=>{
+      const date=parse(event.target.dataset.date);if(!date)return;
+      const offset={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[event.key];
+      if(offset) date.setDate(date.getDate()+offset);
+      else if(event.key==='Home')date.setDate(date.getDate()-(date.getDay()+6)%7);
+      else if(event.key==='End')date.setDate(date.getDate()+6-(date.getDay()+6)%7);
+      else if(event.key==='PageUp'||event.key==='PageDown') {
+        const day=date.getDate();date.setDate(1);date.setMonth(date.getMonth()+(event.key==='PageUp'?-1:1)*(event.shiftKey?12:1));
+        date.setDate(Math.min(day,new Date(date.getFullYear(),date.getMonth()+1,0).getDate()));
+      } else return;
+      event.preventDefault();if(date.getFullYear()<100||date.getFullYear()>9999)return;
+      const changed=date.getMonth()!==month.getMonth()||date.getFullYear()!==month.getFullYear();
+      month=monthStart(date);cursor=value(date);render(changed);focusDay();
+    });
+    let backdropDown=false;
+    dialog.addEventListener('pointerdown',event=>{backdropDown=event.target===dialog});
+    dialog.addEventListener('click',event=>{if(backdropDown&&event.target===dialog)ConsoleMotion.closeDialog(dialog)});
+    return {open(from,to) {start.value=from;end.value=to;editing=start;month=monthStart(parse(from)||new Date());cursor=from;render();ConsoleMotion.openDialog(dialog);focusDay()}};
+  }
+  return {icon, iconButton, action, mountSegments, prune, dateRangePicker};
 })();
