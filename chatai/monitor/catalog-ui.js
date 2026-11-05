@@ -15,13 +15,13 @@ function metadataList(root,label,values){
  const list=el('ul');for(const value of values)list.append(el('li','',value));root.append(list);
 }
 function renderSkills(root,data){
- $('catalog-status').textContent=data.enabled?`${data.items.length} 项可用技能 · 未激活、已退役和已过期的经验技能不在此列`:'Skills 功能未启用';
- root.append(el('p','muted','常驻技能会在每次运行的首轮请求中带入完整正文并加载关联工具，减少读取技能的额外调用，但会增加输入 token。全局技能的设置对所有群生效，保存后下次运行生效。'));
+ $('catalog-status').textContent=data.enabled?`${data.items.length} 项可用技能`:'Skills 功能未启用';
+ root.append(el('p','muted','常驻技能增加输入 Token；全局设置影响所有群，下次运行生效。'));
  const group=$('group').value;
- section(root,'可用技能',data.items,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions'),status=el('span','muted');status.setAttribute('role','status');const toggle=action('',async()=>{
+ section(root,'可用技能',data.items,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');const toggle=action('',async()=>{
   toggle.disabled=true;toggle.setAttribute('aria-busy','true');status.textContent='保存中…';
-  try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update();status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false;toggle.removeAttribute('aria-busy')}
- });toggle.classList.add('resident-switch');toggle.setAttribute('role','switch');toggle.append(ConsoleControls.icon('pin'),el('span','switch-track'));toggle.title='常驻技能：每次运行自动加载；增加输入 Token，保存后下次运行生效';const update=()=>{toggle.setAttribute('aria-checked',String(!!s.resident));toggle.setAttribute('aria-label',`${s.name} 常驻`)};update();buttons.classList.add('skill-actions');const detail=action('查看详情 ↗',()=>showSkillDetail(s));detail.classList.add('detail-link');buttons.append(detail,toggle,status);c.append(buttons);return c});
+  try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update(true);status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false;toggle.removeAttribute('aria-busy')}
+ });ConsoleControls.iconButton(toggle,'pin','常驻');toggle.classList.add('resident-toggle');toggle.setAttribute('role','switch');const update=(animate=false)=>{ConsoleControls.setResident(toggle,!!s.resident,animate);toggle.setAttribute('aria-label',`${s.name} 常驻`);toggle.title=s.resident?'已常驻 · 点击取消':'未常驻 · 点击每次运行自动加载'};update();buttons.classList.add('skill-actions');buttons.append(action('查看详情',()=>showSkillDetail(s)),toggle);c.append(status,buttons);return c});
 }
 async function showSkillDetail(skill){
  const group=$('group').value,{dialog,body}=resourceDialog(skill.name,skill.description);
@@ -34,7 +34,7 @@ async function showSkillDetail(skill){
  };
  if(!skill.path){render(skill);files.append(el('h3','section-heading','Skills 目录'),el('p','muted','此技能存储于数据库，没有关联的文件夹。'));return}
  const load=async()=>{content.replaceChildren(el('p','muted','正在读取 SKILL.md…'));try{const data=await api(endpoint('skill'));if(dialog.isConnected)render({...skill,...data})}catch(e){if(dialog.isConnected)content.replaceChildren(el('p','warning',e.message),action('重试',load))}};
- const loadFiles=async()=>{files.replaceChildren(el('h3','section-heading','Skills 目录'),el('p','muted','正在读取目录…'));try{const data=await api(endpoint('skill-files'));if(!dialog.isConnected)return;files.replaceChildren(el('h3','section-heading','Skills 目录'),el('p','muted','点击文件夹进入，点击文件预览。单文件最多 5 MiB。'),skillFileBrowser(data,endpoint))}catch(e){if(dialog.isConnected)files.replaceChildren(el('h3','section-heading','Skills 目录'),el('p','warning',e.message),action('重试目录',loadFiles))}};
+ const loadFiles=async()=>{files.replaceChildren(el('h3','section-heading','Skills 目录'),el('p','muted','正在读取目录…'));try{const data=await api(endpoint('skill-files'));if(!dialog.isConnected)return;files.replaceChildren(el('h3','section-heading','Skills 目录'),el('p','muted','预览上限：5 MiB / 文件。'),skillFileBrowser(data,endpoint))}catch(e){if(dialog.isConnected)files.replaceChildren(el('h3','section-heading','Skills 目录'),el('p','warning',e.message),action('重试目录',loadFiles))}};
  await Promise.allSettled([load(),loadFiles()]);
 }
 function skillFileBrowser(files,endpoint){
@@ -85,7 +85,7 @@ function renderMarkdown(source){
 }
 function renderTools(root,data){
  $('catalog-status').textContent=`${data.length} 个已注册工具 · 包含 search_tools 发现入口`;
- section(root,'工具能力',data,t=>{const f=t.definition.function,c=card(f.name,f.description,t.namespace);c.classList.add('catalog-summary');c.append(el('div','meta',`${t.read_only?'只读':'可执行写操作'} · 风险 ${t.risk}`));const buttons=el('div','actions');buttons.append(action('详情',()=>showToolDetail(t)));c.append(buttons);return c});
+ section(root,'工具能力',data,t=>{const f=t.definition.function,c=card(f.name,f.description,t.namespace);c.classList.add('catalog-summary');c.append(el('div','meta',`${t.read_only?'只读':'可执行写操作'} · 风险 ${t.risk}`));const buttons=el('div','actions card-actions');buttons.append(action('查看详情',()=>showToolDetail(t)));c.append(buttons);return c});
 }
 function showToolDetail(tool){
  const f=tool.definition.function,{body}=resourceDialog(f.name,f.description);

@@ -45,3 +45,37 @@ test('inline console scripts remain syntactically valid',()=>{
   const html=fs.readFileSync(__dirname+'/index.html','utf8');
   for(const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(match[1]);
 });
+
+test('layout follows screen orientation only when the graph has enough width',()=>{
+  for(const [width,screenWidth,screenHeight,expected] of [
+    [1100,1440,900,'horizontal'],[700,844,390,'horizontal'],
+    [600,1440,900,'vertical'],[360,390,844,'vertical'],[800,900,1200,'vertical'],
+  ]) assert.equal(context.runDAGDirection(width,screenWidth,screenHeight),expected);
+});
+
+test('both layouts keep branches separate, edges forward and cards inside the canvas',()=>{
+  const events=[e('run_started'),e('model_started'),e('model_finished')];
+  for(let i=0;i<8;i++)events.push(e('tool_planned',{name:`tool${i}`}),e('tool_started',{name:`tool${i}`}),e('tool_finished',{name:`tool${i}`}));
+  events.push(e('model_started'),e('model_finished'),e('run_finished'));
+  const g=context.buildRunDAG({events,status:'success'});
+  const edges=JSON.stringify(g.edges);
+  for(const direction of ['horizontal','vertical','horizontal']){
+    context.layoutRunDAG(g,direction);
+    assert.equal(JSON.stringify(g.edges),edges);
+    for(const node of g.nodes){
+      assert.ok(node.x>=0 && node.y>=0 && node.x+220<=g.width && node.y+82<=g.height);
+      for(const other of g.nodes.filter(n=>n!==node))assert.ok(
+        node.x+220<=other.x || other.x+220<=node.x || node.y+82<=other.y || other.y+82<=node.y);
+    }
+    for(const edge of g.edges){
+      const a=g.nodes.find(n=>n.id===edge.from),b=g.nodes.find(n=>n.id===edge.to);
+      assert.ok(direction==='horizontal' ? a.x+220<b.x : a.y+82<b.y);
+      assert.ok(context.runDAGEdgePath(a,b,direction).startsWith(direction==='horizontal' ? `M ${a.x+220} ${a.y+41}` : `M ${a.x+110} ${a.y+82}`));
+    }
+  }
+});
+
+test('a narrow single-branch graph fits a phone without shrinking its cards',()=>{
+  const g=graph([e('run_started'),e('model_started'),e('model_finished'),e('run_finished')]);
+  assert.equal(g.width,264);
+});

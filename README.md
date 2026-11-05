@@ -452,6 +452,22 @@ routes:
 
 ### Agent 管理后台
 
+#### 本地 UI 预览（模拟数据）
+
+在项目根目录运行下面的手动测试，无需启动 kohme、配置模型或连接数据库：
+
+```powershell
+go test ./chatai/monitor -run '^TestMonitorPreview$' -v -count=1 -timeout=0 -args -monitor-preview
+```
+
+打开 http://127.0.0.1:9086，登录口令为 `preview`。预览使用当前代码内嵌的真实后台页面，提供运行日志、Skills、工具、记忆和定时任务模拟数据；可浏览详情、切换主题及 Skills 常驻状态。常驻状态仅保存在内存，重启恢复；记忆和任务编辑提交会提示预览限制，不执行实际任务，也不修改生产数据。按 `Ctrl+C` 停止。
+
+端口占用时，在命令最后追加 `-monitor-preview-port=9087`，或使用 `-monitor-preview-port=0` 自动选择空闲端口，访问终端打印的地址。只监听本机 `127.0.0.1`。修改 UI 文件后重新运行测试即可加载新页面。
+
+入口位于 `chatai/monitor/preview_test.go`；普通 `go test` 默认跳过手动预览，不会阻塞。`-timeout=0` 用于保持服务运行，`-count=1` 避免测试缓存。
+
+#### 随宿主启动
+
 网页随 Go 插件一起编译，无需安装 Node.js 或单独部署前端。在 chatai 配置的顶层增加：
 
 ```yaml

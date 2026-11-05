@@ -28,7 +28,7 @@ function addMemoryItem(u){openMemoryDialog('新增结构化记忆',u.is_group?'�
 function groupMemoryCard(g){
  const c=identifyCard(card('群',g.summary||'尚未形成群简介','群长期记忆'),'group',$('group').value);
  c.append(el('div','meta',`版本 ${g.version} · ${(g.items||[]).length} 条记忆`));
- c.append(action('查看与管理 →',()=>showGroupMemory(g)));return c;
+ const buttons=el('div','actions card-actions');buttons.append(action('查看详情',()=>showGroupMemory(g)));c.append(buttons);return c;
 }
 function showGroupMemory(g){
  const u={...g,is_group:true},dialog=el('dialog','memory-dialog memory-detail'),head=el('div','row'),heading=el('h2');
@@ -94,7 +94,8 @@ function initConsoleUI(){
 function userMemoryCard(u){
  const c=identifyCard(card('用户 '+u.user_id,'','长期记忆'),'user',u.user_id);c.classList.add('user-summary-card');
  c.append(el('p','memory-summary',u.summary||'尚未形成用户简介'));
- const bottom=el('div','row');bottom.append(el('small','',`${(u.items||[]).length} 条结构化记忆`),action('查看详情 →',()=>showUserMemory(u)));c.append(bottom);return c;
+ c.append(el('div','meta',`${(u.items||[]).length} 条结构化记忆`));
+ const bottom=el('div','actions card-actions');bottom.append(action('查看详情',()=>showUserMemory(u)));c.append(bottom);return c;
 }
 function showUserMemory(u){
  const dialog=el('dialog','memory-dialog memory-detail'),heading=el('h2'),head=el('div','row');

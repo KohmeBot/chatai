@@ -2,7 +2,7 @@
 
 // The graph describes observed decisions and their requested tools. Fan-out is
 // a planning relationship, not a claim that the executor runs tools in parallel.
-function buildRunDAG(run) {
+function buildRunDAG(run, direction = 'vertical') {
   const nodes = [], edges = [], rounds = [];
   let round = null, frontier = [], trigger;
   const add = (kind, label, event, index, state = 'running') => {
@@ -57,26 +57,54 @@ function buildRunDAG(run) {
     if (node.state === 'running' && run.status !== 'running') node.state = 'interrupted';
   }
   // Layers stay ordered even when retries reuse the same step or call ID.
-  const width = Math.max(900, ...rounds.map(item => item.tools.length * 270 + 30));
-  const center = (width - 220) / 2;
-  let y = 22;
-  const place = (node,x) => { node.x=x; node.y=y; };
-  if (trigger) { place(trigger,center); y += 116; }
+  const layers = [];
+  if (trigger) layers.push([trigger]);
   for (const item of rounds) {
-    place(item.model,center); y += 116;
+    layers.push([item.model]);
     // Keep one rank per plan: wrapping branches makes edges cross tool cards.
-    const left = (width-item.tools.length*220-(item.tools.length-1)*50)/2;
-    item.tools.forEach((node,j)=>place(node,left+j*270));
-    if(item.tools.length) y+=116;
+    if (item.tools.length) layers.push(item.tools);
   }
-  for (const node of nodes.filter(n=>n.kind==='end')) { place(node,center); y+=116; }
-  return {nodes, edges, width, height:Math.max(y,150)};
+  for (const node of nodes.filter(n=>n.kind==='end')) layers.push([node]);
+  const graph = {nodes, edges, layers};
+  layoutRunDAG(graph, direction);
+  return graph;
+}
+
+function runDAGDirection(availableWidth, screenWidth, screenHeight) {
+  return availableWidth >= 640 && screenWidth >= screenHeight ? 'horizontal' : 'vertical';
+}
+
+function layoutRunDAG(graph, direction) {
+  const horizontal = direction === 'horizontal';
+  const mainSize = horizontal ? 220 : 82, crossSize = horizontal ? 82 : 220;
+  const mainGap = horizontal ? 64 : 34, crossGap = horizontal ? 34 : 50;
+  const branches = Math.max(1, ...graph.layers.map(layer => layer.length));
+  const cross = branches * crossSize + (branches - 1) * crossGap + 44;
+  const main = Math.max(1, graph.layers.length) * (mainSize + mainGap) - mainGap + 44;
+  graph.layers.forEach((layer, rank) => {
+    const start = (cross - layer.length * crossSize - (layer.length - 1) * crossGap) / 2;
+    layer.forEach((node, branch) => {
+      const along = 22 + rank * (mainSize + mainGap), across = start + branch * (crossSize + crossGap);
+      node.x = horizontal ? along : across;
+      node.y = horizontal ? across : along;
+    });
+  });
+  Object.assign(graph, {direction, width: horizontal ? main : cross, height: horizontal ? cross : main});
+}
+
+function runDAGEdgePath(a, b, direction) {
+  if (direction === 'horizontal') {
+    const x1=a.x+220, x2=b.x, y1=a.y+41, y2=b.y+41;
+    return `M ${x1} ${y1} C ${x1+28} ${y1}, ${x2-28} ${y2}, ${x2-7} ${y2} l -5 -4 m 5 4 l -5 4`;
+  }
+  const x1=a.x+110, x2=b.x+110, y1=a.y+82, y2=b.y;
+  return `M ${x1} ${y1} C ${x1} ${y1+24}, ${x2} ${y2-28}, ${x2} ${y2-7} l -4 -5 m 4 5 l 4 -5`;
 }
 
 function renderRunDAG(run, previous = {}) {
   const graph = buildRunDAG(run), root=el('section','run-dag');
   const heading=el('div','row'), title=el('div');
-  title.append(el('h3','','Agent 规划 · DAG'),el('p','muted','真实模型决策 → 计划调用 → 后续决策。分支表示本轮选定的工具，工具仍按顺序执行。'));
+  title.append(el('h3','','Agent 规划 · DAG'),el('p','muted','分支表示选定工具，工具按顺序执行。'));
   const controls=el('div','dag-controls');
   const minus=el('button','','−'),plus=el('button','','＋'),fit=el('button','','适应');
   ConsoleControls.iconButton(minus,'minus','缩小');ConsoleControls.iconButton(plus,'plus','放大');ConsoleControls.iconButton(fit,'fit','适应视图');
@@ -96,9 +124,9 @@ function renderRunDAG(run, previous = {}) {
   svg.setAttribute('width',graph.width);svg.setAttribute('height',graph.height);svg.setAttribute('aria-hidden','true');
   const nodeMap=new Map(graph.nodes.map(n=>[n.id,n]));
   for(const edge of graph.edges){
-    const a=nodeMap.get(edge.from),b=nodeMap.get(edge.to),x1=a.x+110,x2=b.x+110,y1=a.y+82,y2=b.y;
+    const a=nodeMap.get(edge.from),b=nodeMap.get(edge.to);
     const path=document.createElementNS(svg.namespaceURI,'path');
-    path.setAttribute('d',`M ${x1} ${y1} C ${x1} ${y1+24}, ${x2} ${y2-28}, ${x2} ${y2-7} l -4 -5 m 4 5 l 4 -5`);
+    path.setAttribute('d',runDAGEdgePath(a,b,graph.direction));
     path.setAttribute('class','dag-edge'+(b.state==='running'?' is-active':''));svg.append(path);
   }
   canvas.append(svg);
@@ -131,11 +159,42 @@ function renderRunDAG(run, previous = {}) {
     canvas.style.transform=`scale(${zoom})`;spacer.style.width=graph.width*zoom+'px';spacer.style.height=graph.height*zoom+'px';
     minus.disabled=zoom<=.25;plus.disabled=zoom>=1.5;zoomReadout.textContent=`${Math.round(zoom*100)}%`;
   }
-  minus.onclick=()=>scale(zoom-.15);plus.onclick=()=>scale(zoom+.15);fit.onclick=()=>scale(Math.min(1,(viewport.clientWidth-24)/graph.width));
+  let autoFit = previous.autoFit !== undefined ? previous.autoFit : !previous.zoom;
+  root.dataset.autoFit=String(autoFit);
+  const fitScale=()=>Math.min(1,(viewport.clientWidth-24)/graph.width);
+  const manualScale=value=>{autoFit=false;root.dataset.autoFit='false';scale(value);};
+  minus.onclick=()=>manualScale(zoom-.15);plus.onclick=()=>manualScale(zoom+.15);
+  fit.onclick=()=>{autoFit=true;root.dataset.autoFit='true';scale(fitScale());};
   scale(zoom);inspect(nodeMap.get(chosen)||graph.nodes.findLast(n=>n.state==='running')||graph.nodes[graph.nodes.length-1]);
-  if(!previous.zoom) requestAnimationFrame(()=>{
+  requestAnimationFrame(()=>{
     if(!root.isConnected)return;
-    scale(Math.min(1,(viewport.clientWidth-24)/graph.width));
+    let lastWidth=0, lastDirection='';
+    function resize(){
+      const width=viewport.clientWidth;
+      if(!width)return; // Hidden tabs are laid out when shown again.
+      const direction=runDAGDirection(width,window.innerWidth,window.innerHeight);
+      if(width===lastWidth && direction===lastDirection)return;
+      const changed=!!lastDirection && direction!==lastDirection;
+      lastWidth=width;lastDirection=direction;
+      layoutRunDAG(graph,direction);root.dataset.direction=direction;
+      canvas.style.width=graph.width+'px';canvas.style.height=graph.height+'px';
+      svg.setAttribute('width',graph.width);svg.setAttribute('height',graph.height);
+      graph.edges.forEach((edge,i)=>svg.children[i].setAttribute('d',runDAGEdgePath(nodeMap.get(edge.from),nodeMap.get(edge.to),direction)));
+      canvas.querySelectorAll('button').forEach(button=>{
+        const node=nodeMap.get(button.dataset.node);
+        button.style.left=node.x+'px';button.style.top=node.y+'px';
+      });
+      scale(autoFit ? fitScale() : zoom);
+      if(changed){viewport.scrollLeft=0;viewport.scrollTop=0;}
+    }
+    const observer=new ResizeObserver(resize);observer.observe(viewport);
+    window.addEventListener('resize',resize);
+    const removal=new MutationObserver(()=>{
+      if(root.isConnected)return;
+      observer.disconnect();removal.disconnect();window.removeEventListener('resize',resize);
+    });
+    removal.observe(document.body,{childList:true,subtree:true});
+    resize();
   });
   return root;
 }

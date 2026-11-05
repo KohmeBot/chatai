@@ -185,3 +185,51 @@ test('shared actions show SVG only while keeping their accessible names', () => 
   assert.equal(button.getAttribute('aria-label'), '修改'); assert.equal(button.title, '修改');
   assert.equal(button.children[0].tagName, 'SVG'); assert.equal(button.children[0].getAttribute('aria-hidden'), 'true');
 });
+
+function pinFixture(reducedMotion = false) {
+  const f = fixture(reducedMotion), button = f.buttons[0];
+  const part = () => ({style: {removeProperty(key) { delete this[key]; }}});
+  const body = part(), needle = part();
+  button.querySelector = selector => selector === '.pin-body' ? body : needle;
+  f.controls.setResident(button, false);
+  return {...f, button, body, needle};
+}
+
+test('pin reversal keeps the visible pose and velocity, then releases its frame', () => {
+  const f = pinFixture();
+  f.controls.setResident(f.button, true, true);
+  assert.equal(f.button.getAttribute('aria-checked'), 'true');
+  for (let i = 0; i < 7; i++) f.frame();
+  const before = f.body.style.transform;
+  f.controls.setResident(f.button, false, true);
+  assert.equal(f.body.style.transform, before, 'reversal must not reset the pose');
+  f.frame();
+  const angle = text => Number(text.match(/rotate\(([^d]+)/)[1]);
+  assert.ok(angle(f.body.style.transform) < angle(before), 'existing insertion velocity should decelerate before reversing');
+  f.settle();
+  assert.equal(f.button.getAttribute('aria-checked'), 'false');
+  assert.equal(f.body.style.transform, undefined);
+  assert.equal(f.needle.style.transform, undefined);
+});
+
+test('pin spring settles at 60 and 120 Hz and stops for reduced motion or removal', () => {
+  for (const step of [1000 / 60, 1000 / 120]) {
+    const f = pinFixture();
+    f.controls.setResident(f.button, true, true); f.settle(step);
+    assert.equal(f.button.getAttribute('aria-checked'), 'true');
+    assert.equal(f.body.style.transform, undefined);
+  }
+  for (const removal of [false, true]) {
+    const f = pinFixture();
+    f.controls.setResident(f.button, true, true); f.frame();
+    if (removal) { f.button.isConnected = false; f.frame(); }
+    else { f.preference.matches = true; f.preference.emit('change'); }
+    assert.equal(f.frames.size, 0);
+    assert.equal(f.body.style.transform, undefined);
+    assert.equal(f.needle.style.transform, undefined);
+  }
+  const f = pinFixture(true);
+  f.controls.setResident(f.button, true, true);
+  assert.equal(f.frames.size, 0);
+  assert.equal(f.button.getAttribute('aria-checked'), 'true');
+});

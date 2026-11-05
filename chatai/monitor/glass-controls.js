@@ -5,6 +5,10 @@
 // https://developer.apple.com/design/human-interface-guidelines/motion
 window.ConsoleControls = (() => {
   const paths = {
+    calendar1: 'M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2ZM8 3v4m8-4v4M4 10h16m-9.5 4 1.5-1v6m-1.5 0h3',
+    calendar3: 'M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2ZM8 3v4m8-4v4M4 10h16M10 13h4l-2 3h.5a1.5 1.5 0 0 1 0 3H10',
+    calendar7: 'M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2ZM8 3v4m8-4v4M4 10h16M10 13h4l-3 6',
+    calendarCustom: 'M4 5h10a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2ZM6 3v4m6-4v4M2 10h14M19 10h4m-4 5h4m-4 5h4M20 9v2m2 3v2m-2 3v2',
     calendar: 'M4 5h16v16H4zM8 3v4m8-4v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01',
     runs: 'M4 5h16v14H4z M8 9h8M8 13h5',
     skills: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z',
@@ -31,13 +35,27 @@ window.ConsoleControls = (() => {
     flow: 'M9 3h6v5H9zM2 16h6v5H2zM16 16h6v5h-6zM12 8v4M5 16v-4h14v4',
     outputs: 'M4 7h16v13H4zM3 4h18v3H3zM9 11h6',
     timing: 'M5 20V10m7 10V4m7 16v-7', logs: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4',
-    pin: 'm9 3 6 0-1 6 4 4v2H6v-2l4-4ZM12 15v6',
+    pin: 'M8 3.5h8l-1 7 3 3v1H6v-1l3-3Z',
+    pinNeedle: 'M12 14.5V21',
     folder: 'M3 7V5h6l2 2h10v13H3z', file: 'M5 3h9l5 5v13H5zM14 3v6h5',
   };
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'control-icon');
     svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+    if (name === 'pin' || name === 'pinPinned') {
+      svg.classList.add('pin-icon');
+      if (name === 'pinPinned') svg.classList.add('is-pinned');
+      const part = (tag, attrs, parent = svg) => {
+        const node = document.createElementNS(svg.namespaceURI, tag);
+        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+        parent.append(node); return node;
+      };
+      const body = part('g', {class:'pin-body'});
+      part('path', {class:'pin-needle', d:paths.pinNeedle}, body);
+      part('path', {class:'pin-cap', d:paths.pin}, body);
+      return svg;
+    }
     const path = document.createElementNS(svg.namespaceURI, 'path');
     path.setAttribute('d', paths[name] || paths.detail); svg.append(path); return svg;
   }
@@ -49,7 +67,7 @@ window.ConsoleControls = (() => {
   const actions = {
     '修改': 'edit', '新增结构化记忆': 'plus', '查看与管理 →': 'memory', '查看详情 →': 'detail',
     '清空群记忆': 'trash', '清空长期记忆': 'trash', '编辑简介与关系': 'edit', '编辑群简介': 'edit',
-    '详情': 'detail', '查看详情 ↗': 'detail', '查看记忆': 'memory', '×': 'close', '关闭': 'close',
+    '详情': 'detail', '查看详情': 'detail', '查看详情 ↗': 'detail', '查看记忆': 'memory', '×': 'close', '关闭': 'close',
     '取消': 'close', '编辑': 'edit', '删除': 'trash', '删除任务': 'trash', '确认删除': 'trash',
     '保存修改': 'check', '创建任务': 'check', '连接并查看': 'right',
     '重试': 'refresh', '重试目录': 'refresh', '＋ 新增任务': 'plus',
@@ -64,6 +82,52 @@ window.ConsoleControls = (() => {
   }
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const pinMotions = new WeakMap();
+  // One physical progress value drives every part. Reversals retain position
+  // AND velocity; a shared near-critical spring gives a long, quiet settle.
+  function setResident(button, resident, animate = false) {
+    const body = button.querySelector('.pin-body');
+    const needle = button.querySelector('.pin-needle');
+    const previous = button.getAttribute('aria-checked') === 'true';
+    const changed = button.getAttribute('aria-checked') !== String(resident);
+    button.setAttribute('aria-checked', String(resident));
+    let motion = pinMotions.get(button);
+    if (!body || !needle || !animate || reduced.matches) { motion?.stop(); return; }
+    if (!changed) return;
+    if (motion) { motion.target = resident ? 1 : 0; return; }
+    motion = {position:previous ? 1 : 0, velocity:0, target:resident ? 1 : 0, frame:0, last:performance.now()};
+    const smooth = value => { const p = clamp(value, 0, 1); return p * p * (3 - 2 * p); };
+    function paint() {
+      const p = clamp(motion.position, 0, 1);
+      // Lift on the shared arc, straighten before insertion. The reverse path
+      // extracts the needle before tilting; no unrelated timed transitions.
+      const angle = 28 * (1 - smooth(p / .8));
+      const y = -1 + p - 2.4 * Math.sin(Math.PI * p);
+      body.style.transform = `translateY(${y}px) rotate(${angle}deg)`;
+      needle.style.transform = `scaleY(${1 - .22 * smooth((p - .4) / .6)})`;
+    }
+    function stop() {
+      cancelAnimationFrame(motion.frame);
+      body.style.removeProperty('transform'); needle.style.removeProperty('transform');
+      reduced.removeEventListener('change', preferenceChanged);
+      pinMotions.delete(button);
+    }
+    function preferenceChanged() { if (reduced.matches) stop(); }
+    function tick(now) {
+      if (!button.isConnected || reduced.matches) { stop(); return; }
+      let dt = Math.min((now - motion.last) / 1000, .04); motion.last = now;
+      while (dt > 0) {
+        const step = Math.min(dt, 1 / 240); dt -= step;
+        motion.velocity += ((motion.target - motion.position) * spring.settle.stiffness - motion.velocity * spring.settle.damping) * step;
+        motion.position += motion.velocity * step;
+      }
+      if (Math.abs(motion.target - motion.position) < .001 && Math.abs(motion.velocity) < .01) { stop(); return; }
+      paint(); motion.frame = requestAnimationFrame(tick);
+    }
+    motion.stop = stop; pinMotions.set(button, motion);
+    reduced.addEventListener('change', preferenceChanged);
+    paint(); motion.frame = requestAnimationFrame(tick);
+  }
   const instances = new Map();
   // Near-critical damping avoids a rubbery overshoot on selection. Direct
   // manipulation stays firmer so the lens still follows the pointer promptly.
@@ -282,5 +346,5 @@ window.ConsoleControls = (() => {
     dialog.addEventListener('click',event=>{if(backdropDown&&event.target===dialog)ConsoleMotion.closeDialog(dialog)});
     return {open(from,to) {start.value=from;end.value=to;editing=start;month=monthStart(parse(from)||new Date());cursor=from;render();ConsoleMotion.openDialog(dialog);focusDay()}};
   }
-  return {icon, iconButton, action, mountSegments, prune, dateRangePicker};
+  return {icon, iconButton, action, setResident, mountSegments, prune, dateRangePicker};
 })();

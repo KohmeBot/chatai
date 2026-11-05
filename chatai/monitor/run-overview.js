@@ -121,7 +121,6 @@ function renderRunOverview(run, opened, mode = 'overview') {
     alert.append(disclosure('查看异常记录', failures.map(e => `${e.name || e.kind}\n${e.error}`).join('\n\n'), `${run.id}:errors`, opened));
     root.append(alert);
   }
-  root.append(el('p', 'muted overview-hint', '想了解执行细节？切换上方标签，查看流程、产出、耗时或完整日志。'));
   return root;
   }
   root.append(el('h4', '', 'Skills · 已加载'));
@@ -141,7 +140,7 @@ function renderRunOverview(run, opened, mode = 'overview') {
   }
   if (!data.tools.length) toolList.append(el('span', 'muted', '尚无工具调用记录'));
   root.append(toolList, el('h4', '', '产物与工具结果'));
-  root.append(el('p', 'muted', '展示已记录的消息、图片来源、脚本输出及其他工具返回；工具返回不代表生成了持久文件。'));
+  root.append(el('p', 'muted', '工具返回不代表文件已保存。'));
   for (const output of data.outputs) {
     const card = el('article', 'overview-output'), heading = el('div', 'row');
     heading.append(el('strong', '', output.title), badge(output.error ? 'error' : 'success'));
