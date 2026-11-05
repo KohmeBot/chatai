@@ -606,3 +606,35 @@ agent:
 命令以机器人进程权限运行，**不是沙箱**；按群工作目录只是文件组织方式，不能隔离命令访问。仅在可信部署中启用命令执行。默认60秒、最多180秒，并受 Agent 本轮超时约束；合并输出最多64 KiB，返回退出码及截断/超时标志。取消会终止直接启动的 shell，但不保证终止所有派生或脱离的子进程，不应用此工具启动后台服务。已有的 `run_skill_script` 仍使用 pyrunner 临时沙箱。
 
 `send_file` 使用 OneBot 的 `upload_group_file` 上传到当前群；只有 `status=ok` 且 `retcode=0` 才记为成功交付。OneBot 实现必须支持该接口，并能访问机器人传入的绝对文件路径；分机或容器部署需要共享目录和相同挂载路径。工作目录中的产物和临时文件默认按最后修改时间保留 7 天，`retention_days` 可配置为 1–36500 天，0 或未配置使用默认 7 天。启动时及之后每小时扫描并删除到期文件（运行中最多延后约一小时，停机期间下次启动补清理），不跟随符号链接，不删除群根目录或子目录。命令的 `TMPDIR`、`TMP`、`TEMP` 默认指向群工作目录的 `.tmp`，一并清理；显式写到工作目录之外的文件不在清理范围。已上传的群文件不受本地清理影响。Skill 沙箱临时副本仍在运行结束后立即删除。
+
+## MCP Client
+
+通过顶层 `mcp_servers` 配置接入外部 MCP 工具，未配置时关闭。使用官方 Go SDK，支持 `stdio`、`streamable_http` 和旧版 `sse`。
+
+```yaml
+mcp_servers:
+  - name: remote
+    transport: streamable_http
+    url: http://127.0.0.1:8000/mcp
+    headers:
+      Authorization: "Bearer YOUR_TOKEN"
+    timeout_seconds: 60
+    allowed_tools: [search, fetch]
+
+  - name: local
+    transport: stdio
+    command: python
+    args: ["D:/mcp/server.py"]
+    dir: "D:/mcp"
+    env:
+      API_KEY: "YOUR_KEY"
+    timeout_seconds: 60
+```
+
+- `name` 必须唯一，长度 1–24，只允许字母、数字、下划线和连字符。`allowed_tools` 使用服务端原始工具名，省略或空列表允许所有工具。
+- 启动时完成握手和分页工具发现；任一配置、连接或白名单工具错误都会阻止插件初始化，避免静默缺少工具。修改配置或服务端工具列表后需重启插件。
+- 工具注册到 `mcp_<服务名>` 命名空间，可通过现有 `search_tools` 查找；模型函数名由服务名、清洗后的工具名和稳定哈希组成，避免冲突。
+- 发现和每次调用各自建立、关闭会话；stdio 每次启动新进程。因此不会保留跨调用的服务端会话状态，并有连接开销。调用失败不会自动重试，避免重复产生副作用。
+- 超时默认 60 秒，最大 900 秒，包括连接和请求；同时遵循 Agent 运行取消。关闭 stdio 时会给予子进程短暂退出时间。
+- 保留 MCP 内容块及结构化结果，`isError` 转为 Agent 工具失败。当前只接入 tools，不包含 resources、prompts、OAuth 授权交互或工具变更热更新。
+- 配置的工具对所有已启用群可用，默认标记为高风险，不把服务端注解作为权限保证。stdio 命令以机器人进程权限执行；命令与参数分开传递，不经过 shell。HTTP 头仅发往配置地址的同源端点，拒绝重定向。

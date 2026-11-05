@@ -2,6 +2,7 @@ package chatai
 
 import (
 	"fmt"
+	"github.com/kohmebot/chatai/chatai/mcpclient"
 
 	"github.com/kohmebot/plugin/v2/ui"
 )
@@ -15,12 +16,13 @@ type MonitorConfig struct {
 }
 
 type Config struct {
-	Monitor      MonitorConfig         `yaml:"monitor" jsonschema:"description=Agent 运行监控"`
-	System       ui.TextArea           `yaml:"system" jsonschema:"description=Agent 系统提示词"`
-	ProviderName string                `yaml:"provider_name" jsonschema:"description=默认供应商,enum=tongyi,enum=deepseek"`
-	ModelName    string                `yaml:"model_name" jsonschema:"description=默认模型名称"`
-	Providers    []ModelProviderConfig `yaml:"providers" jsonschema:"description=模型供应商配置"`
-	Routes       ModelRoutes           `yaml:"routes" jsonschema:"description=按能力选择模型；留空时回退默认模型"`
+	MCPServers   []mcpclient.ServerConfig `yaml:"mcp_servers,omitempty" jsonschema:"description=MCP 服务列表；启动时发现工具，空列表关闭"`
+	Monitor      MonitorConfig            `yaml:"monitor" jsonschema:"description=Agent 运行监控"`
+	System       ui.TextArea              `yaml:"system" jsonschema:"description=Agent 系统提示词"`
+	ProviderName string                   `yaml:"provider_name" jsonschema:"description=默认供应商,enum=tongyi,enum=deepseek"`
+	ModelName    string                   `yaml:"model_name" jsonschema:"description=默认模型名称"`
+	Providers    []ModelProviderConfig    `yaml:"providers" jsonschema:"description=模型供应商配置"`
+	Routes       ModelRoutes              `yaml:"routes" jsonschema:"description=按能力选择模型；留空时回退默认模型"`
 
 	MaxTokens   int64       `yaml:"max_tokens" jsonschema:"description=最大输出 Tokens"`
 	InputToken  int64       `yaml:"input_token" jsonschema:"description=每人每天 input token 上限"`

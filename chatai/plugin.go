@@ -12,6 +12,7 @@ import (
 
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/favor"
+	"github.com/kohmebot/chatai/chatai/mcpclient"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/model/factory"
 	"github.com/kohmebot/chatai/chatai/monitor"
@@ -103,6 +104,10 @@ func (c *ChatPlugin) routeModel(route ModelRouteConfig, system string, responseJ
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
 	if err := env.GetConf(&c.conf); err != nil {
+		return err
+	}
+	mcpTools, err := mcpclient.Discover(context.Background(), c.conf.MCPServers)
+	if err != nil {
 		return err
 	}
 	if c.conf.Agent.Work.RetentionDays < 0 || c.conf.Agent.Work.RetentionDays > 36500 {
@@ -313,7 +318,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			ProgressTips:  c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
 			RepeatEnable: c.conf.Repeat.Enable,
 			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionUpdateEnable: c.conf.Impression.Enable,
-			ExtraTools: c.extraTools,
+			ExtraTools: append(append([]agent.Tool{}, c.extraTools...), mcpTools...),
 			Skills:     skillService,
 			SearchAPI:  searcher,
 		})
@@ -374,4 +379,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.5.15" }
+func (c *ChatPlugin) Version() string      { return "v1.5.16" }
