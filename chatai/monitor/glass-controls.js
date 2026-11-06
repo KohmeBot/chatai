@@ -35,6 +35,7 @@ window.ConsoleControls = (() => {
     flow: 'M9 3h6v5H9zM2 16h6v5H2zM16 16h6v5h-6zM12 8v4M5 16v-4h14v4',
     outputs: 'M4 7h16v13H4zM3 4h18v3H3zM9 11h6',
     timing: 'M5 20V10m7 10V4m7 16v-7', logs: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4',
+    disable: 'M21 12a9 9 0 1 0-18 0 9 9 0 0 0 18 0',
     pin: 'M8 3.5h8l-1 7 3 3v1H6v-1l3-3Z',
     pinNeedle: 'M12 14.5V21',
     folder: 'M3 7V5h6l2 2h10v13H3z', file: 'M5 3h9l5 5v13H5zM14 3v6h5',
@@ -56,6 +57,13 @@ window.ConsoleControls = (() => {
       part('path', {class:'pin-cap', d:paths.pin}, body);
       return svg;
     }
+    if (name === 'disable') {
+      svg.classList.add('disable-icon');
+      for (const [cls,d] of [['disable-ring',paths.disable],['disable-slash','M6 6l12 12']]) {
+        const part=document.createElementNS(svg.namespaceURI,'path');part.setAttribute('class',cls);part.setAttribute('d',d);svg.append(part);
+      }
+      return svg;
+    }
     const path = document.createElementNS(svg.namespaceURI, 'path');
     path.setAttribute('d', paths[name] || paths.detail); svg.append(path); return svg;
   }
@@ -70,7 +78,7 @@ window.ConsoleControls = (() => {
     '详情': 'detail', '查看详情': 'detail', '查看详情 ↗': 'detail', '查看记忆': 'memory', '×': 'close', '关闭': 'close',
     '取消': 'close', '编辑': 'edit', '删除': 'trash', '删除任务': 'trash', '确认删除': 'trash',
     '保存修改': 'check', '创建任务': 'check', '连接并查看': 'right',
-    '重试': 'refresh', '重试目录': 'refresh', '＋ 新增任务': 'plus',
+    '重试': 'refresh', '重试目录': 'refresh', '重置筛选': 'refresh', '＋ 新增任务': 'plus',
     '添加记忆': 'plus', '新增记忆': 'plus', '根目录': 'folder',
   };
   function action(label, handler, danger = false) {
@@ -79,6 +87,75 @@ window.ConsoleControls = (() => {
     if (actions[label]) iconButton(button, actions[label], label.replace(' ↗', '').replace('＋ ', ''));
     else button.textContent = label; // User names / file names remain readable.
     return button;
+  }
+
+  let pickerSerial = 0, openChoice = null, choiceListeners = false;
+  // Native popovers provide top-layer clipping, light dismissal and Escape.
+  // The visible control and its motion remain part of our shared glass system.
+  function choicePicker({label, options, value = '', onChange}) {
+    if (!choiceListeners) {
+      const dismiss = event => {
+        if (!openChoice) return;
+        if (!openChoice.isConnected) { openChoice = null; return; }
+        if (event.type === 'resize' || !openChoice.contains(event.target)) openChoice.hidePopover();
+      };
+      window.addEventListener('resize', dismiss);
+      window.addEventListener('scroll', dismiss, true);
+      choiceListeners = true;
+    }
+    const root = document.createElement('div'); root.className = 'glass-choice';
+    const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'glass-choice-trigger';
+    const caption = document.createElement('span'); caption.className = 'glass-choice-caption'; caption.textContent = label;
+    const current = document.createElement('span'); current.className = 'glass-choice-value';
+    const chevron = icon('down'); chevron.classList.add('glass-choice-chevron');
+    const panel = document.createElement('div'); panel.className = 'glass-choice-menu'; panel.id = `glass-choice-${++pickerSerial}`;
+    panel.setAttribute('popover', 'auto'); panel.setAttribute('role', 'group'); panel.setAttribute('aria-label', label);
+    trigger.setAttribute('aria-controls', panel.id); trigger.setAttribute('aria-expanded', 'false');
+    trigger.append(caption, current, chevron); root.append(trigger, panel);
+    const buttons = options.map(option => {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'glass-choice-option';
+      const text = document.createElement('span'); text.textContent = option.label;
+      button.append(text, icon('check')); button.dataset.value = option.value;
+      button.onclick = () => { setValue(option.value); panel.hidePopover(); trigger.focus({preventScroll:true}); onChange(option.value); };
+      panel.append(button); return button;
+    });
+    function setValue(next) {
+      const option = options.find(option => option.value === next) || options[0]; value = option.value;
+      current.textContent = option.label; trigger.title = `${label}：${option.label}`;
+      trigger.setAttribute('aria-label', trigger.title); trigger.dataset.filtered = String(value !== '');
+      buttons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.value === value)));
+    }
+    function open() { panel.showPopover(); }
+    trigger.onclick = () => panel.matches(':popover-open') ? panel.hidePopover() : open();
+    trigger.onkeydown = event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); open(); } };
+    panel.addEventListener('beforetoggle', event => {
+      trigger.setAttribute('aria-expanded', String(event.newState === 'open'));
+      if (event.newState !== 'open') { if (openChoice === panel) openChoice = null; return; }
+      openChoice = panel;
+      const rect = trigger.getBoundingClientRect(), gap = 8, margin = 12;
+      const width = Math.min(Math.max(rect.width, 240), innerWidth - margin * 2);
+      const below = innerHeight - rect.bottom - gap - margin, above = rect.top - gap - margin;
+      const upwards = below < Math.min(options.length * 46 + 16, 280) && above > below;
+      panel.style.width = `${width}px`; panel.style.left = `${Math.max(margin, Math.min(rect.left, innerWidth - width - margin))}px`;
+      panel.style.top = upwards ? 'auto' : `${rect.bottom + gap}px`;
+      panel.style.bottom = upwards ? `${innerHeight - rect.top + gap}px` : 'auto';
+      panel.style.maxHeight = `${Math.max(80, upwards ? above : below)}px`;
+      panel.style.transformOrigin = upwards ? 'bottom center' : 'top center';
+    });
+    panel.addEventListener('toggle', () => { if (panel.matches(':popover-open')) buttons.find(button => button.dataset.value === value)?.focus({preventScroll:true}); });
+    panel.onkeydown = event => {
+      const index = buttons.indexOf(document.activeElement);
+      let next;
+      if (event.key === 'ArrowDown') next = (index + 1) % buttons.length;
+      else if (event.key === 'ArrowUp') next = (index - 1 + buttons.length) % buttons.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = buttons.length - 1;
+      else if (event.key === 'Escape') { event.preventDefault(); panel.hidePopover(); trigger.focus({preventScroll:true}); return; }
+      else if (event.key === 'Tab') { panel.hidePopover(); trigger.focus({preventScroll:true}); return; }
+      else return;
+      event.preventDefault(); buttons[next].focus({preventScroll:true});
+    };
+    setValue(value); return {root, setValue};
   }
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -346,5 +423,5 @@ window.ConsoleControls = (() => {
     dialog.addEventListener('click',event=>{if(backdropDown&&event.target===dialog)ConsoleMotion.closeDialog(dialog)});
     return {open(from,to) {start.value=from;end.value=to;editing=start;month=monthStart(parse(from)||new Date());cursor=from;render();ConsoleMotion.openDialog(dialog);focusDay()}};
   }
-  return {icon, iconButton, action, setResident, mountSegments, prune, dateRangePicker};
+  return {icon, iconButton, action, choicePicker, setResident, mountSegments, prune, dateRangePicker};
 })();

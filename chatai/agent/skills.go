@@ -50,7 +50,7 @@ func (r *Registry) skillToolNames(content string) []string {
 	names := make([]string, 0)
 	seen := make(map[string]bool)
 	for _, name := range candidates {
-		if _, ok := r.tools[name]; ok && !seen[name] {
+		if _, ok := r.tools[name]; ok && !r.disabled[name] && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
 		}

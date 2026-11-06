@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/persona"
@@ -88,6 +90,24 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		}
 		return c.scheduler.Create(id, user, bot, input.Input)
 	case "tools":
+		if r.Method == http.MethodPatch {
+			var input struct {
+				Name     string `json:"name"`
+				Disabled *bool  `json:"disabled"`
+			}
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&input); err != nil {
+				return nil, fmt.Errorf("无效工具设置: %w", err)
+			}
+			if decoder.Decode(new(any)) != io.EOF || input.Disabled == nil {
+				return nil, fmt.Errorf("需要单个 JSON 对象和 disabled 布尔值")
+			}
+			if err := p.SetToolDisabled(input.Name, *input.Disabled); err != nil {
+				return nil, err
+			}
+			return map[string]bool{"disabled": *input.Disabled}, nil
+		}
 		return p.ToolCatalog(), nil
 	case "memory":
 		if r.Method != http.MethodGet {
@@ -154,14 +174,21 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 				Name     string `json:"name"`
 				ID       uint   `json:"id"`
 				Resident *bool  `json:"resident"`
+				Disabled *bool  `json:"disabled"`
 			}
 			decoder := json.NewDecoder(r.Body)
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&input); err != nil {
 				return nil, fmt.Errorf("无效技能设置: %w", err)
 			}
-			if decoder.Decode(new(any)) != io.EOF || input.Resident == nil {
-				return nil, fmt.Errorf("需要单个 JSON 对象和 resident 布尔值")
+			if decoder.Decode(new(any)) != io.EOF || (input.Resident == nil) == (input.Disabled == nil) {
+				return nil, fmt.Errorf("需要单个 JSON 对象，且只指定 resident 或 disabled 布尔值")
+			}
+			if input.Disabled != nil {
+				if err := c.skills.SetDisabled(id, input.Name, input.ID, *input.Disabled); err != nil {
+					return nil, err
+				}
+				return map[string]bool{"disabled": *input.Disabled}, nil
 			}
 			if err := c.skills.SetResident(id, input.Name, input.ID, *input.Resident); err != nil {
 				return nil, err
@@ -172,7 +199,15 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		if c.skills == nil {
 			return map[string]any{"enabled": false, "items": items}, nil
 		}
-		summaries, err := c.skills.ListSkillSummaries()
+		var summaries []skill.Metadata
+		var err error
+		if c.skills.Directory != nil {
+			summaries, err = c.skills.Directory.List()
+		}
+		if err != nil {
+			return nil, err
+		}
+		disabled, err := c.skills.DisabledKeys()
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +216,13 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 			return nil, err
 		}
 		for _, s := range summaries {
-			items = append(items, map[string]any{"resident": resident[skill.ResidentKey(s.Name, 0)], "name": s.Name, "description": s.Description, "path": s.Path, "source": "目录 Skill", "triggers": s.Triggers, "non_triggers": s.NonTriggers})
+			item := map[string]any{"disabled": disabled[skill.ResidentKey(s.Name, 0)], "resident": resident[skill.ResidentKey(s.Name, 0)], "name": s.Name, "description": s.Description, "path": s.Path, "source": "目录 Skill", "triggers": s.Triggers, "non_triggers": s.NonTriggers}
+			files, err := c.skills.Directory.Files(r.Context(), s.Name)
+			if err == nil {
+				item["has_scripts"], item["has_resources"] = monitorSkillFiles(files)
+			}
+			// Unreadable projects remain visible, with unknown file categories.
+			items = append(items, item)
 		}
 		var records []skill.Record
 		err = c.db.Where("status = ? AND (scope = ? OR (scope = ? AND group_id = ?))", skill.StatusActive, skill.ScopeGlobal, skill.ScopeGroup, id).Order("name").Find(&records).Error
@@ -192,9 +233,33 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 			if s.Source == skill.SourceGenerated && !s.ExpiresAt.After(time.Now()) {
 				continue
 			}
-			items = append(items, map[string]any{"id": s.ID, "resident": resident[skill.ResidentKey("", s.ID)], "name": s.Name, "description": s.Description, "source": s.Source, "content": s.MarkdownText(), "triggers": s.Triggers(), "non_triggers": s.NonTriggers(), "required_tools": s.RequiredTools(), "scope": s.Scope, "version": s.Version, "updated_at": s.UpdatedAt})
+			items = append(items, map[string]any{"disabled": disabled[skill.ResidentKey("", s.ID)], "id": s.ID, "resident": resident[skill.ResidentKey("", s.ID)], "name": s.Name, "description": s.Description, "source": s.Source, "content": s.MarkdownText(), "triggers": s.Triggers(), "non_triggers": s.NonTriggers(), "required_tools": s.RequiredTools(), "scope": s.Scope, "version": s.Version, "updated_at": s.UpdatedAt})
+			items[len(items)-1]["has_scripts"] = false
+			items[len(items)-1]["has_resources"] = false
 		}
 		return map[string]any{"enabled": true, "items": items}, nil
 	}
 	return nil, fmt.Errorf("未知数据分类")
+}
+
+// Classify attached files without reading their contents. Scripts include files
+// in scripts/ and common executable source files elsewhere in the project.
+func monitorSkillFiles(files []skill.FileInfo) (scripts, resources bool) {
+	for _, file := range files {
+		name := strings.ToLower(file.Path)
+		if name == "skill.md" {
+			continue
+		}
+		isScript := strings.HasPrefix(name, "scripts/")
+		switch path.Ext(name) {
+		case ".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".bash", ".ps1", ".bat", ".cmd", ".rb", ".pl":
+			isScript = true
+		}
+		if isScript {
+			scripts = true
+		} else {
+			resources = true
+		}
+	}
+	return
 }

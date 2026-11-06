@@ -21,7 +21,7 @@ function fixture(reducedMotion = false) {
   }
   class Node extends Target {
     constructor(tag) {
-      super(); this.tagName = tag.toUpperCase(); this.children = []; this.attributes = new Map(); this.isConnected = true;
+      super(); this.tagName = tag.toUpperCase(); this.children = []; this.attributes = new Map(); this.isConnected = true; this.dataset = {};
       this.style = {setProperty(name, value) { this[name] = value; }};
       const classes = new Set(); this.classList = {add: (...v) => v.forEach(c => classes.add(c)), remove: (...v) => v.forEach(c => classes.delete(c)), contains: c => classes.has(c)};
       this.offsetWidth = 60; this.offsetHeight = 44; this.offsetTop = 5; this.offsetLeft = 5; this.clientLeft = 1; this.scrollLeft = 0;
@@ -33,13 +33,16 @@ function fixture(reducedMotion = false) {
     remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(node => node !== this); }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     closest() { return this.tagName === 'BUTTON' ? this : this.parentElement?.closest(); }
-    matches() { return this.classList.contains('nav-active') || this.getAttribute('aria-selected') === 'true' || this.getAttribute('aria-pressed') === 'true'; }
+    matches(selector) { if (selector === ':popover-open') return !!this.popoverOpen; return this.classList.contains('nav-active') || this.getAttribute('aria-selected') === 'true' || this.getAttribute('aria-pressed') === 'true'; }
+    contains(node) { return node === this || this.children.some(child => child.contains(node)); }
+    showPopover() { if (this.popoverOpen) return; this.emit('beforetoggle', {newState:'open'}); this.popoverOpen = true; this.emit('toggle', {newState:'open'}); }
+    hidePopover() { if (!this.popoverOpen) return; this.emit('beforetoggle', {newState:'closed'}); this.popoverOpen = false; this.emit('toggle', {newState:'closed'}); }
     querySelectorAll() { return this.children.filter(c => c.tagName === 'BUTTON'); }
-    getBoundingClientRect() { return {left: 100}; }
+    getBoundingClientRect() { return {left: 100, top:100, bottom:164, width:this.offsetWidth}; }
     setPointerCapture(id) { this.capture = id; }
     hasPointerCapture(id) { return this.capture === id; }
     releasePointerCapture() { this.capture = null; }
-    focus() { this.focused = true; }
+    focus() { this.focused = true; context.document.activeElement = this; }
     click() { const e = this.parentElement.emit('click', {target: this, detail: 0}); if (!e.prevented) this.onclick?.(); }
   }
   const window = new Target(), preference = new Target(); preference.matches = reducedMotion;
@@ -49,7 +52,7 @@ function fixture(reducedMotion = false) {
     disconnect() { this.disconnected = true; }
   }
   const context = vm.createContext({window, document: {createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag)},
-    matchMedia: () => preference, ResizeObserver: Observer, MutationObserver: Observer, performance: {now: () => now},
+    innerWidth:360, innerHeight:800, matchMedia: () => preference, ResizeObserver: Observer, MutationObserver: Observer, performance: {now: () => now},
     requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; }, cancelAnimationFrame: id => frames.delete(id)});
   vm.runInContext(fs.readFileSync(__dirname + '/glass-controls.js', 'utf8'), context);
   const controls = window.ConsoleControls, root = new Node('div'); root.offsetWidth = 280;
@@ -67,8 +70,44 @@ function fixture(reducedMotion = false) {
   const frame = (step = 1000 / 60) => { now += step; const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(now)); };
   const settle = (step) => { for (let i = 0; frames.size && i < 800; i++) frame(step); assert.equal(frames.size, 0, 'spring must settle and release the animation loop'); };
   const pointer = (type, x, extras = {}) => root.emit(type, {target: buttons[0], clientX: x + 101, ...extras});
-  return {root, buttons, controls, lens, pointer, frame, settle, frames, calls, preference, window, observers, sync};
+  return {root, buttons, controls, lens, pointer, frame, settle, frames, calls, preference, window, observers, sync, document:context.document};
 }
+
+test('glass choice keyboard selection commits immediately and restores trigger focus', () => {
+  const f = fixture(), selected = [];
+  const picker = f.controls.choicePicker({label:'来源', options:[{value:'',label:'全部'},{value:'generated',label:'生成技能'}], onChange:v=>selected.push(v)});
+  const [trigger,panel] = picker.root.children, [all,generated] = panel.children;
+  trigger.onclick();
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  assert.equal(f.document.activeElement, all);
+  panel.onkeydown({key:'End',preventDefault(){}});
+  assert.equal(f.document.activeElement, generated);
+  generated.onclick();
+  assert.deepEqual(selected, ['generated']);
+  assert.equal(trigger.getAttribute('aria-label'), '来源：生成技能');
+  assert.equal(f.document.activeElement, trigger);
+  assert.equal(panel.matches(':popover-open'), false);
+  picker.setValue('');
+  assert.equal(f.document.activeElement, trigger, 'reset must not replace the focused control');
+  assert.equal(all.getAttribute('aria-pressed'), 'true');
+  trigger.onclick(); panel.onkeydown({key:'Escape',preventDefault(){}});
+  assert.deepEqual(selected, ['generated'], 'Escape does not submit a new selection');
+  assert.equal(f.document.activeElement, trigger);
+});
+
+test('glass choice remains within the viewport and dismisses when its anchor moves', () => {
+  const f = fixture();
+  const picker = f.controls.choicePicker({label:'组别',options:[{value:'',label:'全部'}],onChange(){}});
+  const [trigger,panel] = picker.root.children;
+  trigger.onclick();
+  assert.ok(parseFloat(panel.style.left) + parseFloat(panel.style.width) <= 348);
+  f.window.emit('scroll',{target:panel});
+  assert.equal(panel.matches(':popover-open'),true, 'scrolling options keeps the menu open');
+  f.window.emit('scroll');
+  assert.equal(panel.matches(':popover-open'),false);
+  trigger.onclick(); f.window.emit('resize');
+  assert.equal(trigger.getAttribute('aria-expanded'),'false');
+});
 
 test('drag previews without committing, then activates the nearest segment exactly once', () => {
   const f = fixture(); f.pointer('pointerdown', 35); f.pointer('pointermove', 117); f.frame();

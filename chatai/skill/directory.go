@@ -112,6 +112,16 @@ func (d *Directory) List() ([]Metadata, error) {
 }
 
 func (d *Directory) Search(query string, limit int) ([]agent.SkillMatch, error) {
+	return d.search(query, limit, nil)
+}
+func (s *Service) SearchDirectory(query string, limit int) ([]agent.SkillMatch, error) {
+	keys, err := s.DisabledKeys()
+	if err != nil {
+		return nil, err
+	}
+	return s.Directory.search(query, limit, keys)
+}
+func (d *Directory) search(query string, limit int, disabled map[string]bool) ([]agent.SkillMatch, error) {
 	items, err := d.List()
 	if err != nil {
 		return nil, err
@@ -122,6 +132,9 @@ func (d *Directory) Search(query string, limit int) ([]agent.SkillMatch, error) 
 	}
 	var hits []hit
 	for _, m := range items {
+		if disabled[ResidentKey(m.Name, 0)] {
+			continue
+		}
 		r := Record{Name: m.Name, Description: m.Description, TriggersJSON: encodeStrings(m.Triggers)}
 		score := matchScore(query, r)
 		if score >= .22 && !matchesNegativeTrigger(query, m.NonTriggers) {
@@ -145,12 +158,19 @@ func (s *Service) ListSkillSummaries() ([]agent.SkillSummary, error) {
 	if s == nil || !s.opts.Enabled || s.Directory == nil {
 		return nil, nil
 	}
+	keys, err := s.DisabledKeys()
+	if err != nil {
+		return nil, err
+	}
 	items, err := s.Directory.List()
 	if err != nil {
 		return nil, err
 	}
 	result := make([]agent.SkillSummary, 0, len(items))
 	for _, m := range items {
+		if keys[ResidentKey(m.Name, 0)] {
+			continue
+		}
 		result = append(result, agent.SkillSummary{Name: m.Name, Description: m.Description, Path: m.Path, Triggers: m.Triggers, NonTriggers: m.NonTriggers})
 	}
 	return result, nil

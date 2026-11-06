@@ -1,4 +1,28 @@
 // Catalog presentation. All user-controlled content is rendered as DOM text.
+const catalogFilters={skills:{},tools:{}};
+function catalogCategory(item,key){
+ if(key==='source')return item.path?'directory':item.source||'unknown';
+ if(key==='server')return item.namespace?.startsWith('mcp_')?'server:'+item.namespace.slice(4):'builtin';
+ if(key==='has_scripts'||key==='has_resources')return typeof item[key]==='boolean'?String(item[key]):'unknown';
+ return item[key]||'unknown';
+}
+function filterCatalog(items,filters){return items.filter(item=>Object.entries(filters).every(([key,value])=>!value||catalogCategory(item,key)===value))}
+function mountCatalogFilters(view,data){
+ const root=$('catalog-filters');root.replaceChildren();root.hidden=!catalogFilters[view];if(root.hidden)return;
+ const items=view==='skills'?data.items:data,state=catalogFilters[view];
+ const fields=view==='skills'?[['source','来源',{directory:'目录技能',generated:'生成技能',config:'配置技能',unknown:'未知来源'}],['has_scripts','脚本',{true:'有脚本',false:'无脚本',unknown:'未能读取'}],['has_resources','资源文件',{true:'有资源文件',false:'无资源文件',unknown:'未能读取'}]]:[['risk','风险',{low:'低风险',medium:'中风险',high:'高风险',unknown:'未标注'}],['namespace','能力组别',{}],['server','MCP Server',{builtin:'内置工具（非 MCP）'}]];
+ const pickers=[];
+ const update=()=>{renderCatalog();ConsoleMotion.reveal($('catalog-content'),0,5,360)};
+ for(const [key,label,labels] of fields){
+  const values=[...new Set(items.map(item=>catalogCategory(item,key)))].sort();
+  if(!values.includes(state[key]))state[key]='';
+  const options=[{value:'',label:'全部'},...values.map(value=>({value,label:labels[value]||(key==='server'?value.slice(7):value)}))];
+  const picker=ConsoleControls.choicePicker({label,options,value:state[key],onChange:value=>{state[key]=value;update()}});
+  pickers.push([key,picker]);root.append(picker.root);
+ }
+ const reset=action('重置筛选',()=>{for(const [key,picker] of pickers){state[key]='';picker.setValue('')}$('catalog-query').value='';update()});reset.classList.add('catalog-filter-reset');root.append(reset);
+ if(view==='skills')root.append(el('small','muted catalog-filter-hint','资源文件指除 SKILL.md 和脚本以外的附带文件。'));
+}
 let resourceDialogSerial=0;
 function resourceDialog(title,description){
  const dialog=el('dialog','memory-dialog resource-detail'),head=el('div','row resource-heading'),heading=el('h2','',title);
@@ -14,14 +38,30 @@ function metadataList(root,label,values){
  root.append(el('h4','',label));if(!values?.length){root.append(el('p','muted','未声明'));return}
  const list=el('ul');for(const value of values)list.append(el('li','',value));root.append(list);
 }
+function disableControl(item,kind,group,card,status,onUpdate=()=>{}){
+ const name=kind==='tools'?item.definition.function.name:item.name;
+ const button=action('',async()=>{
+  button.disabled=true;button.setAttribute('aria-busy','true');status.textContent='保存中…';
+  try{
+   const identity=kind==='skills'&&item.id?{id:item.id}:{name};
+   const saved=await api('/api/inspect/'+kind+'?group='+encodeURIComponent(group),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...identity,disabled:!item.disabled})});
+   item.disabled=saved.disabled;update();onUpdate();status.textContent='已保存';
+  }catch(e){status.textContent=e.message}finally{button.disabled=false;button.removeAttribute('aria-busy')}
+ });
+ ConsoleControls.iconButton(button,'disable','禁用');button.classList.add('disable-toggle');button.setAttribute('role','switch');
+ const badge=el('span','badge disabled-badge','已禁用');card.append(badge);
+ const update=()=>{button.setAttribute('aria-checked',String(!!item.disabled));button.setAttribute('aria-label',name+' 禁用');button.title=item.disabled?'已禁用 · 点击恢复启用':'已启用 · 点击禁用';badge.hidden=!item.disabled;card.classList.toggle('resource-disabled',!!item.disabled)};
+ update();return button;
+}
 function renderSkills(root,data){
- $('catalog-status').textContent=data.enabled?`${data.items.length} 项可用技能`:'Skills 功能未启用';
- root.append(el('p','muted','常驻技能增加输入 Token；全局设置影响所有群，下次运行生效。'));
+ const visible=filterCatalog(data.items,catalogFilters.skills).filter(matches);
+ $('catalog-status').textContent=data.enabled?`显示 ${visible.length} / ${data.items.length} 项技能`:'Skills 功能未启用';
+ root.append(el('p','muted','常驻技能增加输入 Token；禁用后停止加载和调用，保留常驻设置。技能设置影响所有群，已加载的内容在下次运行移除。'));
  const group=$('group').value;
- section(root,'可用技能',data.items,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');const toggle=action('',async()=>{
+ section(root,'技能目录',visible,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');const toggle=action('',async()=>{
   toggle.disabled=true;toggle.setAttribute('aria-busy','true');status.textContent='保存中…';
   try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update(true);status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false;toggle.removeAttribute('aria-busy')}
- });ConsoleControls.iconButton(toggle,'pin','常驻');toggle.classList.add('resident-toggle');toggle.setAttribute('role','switch');const update=(animate=false)=>{ConsoleControls.setResident(toggle,!!s.resident,animate);toggle.setAttribute('aria-label',`${s.name} 常驻`);toggle.title=s.resident?'已常驻 · 点击取消':'未常驻 · 点击每次运行自动加载'};update();buttons.classList.add('skill-actions');buttons.append(action('查看详情',()=>showSkillDetail(s)),toggle);c.append(status,buttons);return c});
+ });ConsoleControls.iconButton(toggle,'pin','常驻');toggle.classList.add('resident-toggle');toggle.setAttribute('role','switch');const update=(animate=false)=>{ConsoleControls.setResident(toggle,!!s.resident,animate);toggle.setAttribute('aria-label',`${s.name} 常驻`);toggle.title=s.resident?'已常驻 · 点击取消':'未常驻 · 点击每次运行自动加载'};update();buttons.classList.add('skill-actions');buttons.append(action('查看详情',()=>showSkillDetail(s)),toggle);const disable=disableControl(s,'skills',group,c,status);buttons.append(disable);c.append(status,buttons);return c});
 }
 async function showSkillDetail(skill){
  const group=$('group').value,{dialog,body}=resourceDialog(skill.name,skill.description);
@@ -84,8 +124,10 @@ function renderMarkdown(source){
  }return root;
 }
 function renderTools(root,data){
- $('catalog-status').textContent=`${data.length} 个已注册工具 · 包含 search_tools 发现入口`;
- section(root,'工具能力',data,t=>{const f=t.definition.function,c=card(f.name,f.description,t.namespace);c.classList.add('catalog-summary');c.append(el('div','meta',`${t.read_only?'只读':'可执行写操作'} · 风险 ${t.risk}`));const buttons=el('div','actions card-actions');buttons.append(action('查看详情',()=>showToolDetail(t)));c.append(buttons);return c});
+ const visible=filterCatalog(data,catalogFilters.tools).filter(matches);
+ $('catalog-status').textContent=`显示 ${visible.length} / ${data.length} 个已注册工具`;
+ root.append(el('p','muted','工具禁用仅影响当前群；保存后停止新的调用，已开始的调用继续完成。'));
+ section(root,'工具能力',visible,t=>{const f=t.definition.function,c=card(f.name,f.description,t.namespace);c.classList.add('catalog-summary');c.append(el('div','meta',`${t.read_only?'只读':'可执行写操作'} · 风险 ${t.risk}`));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');buttons.append(action('查看详情',()=>showToolDetail(t)));const disable=disableControl(t,'tools',$('group').value,c,status);if(f.name==='search_tools'){disable.disabled=true;disable.title='工具发现入口，不支持禁用'}buttons.append(disable);c.append(status,buttons);return c});
 }
 function showToolDetail(tool){
  const f=tool.definition.function,{body}=resourceDialog(f.name,f.description);

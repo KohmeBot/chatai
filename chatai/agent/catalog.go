@@ -14,7 +14,7 @@ func (r *Registry) Catalog() []map[string]any {
 	sort.Strings(names)
 	for _, name := range names {
 		t := r.tools[name]
-		result = append(result, map[string]any{"definition": t.Definition, "namespace": t.Namespace, "read_only": t.ReadOnly, "idempotent": t.Idempotent, "risk": t.Risk, "group_action": t.GroupAction})
+		result = append(result, map[string]any{"disabled": r.disabled[name], "definition": t.Definition, "namespace": t.Namespace, "read_only": t.ReadOnly, "idempotent": t.Idempotent, "risk": t.Risk, "group_action": t.GroupAction})
 	}
 	return result
 }

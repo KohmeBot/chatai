@@ -127,6 +127,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		&persona.GroupMemory{}, &persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
 	}
 	tables = append(tables, skill.Models()...)
+	tables = append(tables, &agent.ToolPreference{})
 	tables = append(tables, schedule.Models()...)
 	for _, table := range tables {
 		if err := db.AutoMigrate(table); err != nil {
@@ -379,4 +380,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.5.16" }
+func (c *ChatPlugin) Version() string      { return "v1.5.17" }

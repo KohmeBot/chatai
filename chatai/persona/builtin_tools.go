@@ -1,6 +1,7 @@
 package persona
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -25,6 +26,23 @@ func (p *Persona) registerBuiltinTools() {
 	}
 	for _, tools := range groups {
 		for _, tool := range tools {
+			if tool.Namespace == "skill" && p.opts.Skills != nil {
+				handler := tool.Handler
+				tool.Handler = func(ctx *agent.RunContext, raw json.RawMessage) (any, error) {
+					var input struct {
+						Name string `json:"name"`
+					}
+					if err := json.Unmarshal(raw, &input); err != nil {
+						return nil, err
+					}
+					if input.Name != "" {
+						if err := p.opts.Skills.CheckEnabled(input.Name); err != nil {
+							return nil, err
+						}
+					}
+					return handler(ctx, raw)
+				}
+			}
 			if err := p.tools.Register(tool); err != nil {
 				panic(fmt.Sprintf("register builtin tool %q: %v", tool.Definition.Function.Name, err))
 			}

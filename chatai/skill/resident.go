@@ -100,6 +100,13 @@ func (s *Service) ResidentSkills(groupID int64) ([]agent.SkillMatch, error) {
 	if err != nil {
 		return nil, err
 	}
+	disabled, err := s.DisabledKeys()
+	if err != nil {
+		return nil, err
+	}
+	for key := range disabled {
+		delete(keys, key)
+	}
 	if len(keys) == 0 {
 		return nil, nil
 	}

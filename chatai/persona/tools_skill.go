@@ -27,7 +27,7 @@ func (p *Persona) skillTools() []agent.Tool {
 				if err := json.Unmarshal(raw, &in); err != nil {
 					return nil, err
 				}
-				matches, err := d.Search(in.Query, in.Limit)
+				matches, err := p.opts.Skills.SearchDirectory(in.Query, in.Limit)
 				if err != nil {
 					return nil, err
 				}
@@ -42,7 +42,7 @@ func (p *Persona) skillTools() []agent.Tool {
 			Definition: agent.Function("list_skills", "列出目录 Skill 的名称、描述和入口路径，不读取正文；根据任务选择后使用 read_skill", map[string]any{}),
 			Namespace:  "skill", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow,
 			SearchTerms: []string{"技能目录", "skills", "列出技能", "可用技能"},
-			Handler:     func(_ *agent.RunContext, _ json.RawMessage) (any, error) { return d.List() },
+			Handler:     func(_ *agent.RunContext, _ json.RawMessage) (any, error) { return p.opts.Skills.ListMetadata() },
 		},
 		{
 			Definition: agent.Function("read_skill", "按需读取一个 Skill 文件；默认 SKILL.md，先读 SKILL.md，再按当前步骤读取辅助文件，路径相对于该 Skill 目录，不要一次读取整个目录。读取成功后自动暴露 front matter 的 tools 清单中已注册的工具；未声明 tools 时精确匹配正文中的完整工具名，loaded_tools 返回匹配结果，无需再次搜索这些工具。读取不会执行脚本", map[string]any{"name": stringProperty("Skill 文件夹名"), "file": stringProperty("相对路径，默认 SKILL.md，例如 references/examples.md")}, "name"),

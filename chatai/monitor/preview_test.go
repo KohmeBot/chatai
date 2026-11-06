@@ -36,7 +36,7 @@ func TestMonitorPreview(t *testing.T) {
 	defer signal.Stop(interrupt)
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
-	t.Logf("\n后台预览：http://%s\n登录口令：preview\n全部为模拟数据；常驻切换仅保存在内存，记忆和任务编辑不提交。\n按 Ctrl+C 停止。", listener.Addr())
+	t.Logf("\n后台预览：http://%s\n登录口令：preview\n全部为模拟数据；常驻与禁用切换仅保存在内存，记忆和任务编辑不提交。\n按 Ctrl+C 停止。", listener.Addr())
 	select {
 	case <-interrupt:
 	case err := <-done:
@@ -85,6 +85,11 @@ func newMonitorPreview() *Store {
 		{"name": "quick-note", "description": "记录一条简短的备忘。", "source": "经验技能", "resident": false, "content": "# 快速备忘\n\n提取事项、负责人和截止时间。", "scope": "global", "version": 1, "updated_at": now},
 	}
 	users := []previewObject{}
+	// Include all catalog categories so the preview exercises real filter choices.
+	skills[0]["has_scripts"], skills[0]["has_resources"] = true, true
+	skills[1]["has_scripts"], skills[1]["has_resources"] = false, true
+	skills[2]["source"] = "generated"
+	skills[2]["has_scripts"], skills[2]["has_resources"] = false, false
 	for i, summary := range []string{"喜欢简洁直接的回复，正在维护群聊助手。", "关注前端布局、深浅主题和移动端体验。希望同类操作保持相同位置，并明确展示保存结果。", ""} {
 		users = append(users, previewObject{"user_id": fmt.Sprint(20001 + i), "summary": summary, "version": 1, "updated_at": now,
 			"relationship": previewObject{"score": 120, "level": "熟悉", "description": "经常参与项目讨论", "reason": "模拟关系数据"},
@@ -115,29 +120,48 @@ func newMonitorPreview() *Store {
 		tools = append(tools, previewObject{"namespace": "demo", "read_only": name != "send_message", "risk": "low", "idempotent": true, "group_action": name == "send_message", "definition": previewObject{"type": "function", "function": previewObject{"name": name, "description": "用于检查工具卡片和参数详情的模拟工具。", "parameters": previewObject{"type": "object", "properties": previewObject{"query": previewObject{"type": "string", "description": "待处理内容"}}, "required": []string{"query"}}}}})
 	}
 
+	tools[0]["namespace"] = "context"
+	tools[1]["namespace"], tools[1]["risk"] = "chat", "medium"
+	tools[2]["namespace"], tools[2]["risk"] = "mcp_demo", "high"
 	var mu sync.Mutex
 	s.Inspect = func(r *http.Request) (any, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		section := r.PathValue("section")
 		if r.Method != http.MethodGet {
-			if section != "skills" || r.Method != http.MethodPatch {
+			if (section != "skills" && section != "tools") || r.Method != http.MethodPatch {
 				return nil, fmt.Errorf("预览模式仅供浏览；记忆和定时任务编辑不会提交")
 			}
 			var payload struct {
 				Name     string `json:"name"`
-				Resident bool   `json:"resident"`
+				Resident *bool  `json:"resident"`
+				Disabled *bool  `json:"disabled"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				return nil, err
 			}
-			for _, skill := range skills {
-				if skill["name"] == payload.Name {
-					skill["resident"] = payload.Resident
-					return previewObject{"resident": payload.Resident}, nil
+			if section == "skills" {
+				for _, item := range skills {
+					if item["name"] == payload.Name {
+						if payload.Disabled != nil {
+							item["disabled"] = *payload.Disabled
+							return previewObject{"disabled": *payload.Disabled}, nil
+						}
+						if payload.Resident != nil {
+							item["resident"] = *payload.Resident
+							return previewObject{"resident": *payload.Resident}, nil
+						}
+					}
+				}
+			} else {
+				for _, item := range tools {
+					if item["definition"].(previewObject)["function"].(previewObject)["name"] == payload.Name && payload.Disabled != nil {
+						item["disabled"] = *payload.Disabled
+						return previewObject{"disabled": *payload.Disabled}, nil
+					}
 				}
 			}
-			return nil, fmt.Errorf("模拟技能不存在")
+			return nil, fmt.Errorf("模拟资源不存在或缺少设置")
 		}
 		var result any
 		switch section {

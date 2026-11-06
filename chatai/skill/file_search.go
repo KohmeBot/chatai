@@ -50,6 +50,19 @@ func (d *Directory) ResolveFile(p string) (string, error) {
 
 // SearchFiles searches resource paths without parsing routing metadata or bodies.
 func (d *Directory) SearchFiles(ctx context.Context, query, dir, kind string, limit int) (FileSearchResult, error) {
+	return d.searchFiles(ctx, query, dir, kind, limit, nil)
+}
+func (s *Service) SearchFiles(ctx context.Context, query, dir, kind string, limit int) (FileSearchResult, error) {
+	keys, err := s.DisabledKeys()
+	if err != nil {
+		return FileSearchResult{}, err
+	}
+	if keys[ResidentKey(strings.Split(dir, "/")[0], 0)] {
+		return FileSearchResult{}, fmt.Errorf("Skill 已禁用")
+	}
+	return s.Directory.searchFiles(ctx, query, dir, kind, limit, keys)
+}
+func (d *Directory) searchFiles(ctx context.Context, query, dir, kind string, limit int, disabled map[string]bool) (FileSearchResult, error) {
 	result := FileSearchResult{Items: make([]FileMatch, 0)}
 	if dir == "" {
 		dir = "."
@@ -90,6 +103,12 @@ func (d *Directory) SearchFiles(ctx context.Context, query, dir, kind string, li
 			return nil
 		}
 		relative := path.Join(dir, p)
+		if disabled[ResidentKey(strings.Split(relative, "/")[0], 0)] {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
 		entryKind := "file"
 		if entry.IsDir() {
 			entryKind = "directory"

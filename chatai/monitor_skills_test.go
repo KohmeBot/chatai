@@ -75,5 +75,67 @@ func TestMonitorResidentSkillSettings(t *testing.T) {
 		items := data.(map[string]any)["items"].([]map[string]any)
 		require.Len(t, items, 1)
 		require.Equal(t, value == "true", items[0]["resident"])
+		require.Equal(t, false, items[0]["has_scripts"])
+		require.Equal(t, false, items[0]["has_resources"])
+	}
+	require.NoError(t, directory.Save("demo", "scripts/main.py", "print('hello')", false))
+	require.NoError(t, directory.Save("demo", "references/help.md", "Help", false))
+	data, err := request("GET", "")
+	require.NoError(t, err)
+	item := data.(map[string]any)["items"].([]map[string]any)[0]
+	require.Equal(t, true, item["has_scripts"])
+	require.Equal(t, true, item["has_resources"])
+}
+
+func TestMonitorSkillFileCategories(t *testing.T) {
+	for _, tt := range []struct {
+		paths              []string
+		scripts, resources bool
+	}{
+		{[]string{"SKILL.md"}, false, false},
+		{[]string{"SKILL.md", "main.PY"}, true, false},
+		{[]string{"scripts/run", "assets/data.csv"}, true, true},
+		{[]string{"references/help.md", "assets/logo.png"}, false, true},
+	} {
+		files := []skill.FileInfo{}
+		for _, path := range tt.paths {
+			files = append(files, skill.FileInfo{Path: path})
+		}
+		scripts, resources := monitorSkillFiles(files)
+		require.Equal(t, tt.scripts, scripts)
+		require.Equal(t, tt.resources, resources)
+	}
+}
+
+func TestMonitorDisabledSkillRemainsVisible(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "disabled.db")), &gorm.Config{})
+	require.NoError(t, err)
+	conn, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+	require.NoError(t, db.AutoMigrate(skill.Models()...))
+	d, err := skill.NewDirectory(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, d.Save("demo", "SKILL.md", "---\nname: demo\ndescription: Demo\n---\nBody", false))
+	s := skill.NewService(db, nil, skill.Options{Enabled: true})
+	s.Directory = d
+	c := &ChatPlugin{db: db, skills: s, personaMap: map[int64]*persona.Persona{10: {}}}
+	request := func(method, body string) (any, error) {
+		r := httptest.NewRequest(method, "/api/inspect/skills?group=10", strings.NewReader(body))
+		r.SetPathValue("section", "skills")
+		return c.inspectMonitor(r)
+	}
+	for _, body := range []string{`{"name":"demo","disabled":true,"resident":true}`, `{"name":"demo","disabled":"yes"}`, `{"name":"demo","disabled":true} {}`} {
+		_, err = request("PATCH", body)
+		require.Error(t, err)
+	}
+	for _, value := range []string{"true", "false"} {
+		_, err = request("PATCH", `{"name":"demo","disabled":`+value+`}`)
+		require.NoError(t, err)
+		result, err := request("GET", "")
+		require.NoError(t, err)
+		items := result.(map[string]any)["items"].([]map[string]any)
+		require.Len(t, items, 1)
+		require.Equal(t, value == "true", items[0]["disabled"])
 	}
 }

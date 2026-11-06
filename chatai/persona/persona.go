@@ -155,6 +155,15 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 		_ = p.tools.Register(tool)
 	}
 
+	if db != nil && db.Migrator().HasTable(&agent.ToolPreference{}) {
+		var preferences []agent.ToolPreference
+		if err := db.Where("group_id = ?", groupID).Find(&preferences).Error; err != nil {
+			panic(fmt.Errorf("load tool preferences: %w", err))
+		}
+		for _, preference := range preferences {
+			p.tools.RestoreDisabled(preference.Name)
+		}
+	}
 	return p
 }
 

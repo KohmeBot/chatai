@@ -29,7 +29,7 @@ func (p *Persona) searchSkillFilesTool() agent.Tool {
 			if err := json.Unmarshal(raw, &in); err != nil {
 				return nil, err
 			}
-			return p.opts.Skills.Directory.SearchFiles(skillContext(rc), in.Query, in.Directory, in.Type, in.Limit)
+			return p.opts.Skills.SearchFiles(skillContext(rc), in.Query, in.Directory, in.Type, in.Limit)
 		},
 	}
 }

@@ -194,7 +194,7 @@ func NewService(db *gorm.DB, reflectionModel model.LargeModel, opts Options) *Se
 }
 
 // Models 返回 Skill 系统需要迁移的数据表。
-func Models() []any { return []any{&Record{}, &Evidence{}, &Residency{}} }
+func Models() []any { return []any{&Record{}, &Evidence{}, &Residency{}, &Disabled{}} }
 
 // Initialize 把第一版群级记录迁移并合并为全局 Skill，然后同步配置声明。
 func (s *Service) Initialize(definitions []Definition) error {
@@ -514,7 +514,7 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 	var directoryMatches []agent.SkillMatch
 	if s.Directory != nil {
 		var err error
-		directoryMatches, err = s.Directory.Search(query, limit)
+		directoryMatches, err = s.SearchDirectory(query, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -527,7 +527,7 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 		Updates(map[string]any{"status": StatusStale}).Error; err != nil {
 		return nil, err
 	}
-	rows, err := s.searchRecords(query, []string{StatusActive}, limit, 0.22, groupID)
+	rows, err := s.searchRecords(query, []string{StatusActive}, 0, 0.22, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -536,6 +536,17 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 		result = append(result, agent.SkillMatch{Score: matchScore(query, row), ID: row.ID, Name: row.Name, Description: row.Description,
 			Markdown: row.MarkdownText(), RequiredTools: row.RequiredTools()})
 	}
+	disabled, err := s.DisabledKeys()
+	if err != nil {
+		return nil, err
+	}
+	filtered := result[:0]
+	for _, item := range result {
+		if !disabled[ResidentKey(item.Name, item.ID)] {
+			filtered = append(filtered, item)
+		}
+	}
+	result = filtered
 	// Rank both sources together; prefer directory skills only on equal scores.
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Score > result[j].Score })
 	if len(result) > limit {

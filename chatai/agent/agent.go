@@ -259,11 +259,14 @@ type Tool struct {
 }
 
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
+	mu       sync.RWMutex
+	tools    map[string]Tool
+	disabled map[string]bool
 }
 
-func NewRegistry() *Registry { return &Registry{tools: make(map[string]Tool)} }
+func NewRegistry() *Registry {
+	return &Registry{tools: make(map[string]Tool), disabled: make(map[string]bool)}
+}
 
 func (r *Registry) Register(tool Tool) error {
 	name := tool.Definition.Function.Name
@@ -305,7 +308,7 @@ func (r *Registry) Definitions(names map[string]bool) []model.Tool {
 	defer r.mu.RUnlock()
 	selected := make([]string, 0, len(names))
 	for name := range r.tools {
-		if names[name] {
+		if names[name] && !r.disabled[name] {
 			selected = append(selected, name)
 		}
 	}
@@ -323,7 +326,7 @@ func (r *Registry) GroupActionDefinitions() []model.Tool {
 	defer r.mu.RUnlock()
 	names := make([]string, 0)
 	for name, tool := range r.tools {
-		if tool.GroupAction {
+		if tool.GroupAction && !r.disabled[name] {
 			names = append(names, name)
 		}
 	}
@@ -379,6 +382,9 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 	}
 	matches := make([]scored, 0)
 	for name, tool := range r.tools {
+		if r.disabled[name] {
+			continue
+		}
 		description := tool.Definition.Function.Description
 		haystack := strings.ToLower(name + " " + description + " " + strings.Join(tool.SearchTerms, " "))
 		score := 0
@@ -503,7 +509,11 @@ func (r *Registry) execute(ctx *RunContext, call model.ToolCall) (result any, er
 	}()
 	r.mu.RLock()
 	tool, ok := r.tools[call.Function.Name]
+	disabled := r.disabled[call.Function.Name]
 	r.mu.RUnlock()
+	if disabled {
+		return nil, fmt.Errorf("tool %q is disabled", call.Function.Name)
+	}
 	if !ok {
 		return nil, fmt.Errorf("unknown tool %q", call.Function.Name)
 	}
@@ -986,7 +996,7 @@ func (r *Registry) Has(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	_, ok := r.tools[name]
-	return ok
+	return ok && !r.disabled[name]
 }
 
 // Names 返回所有已注册工具名的稳定排序副本。
@@ -995,6 +1005,9 @@ func (r *Registry) Names() []string {
 	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
+		if r.disabled[name] {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
