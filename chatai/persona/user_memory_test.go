@@ -263,26 +263,6 @@ func TestMaintainerBootstrapBoundsHistoryAndKeepsNewestMessages(t *testing.T) {
 	require.Equal(t, rows[44].ID, cursor.LastID)
 }
 
-func TestStructuredMemoryToolsRespectWriteSwitchAndLegacySharesProfile(t *testing.T) {
-	db := memoryTestDB(t)
-	p := &Persona{db: db, tools: agent.NewRegistry()}
-	p.registerBuiltinTools()
-	require.Contains(t, p.ToolNames(), "read_user_memory")
-	require.NotContains(t, p.ToolNames(), "update_user_memory")
-	require.NotContains(t, p.ToolNames(), "update_user_favor")
-	require.NoError(t, writeUserMemory(db, UserProfile{UserID: 1, Summary: "原简介",
-		Items: []MemoryItem{{Key: "style", Kind: "preference", Text: "简短回答"}}}))
-	_, err := p.handleUpdateImpression(nil, []byte(`{"scope":"user","user_id":1,"previous_content":"原简介","content":"新简介","reason":"明确纠正"}`))
-	require.NoError(t, err)
-	_, err = p.handleUpdateUserFavor(nil, []byte(`{"user_id":1,"delta":60,"reason":"实际互动"}`))
-	require.NoError(t, err)
-	profile, err := readUserMemory(db, 1)
-	require.NoError(t, err)
-	require.Equal(t, "新简介", profile.Summary)
-	require.Len(t, profile.Items, 1)
-	require.Equal(t, int64(5), profile.Relationship.Score)
-}
-
 func TestMemoryRelationshipDeltaIsBoundedAndHasEvidence(t *testing.T) {
 	profile := UserProfile{UserID: 1}
 	rows := []ChatMessageRecord{{ID: 1, GroupID: 2, UserID: 1, CreatedAt: time.Now()}}

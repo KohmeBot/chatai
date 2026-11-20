@@ -13,6 +13,10 @@ func (p *Persona) builtinTools() [][]agent.Tool {
 		p.imageTools(),
 		p.skillTools(),
 		p.chatActionTools(),
+		p.mediaTools(),
+		p.rawMessageTools(),
+		p.groupMemberTools(),
+		p.contextTools(),
 		p.scheduleTools(),
 		p.webTools(),
 	}
@@ -23,12 +27,7 @@ func (p *Persona) builtinTools() [][]agent.Tool {
 		)
 	}
 	groupOnly := [][]agent.Tool{
-		p.groupMemberTools(),
-		p.contextTools(),
-		p.memoryTools(),
 		p.groupMemoryTools(),
-		p.mediaTools(),
-		p.rawMessageTools(),
 	}
 	for _, tools := range groupOnly {
 		for i := range tools {

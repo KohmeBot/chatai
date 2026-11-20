@@ -156,23 +156,27 @@ func (c *ChatPlugin) routeModel(route ModelRouteConfig, system string, responseJ
 	return namedModel{LargeModel: factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, MaxTokens: maxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db}), name: name}
 }
 
-func (c *ChatPlugin) conversationOptions(rules string, searcher search.Searcher) persona.Options {
+func (c *ChatPlugin) conversationOptions(rules string, searcher search.Searcher, memoryModel model.LargeModel) persona.Options {
 	settings := c.conf.Agent
 	system := string(c.conf.System) + "\n" + rules
 	opts := persona.Options{
-		AgentModel:        c.routeModel(c.conf.Routes.Agent, system, false),
-		MaxSteps:          settings.MaxSteps,
-		MaxToolCalls:      settings.MaxToolCalls,
-		RunTimeout:        time.Duration(settings.RunTimeoutSeconds) * time.Second,
-		ContextLimit:      settings.ContextLimit,
-		ProgressAfter:     time.Duration(settings.ProgressAfterSeconds) * time.Second,
-		ProgressTips:      settings.ProgressTips,
-		WebSearchPrefer:   time.Duration(settings.WebSearchPreferSeconds) * time.Second,
-		WebBrowserEnable:  settings.WebBrowserEnable,
-		WebBrowserAddress: settings.WebBrowserAddress,
-		SearchAPI:         searcher,
-		Skills:            c.skills,
-		ToolPreferences:   c.toolPreferences,
+		AgentModel:           c.routeModel(c.conf.Routes.Agent, system, false),
+		MaxSteps:             settings.MaxSteps,
+		MaxToolCalls:         settings.MaxToolCalls,
+		RunTimeout:           time.Duration(settings.RunTimeoutSeconds) * time.Second,
+		ContextLimit:         settings.ContextLimit,
+		ProgressAfter:        time.Duration(settings.ProgressAfterSeconds) * time.Second,
+		ProgressTips:         settings.ProgressTips,
+		WebSearchPrefer:      time.Duration(settings.WebSearchPreferSeconds) * time.Second,
+		WebBrowserEnable:     settings.WebBrowserEnable,
+		WebBrowserAddress:    settings.WebBrowserAddress,
+		SearchAPI:            searcher,
+		Skills:               c.skills,
+		ToolPreferences:      c.toolPreferences,
+		ConversationMemory:   settings.ConversationMemory.Enable,
+		ConversationWindow:   time.Duration(settings.ConversationMemory.WindowSeconds) * time.Second,
+		ConversationMaxChars: settings.ConversationMemory.MaxChars,
+		MemoryModel:          memoryModel,
 	}
 	if c.conf.Routes.Vision.Configured() {
 		// 带图事件使用和文本 Agent 一致的会话规则与工具说明。
@@ -367,7 +371,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 	}
 	searcher := c.newSearcher()
-	catalogOptions := c.conversationOptions("", searcher)
+	catalogOptions := c.conversationOptions("", searcher, memoryModel)
 	catalogOptions.WorkDirectory = workRoot
 	catalogOptions.WorkCommandEnable = c.conf.Agent.Work.CommandEnable
 	catalogOptions.ImpressionUpdateEnable = c.conf.Impression.Enable
@@ -382,7 +386,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 				return fmt.Errorf("create work directory: %w", err)
 			}
 		}
-		opts := c.conversationOptions(persona.AgentRules(), searcher)
+		opts := c.conversationOptions(persona.AgentRules(), searcher, memoryModel)
 		opts.Scheduler = c.scheduler
 		opts.WorkDirectory = workDir
 		opts.WorkCommandEnable = c.conf.Agent.Work.CommandEnable
@@ -390,10 +394,6 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		opts.ContinuationWindow = time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second
 		opts.ContinuationModel = c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true)
 		opts.Observer = observer
-		opts.ConversationMemory = c.conf.Agent.ConversationMemory.Enable
-		opts.ConversationWindow = time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second
-		opts.ConversationMaxChars = c.conf.Agent.ConversationMemory.MaxChars
-		opts.MemoryModel = memoryModel
 		opts.MemoryMaintainer = c.memory
 		opts.RepeatEnable = c.conf.Repeat.Enable
 		opts.RepeatCount = c.conf.Repeat.TriggerCount
@@ -410,7 +410,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.SetOnUsage(engine)
 	var privatePersona func(persona.PrivateSession) *persona.Persona
 	if privateChatEnabled {
-		opts := c.conversationOptions(persona.PrivateAgentRules(), searcher)
+		opts := c.conversationOptions(persona.PrivateAgentRules(), searcher, memoryModel)
 		opts.Scheduler = c.scheduler
 		opts.WorkDirectory = workRoot
 		opts.WorkCommandEnable = c.conf.Agent.Work.CommandEnable
@@ -480,4 +480,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.6.2" }
+func (c *ChatPlugin) Version() string      { return "v1.6.3" }

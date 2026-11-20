@@ -101,41 +101,36 @@ func TestBuiltinToolSearchFindsWorkflowsByIntent(t *testing.T) {
 	}
 }
 
-func TestBuiltinToolSearchFindsImpressionUpdateWhenEnabled(t *testing.T) {
-	p := &Persona{opts: Options{ImpressionUpdateEnable: true}, tools: agent.NewRegistry()}
-	p.registerBuiltinTools()
-
-	results := p.tools.Search("记住这位群友并更新长期印象", 5)
-	require.Contains(t, searchNames(results), "update_impression")
+func TestBuiltinMediaAndRawToolsAreAvailableInBothScopes(t *testing.T) {
+	catalog := agent.NewRegistry()
+	RegisterToolCatalog(catalog, Options{})
+	for _, name := range []string{"poke_user", "read_raw_message", "send_music", "send_raw_message", "send_record", "send_video"} {
+		require.True(t, catalog.HasInScope(name, agent.ToolScopeGroup), name)
+		require.True(t, catalog.HasInScope(name, agent.ToolScopePrivate), name)
+	}
+	p := NewPrivatePersona(PrivateSession{BotID: 10, UserID: 20}, nil, nil, Options{})
+	require.Subset(t, p.ToolNames(), []string{"poke_user", "read_raw_message", "send_music", "send_raw_message", "send_record", "send_video"})
 }
 
-func TestBuiltinToolDoesNotRegisterImpressionUpdateWhenDisabled(t *testing.T) {
-	p := &Persona{tools: agent.NewRegistry()}
-	p.registerBuiltinTools()
-
-	results := p.tools.Search("更新印象", 8)
-	require.NotContains(t, searchNames(results), "update_impression")
+func TestBuiltinMemoryToolsUseStructuredProfiles(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		p := NewPersona(123, nil, nil, Options{ImpressionUpdateEnable: enabled})
+		names := p.ToolNames()
+		for _, name := range []string{"read_user_impression", "read_group_impression", "read_user_favor", "update_user_favor", "update_impression", "ask_user_and_wait"} {
+			require.NotContains(t, names, name)
+		}
+		require.Subset(t, names, []string{"read_user_memory", "read_group_memory"})
+		require.Equal(t, enabled, p.tools.HasInScope("update_user_memory", agent.ToolScopeGroup))
+		require.Equal(t, enabled, p.tools.HasInScope("update_group_memory", agent.ToolScopeGroup))
+	}
 }
 
-func TestUpdateImpressionValidatesArgumentsBeforeDatabaseAccess(t *testing.T) {
-	p := &Persona{groupID: 12345}
-
-	_, err := p.handleUpdateImpression(nil, []byte(`{"scope":"user","user_id":0,"content":"长期印象","reason":"用户明确表达"}`))
-	require.ErrorContains(t, err, "user_id must be positive")
-
-	_, err = p.handleUpdateImpression(nil, []byte(`{"scope":"group","content":"   ","reason":"群内长期惯例"}`))
-	require.ErrorContains(t, err, "content must not be empty")
-
-	_, err = p.handleUpdateImpression(nil, []byte(`{"scope":"other","content":"长期印象","reason":"长期事实"}`))
-	require.ErrorContains(t, err, "scope must be group or user")
-}
-
-func TestGroupMemberToolsValidateCurrentGroupBeforeUsingContext(t *testing.T) {
+func TestGroupMemberToolsValidateIDsAndRequireContextForCrossGroup(t *testing.T) {
 	p := &Persona{groupID: 12345}
 	rc := &agent.RunContext{}
 
 	_, err := p.handleGetGroupMemberInfo(rc, []byte(`{"group_id":54321,"user_id":10001}`))
-	require.ErrorContains(t, err, "current group (12345)")
+	require.ErrorContains(t, err, "zero context unavailable")
 
 	_, err = p.handleGetGroupMemberList(rc, []byte(`{"group_id":0}`))
 	require.ErrorContains(t, err, "group_id must be positive")

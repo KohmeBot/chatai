@@ -34,10 +34,19 @@ func TestMonitorPrivateMemoryRoutes(t *testing.T) {
 		require.Len(t, rows, 1)
 		return rows[0]
 	}
+	value, err := request(http.MethodGet, "scope=private", "")
+	require.NoError(t, err)
+	require.Equal(t, false, value.(map[string]any)["short_enabled"])
+	c.conf.Agent.ConversationMemory.Enable = true
+	c.conf.PrivateChat = PrivateChatConfig{Enable: true, AllowedUsers: []int64{123}}
+	value, err = request(http.MethodGet, "scope=private", "")
+	require.NoError(t, err)
+	require.Equal(t, true, value.(map[string]any)["short_enabled"])
+	require.Empty(t, value.(map[string]any)["short"])
 	require.Equal(t, "私聊画像", loadPrivate()["summary"])
 	require.Equal(t, "456", loadPrivate()["bot_id"])
 	const edit = `{"target":"profile","user_id":"123","bot_id":"456","version":1,"summary":"更新后的私聊画像"}`
-	_, err := request(http.MethodPatch, "group=10", edit)
+	_, err = request(http.MethodPatch, "group=10", edit)
 	require.Error(t, err)
 	_, err = request(http.MethodPatch, "scope=private", strings.Replace(edit, `"456"`, `"789"`, 1))
 	require.Error(t, err)

@@ -18,6 +18,7 @@ func TestChatMessageRecordRoundTripPreservesContextFields(t *testing.T) {
 		MsgType:       MsgTypeReply,
 		MsgID:         30,
 		QuotedMsgID:   29,
+		QuotedGroupID: 40,
 		CreatedAt:     createdAt,
 		Url:           "https://example.com/image.png",
 		FileName:      "image.png",

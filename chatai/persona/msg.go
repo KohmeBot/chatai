@@ -89,6 +89,7 @@ type GroupMessage struct {
 	MsgType           string    // text/image/poke/mixed
 	MsgID             int64     // 消息ID,可以定位消息
 	QuotedMsgID       int64     // 被引用消息ID
+	QuotedGroupID     int64     // OneBot 确认的引用来源群
 	CreatedAt         time.Time // 创建时间
 	Url               string    // url
 	FileName          string    // file name
@@ -140,6 +141,9 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 	msg.User.Nickname = ctx.CardOrNickName(ctx.Event.UserID)
 	quoted, quotedRaw := getQuotedMessage(ctx, segments)
 	msg.QuotedRawSegments = quotedRaw
+	if quotedRaw != "" {
+		msg.QuotedGroupID = ctx.Event.GroupID
+	}
 	msg.QuotedContent = getText(quoted.Elements)
 	msg.QuotedURL = getUrl(quoted.Elements)
 	msg.Url = firstNonEmpty(msg.Url, msg.QuotedURL)
@@ -148,7 +152,13 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 		msg.QuotedUser = User{UserId: quoted.Sender.ID, Nickname: quoted.Sender.Name()}
 	}
 
-	target := getTargetID(ctx)
+	target := ctx.Event.TargetID
+	if target == 0 {
+		target = firstMentionedUserID(ctx.Event.Message)
+		if target == 0 && quoted.Sender != nil {
+			target = quoted.Sender.ID
+		}
+	}
 	if target > 0 {
 		msg.TargetUser = User{
 			UserId:   target,
@@ -285,49 +295,31 @@ func getFileName(msgs message.Message) string {
 	return ""
 }
 
-func getTargetID(ctx *zero.Ctx) int64 {
-	if ctx.Event.TargetID != 0 {
-		return ctx.Event.TargetID
-	}
-	return getTargetIDFromMsgs(ctx, ctx.Event.Message)
-}
-
-func getTargetIDFromMsgs(ctx *zero.Ctx, msgs message.Message) int64 {
-	var targetID int64
-	// 优先找at
+func firstMentionedUserID(msgs message.Message) int64 {
 	for _, segment := range msgs {
-		if segment.Type == "at" {
-			targetID, _ = strconv.ParseInt(segment.Data["qq"], 10, 64)
-			break
+		if segment.Type == MsgTypeAt {
+			targetID, _ := strconv.ParseInt(segment.Data["qq"], 10, 64)
+			return targetID
 		}
 	}
-	if targetID != 0 {
-		return targetID
-	}
-
-	// 找引用的消息
-	for _, segment := range msgs {
-		if segment.Type == "reply" {
-			msgId, _ := strconv.ParseInt(segment.Data["id"], 10, 64)
-			m := ctx.GetMessage(msgId)
-			if m.Sender != nil {
-				targetID = m.Sender.ID
-			}
-			break
-		}
-	}
-
-	return targetID
+	return 0
 }
 
 func getQuotedMessage(ctx *zero.Ctx, msgs message.Message) (zero.Message, string) {
+	if ctx.Event == nil || ctx.Event.GroupID <= 0 || zero.OnlyPrivate(ctx) {
+		return zero.Message{}, ""
+	}
 	for _, segment := range msgs {
 		if segment.Type != MsgTypeReply {
 			continue
 		}
 		messageID, err := strconv.ParseInt(segment.Data["id"], 10, 64)
-		if err == nil && messageID > 0 {
-			data := ctx.CallAction("get_msg", zero.Params{"message_id": messageID, "__zerobot_no_log_mseeage_id__": true}).Data
+		if err == nil && messageID != 0 {
+			response := ctx.CallAction("get_msg", zero.Params{"message_id": messageID, "__zerobot_no_log_mseeage_id__": true})
+			data := response.Data
+			if response.Status != "ok" || response.RetCode != 0 || data.Get("group_id").Int() != ctx.Event.GroupID || data.Get("message_type").String() == "private" {
+				return zero.Message{}, ""
+			}
 			native := json.RawMessage(data.Get("message").Raw)
 			quoted := zero.Message{
 				Elements:    message.ParseMessage(native),

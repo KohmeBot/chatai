@@ -94,6 +94,14 @@ function initConsoleUI(){
  document.addEventListener('click',e=>{if(!e.target.closest('.group-picker'))closeGroupPicker()});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('group-options').hidden){closeGroupPicker();$('group-toggle').focus()}});
 }
+function shortMemoryCard(s){
+ const c=identifyCard(card('用户 '+s.user_id,'','短期记忆'),'user',s.user_id);
+ if(s.bot_id)c.append(identity('bot',s.bot_id));
+ c.append(el('p','',[s.note.summary,s.note.dialogue].filter(Boolean).join('\n\n')||'暂无摘要'));
+ if(s.note.first_action)c.append(el('p','','续聊建议：'+s.note.first_action));
+ c.append(el('div','meta',`更新 ${time(s.updated_at)} · 到期 ${time(s.expires_at)}`));
+ return c;
+}
 function userMemoryCard(u){
  const c=identifyCard(card('用户 '+u.user_id,'','长期记忆'),'user',u.user_id);c.classList.add('user-summary-card');
  if(u.bot_id)c.append(identity('bot',u.bot_id));

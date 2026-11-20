@@ -146,8 +146,6 @@ func TestGroupAdminItemsAndToolSwitch(t *testing.T) {
 	require.Len(t, p.groupMemoryTools(), 1)
 	p.opts.ImpressionUpdateEnable = true
 	require.Len(t, p.groupMemoryTools(), 2)
-	_, err = p.handleUpdateImpression(nil, json.RawMessage(`{"scope":"group","content":"bypass","reason":"x"}`))
-	require.ErrorContains(t, err, "update_group_memory")
 	// Tool writes must validate evidence and increment the same version as admin writes.
 	row := ChatMessageRecord{GroupID: 10, UserID: 1, CreatedAt: time.Now()}
 	require.NoError(t, db.Create(&row).Error)

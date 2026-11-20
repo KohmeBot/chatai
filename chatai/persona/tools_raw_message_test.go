@@ -56,10 +56,17 @@ func TestReadForwardAndQuotedMessagePreserveNestedArrays(t *testing.T) {
 	require.Error(t, err)
 	caller.responses = nil
 	const raw = `[{"type":"custom","data":{"number":123,"nested":[{"value":"original"}]}}]`
-	caller.response = &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":7,"sender":{"user_id":1},"message":` + raw + `}`)}
+	ctx.Event = &zero.Event{GroupID: 123}
+	caller.response = &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":7,"group_id":123,"sender":{"user_id":1},"message":` + raw + `}`)}
 	quoted, preserved := getQuotedMessage(ctx, message.Message{message.Reply(7)})
 	require.JSONEq(t, raw, preserved)
 	require.Equal(t, int64(1), quoted.Sender.ID)
+	for _, source := range []string{`"group_id":999`, `"message_type":"private"`, `"group_id":123,"message_type":"private"`} {
+		caller.response.Data = gjson.Parse(`{"message_id":7,` + source + `,"sender":{"user_id":1},"message":` + raw + `}`)
+		quoted, preserved := getQuotedMessage(ctx, message.Message{message.Reply(7)})
+		require.Empty(t, preserved)
+		require.Nil(t, quoted.Sender)
+	}
 }
 
 func TestEverySendToolRejectsZeroIDBeforeRecordingOrMarkingDelivery(t *testing.T) {
@@ -68,16 +75,15 @@ func TestEverySendToolRejectsZeroIDBeforeRecordingOrMarkingDelivery(t *testing.T
 		handler agent.Handler
 		args    string
 	}{
-		"text":     {p.handleSendMessage, `{"text":"hello"}`},
-		"video":    {p.handleSendVideo, `{"url":"https://example.com/a.mp4"}`},
-		"record":   {p.handleSendRecord, `{"url":"https://example.com/a.mp3"}`},
-		"music":    {p.handleSendMusic, `{"type":"qq","id":"123"}`},
-		"image":    {p.handleSendImage, `{"url":"https://example.com/a.png"}`},
-		"at":       {p.handleAtUser, `{"user_id":1,"text":"hello"}`},
-		"batch":    {p.handleSendMessages, `{"messages":["first","second"]}`},
-		"raw":      {p.handleSendRawMessage, `{"message":[{"type":"face","data":{"id":"1"}}]}`},
-		"forward":  {p.handleSendRawMessage, `{"message":[{"type":"node","data":{"id":"1"}}]}`},
-		"followup": {p.handleAskUserAndWait, `{"user_id":1,"question":"which?"}`},
+		"text":    {p.handleSendMessage, `{"text":"hello"}`},
+		"video":   {p.handleSendVideo, `{"url":"https://example.com/a.mp4"}`},
+		"record":  {p.handleSendRecord, `{"url":"https://example.com/a.mp3"}`},
+		"music":   {p.handleSendMusic, `{"type":"qq","id":"123"}`},
+		"image":   {p.handleSendImage, `{"url":"https://example.com/a.png"}`},
+		"at":      {p.handleAtUser, `{"user_id":1,"text":"hello"}`},
+		"batch":   {p.handleSendMessages, `{"messages":["first","second"]}`},
+		"raw":     {p.handleSendRawMessage, `{"message":[{"type":"face","data":{"id":"1"}}]}`},
+		"forward": {p.handleSendRawMessage, `{"message":[{"type":"node","data":{"id":"1"}}]}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			caller := &deliveryTestCaller{}
@@ -90,8 +96,6 @@ func TestEverySendToolRejectsZeroIDBeforeRecordingOrMarkingDelivery(t *testing.T
 			require.ErrorIs(t, err, agent.ErrMessageDeliveryFailed)
 			require.False(t, rc.ActionPerformed())
 			require.False(t, rc.ResponseDelivered())
-			require.False(t, rc.WaitingForUser())
-			require.Empty(t, p.followUps)
 			require.Len(t, caller.requests, 1)
 			if name == "forward" {
 				require.Equal(t, "send_group_forward_msg", caller.requests[0].Action)
@@ -141,11 +145,10 @@ func TestTextToolsRejectEscapedNewlinesBeforeDelivery(t *testing.T) {
 		handler agent.Handler
 		args    string
 	}{
-		"text":     {p.handleSendMessage, `{"text":"first\\nsecond"}`},
-		"image":    {p.handleSendImage, `{"url":"https://example.com/a.png","text":"first\\r\\nsecond"}`},
-		"at":       {p.handleAtUser, `{"user_id":1,"text":"first\\nsecond"}`},
-		"batch":    {p.handleSendMessages, `{"messages":["valid","first\\nsecond"]}`},
-		"followup": {p.handleAskUserAndWait, `{"user_id":1,"question":"first\\nsecond"}`},
+		"text":  {p.handleSendMessage, `{"text":"first\\nsecond"}`},
+		"image": {p.handleSendImage, `{"url":"https://example.com/a.png","text":"first\\r\\nsecond"}`},
+		"at":    {p.handleAtUser, `{"user_id":1,"text":"first\\nsecond"}`},
+		"batch": {p.handleSendMessages, `{"messages":["valid","first\\nsecond"]}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			caller := &deliveryTestCaller{}
@@ -187,7 +190,4 @@ func TestReadRawMessagePreservesMetadataAndDeduplicatesNestedForwards(t *testing
 	require.Equal(t, nodes, string(data["forwards"].(map[string]json.RawMessage)["nested"]))
 	require.Empty(t, data["forward_errors"])
 	require.Len(t, caller.requests, 2, "cycles and duplicate IDs must not trigger more API calls")
-	reply := followUpReplyResult(1, GroupMessage{MsgID: 2, QuotedMsgID: 3, RawSegments: segments})["reply"].(map[string]any)
-	require.NotContains(t, reply, "raw_segments")
-	require.Equal(t, int64(3), reply["quoted_message_id"])
 }

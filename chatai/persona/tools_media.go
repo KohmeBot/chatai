@@ -14,21 +14,21 @@ import (
 func (p *Persona) mediaTools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Definition: agent.Function("send_video", "向当前群发送视频，成功后返回 message_id；成功的消息不可重复发送，message_id=0 时需修正后重试", map[string]any{
+			Definition: agent.Function("send_video", "向当前会话发送视频，成功后返回 message_id；成功的消息不可重复发送，message_id=0 时需修正后重试", map[string]any{
 				"url": stringProperty("视频 URL、本地绝对路径或相对整个 skills 目录的文件路径；本地文件须能被 OneBot 服务访问"),
 			}, "url"),
 			Namespace: "chat", Risk: agent.ToolRiskMedium, GroupAction: true,
 			SearchTerms: []string{"发送消息", "发送视频", "视频", "短视频", "video"}, Handler: p.handleSendVideo,
 		},
 		{
-			Definition: agent.Function("send_record", "向当前群发送语音条（已有音频文件），成功后返回 message_id；成功的消息不可重复发送，message_id=0 时需修正后重试", map[string]any{
+			Definition: agent.Function("send_record", "向当前会话发送语音条（已有音频文件），成功后返回 message_id；成功的消息不可重复发送，message_id=0 时需修正后重试", map[string]any{
 				"url": stringProperty("音频 URL、本地绝对路径或相对整个 skills 目录的文件路径；本地文件须能被 OneBot 服务访问"),
 			}, "url"),
 			Namespace: "chat", Risk: agent.ToolRiskMedium, GroupAction: true,
 			SearchTerms: []string{"发送消息", "发送语音", "语音条", "音频", "voice", "record"}, Handler: p.handleSendRecord,
 		},
 		{
-			Definition: agent.Function("send_music", "向当前群发送音乐分享卡片。平台歌曲提供 type 和 id；自定义卡片提供 type=custom、url、audio、title，可附 content 和 image。成功后返回 message_id，成功的消息不可重复发送，message_id=0 时需修正后重试", map[string]any{
+			Definition: agent.Function("send_music", "向当前会话发送音乐分享卡片。平台歌曲提供 type 和 id；自定义卡片提供 type=custom、url、audio、title，可附 content 和 image。成功后返回 message_id，成功的消息不可重复发送，message_id=0 时需修正后重试", map[string]any{
 				"type":    map[string]any{"type": "string", "enum": []string{"qq", "163", "xm", "custom"}, "description": "音乐平台：QQ音乐、网易云音乐、虾米或自定义；实际支持取决于 OneBot 服务"},
 				"id":      stringProperty("平台歌曲 ID，使用字符串以保留完整 ID"),
 				"url":     stringProperty("自定义卡片点击跳转的 HTTP/HTTPS URL"),
@@ -121,7 +121,7 @@ func (p *Persona) sendMediaMessage(rc *agent.RunContext, name string, segment me
 		return nil, err
 	}
 	segments := message.Message{segment}
-	id := ctx.SendGroupMessage(p.groupID, segments)
+	id := p.sendMessage(ctx, segments)
 	if err := checkMessageID(id); err != nil {
 		return nil, err
 	}

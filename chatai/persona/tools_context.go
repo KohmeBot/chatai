@@ -12,12 +12,13 @@ import (
 
 func (p *Persona) contextTools() []agent.Tool {
 	properties := contextToolProperties()
+	properties["group_id"] = groupQueryProperty()
 	userProperties := cloneProperties(properties)
 	userProperties["user_id"] = integerProperty("用户 QQ 号")
 
 	return []agent.Tool{
 		{
-			Definition:  agent.Function("read_group_context", "按最近时段、绝对时间、关键词和分页读取当前群聊天上下文；self_user_id 和消息的 is_self/target_is_self/quoted_is_self 用于识别 Agent 自己；总结‘半小时前到现在’时使用 last_minutes=30", properties),
+			Definition:  agent.Function("read_group_context", "按最近时段、绝对时间、关键词和分页读取群聊记录。群聊默认查当前群，私聊须提供群号。用 self_user_id 和 is_self/target_is_self/quoted_is_self 识别 Agent 自己；总结‘半小时前到现在’时使用 last_minutes=30", properties),
 			Namespace:   "context",
 			ReadOnly:    true,
 			Idempotent:  true,
@@ -26,7 +27,7 @@ func (p *Persona) contextTools() []agent.Tool {
 			Handler:     p.handleReadGroupContext,
 		},
 		{
-			Definition:  agent.Function("read_user_context", "按最近时段、绝对时间、关键词和分页读取某个用户在当前群的发言；self_user_id 和消息的 is_self/target_is_self/quoted_is_self 用于识别 Agent 自己", userProperties, "user_id"),
+			Definition:  agent.Function("read_user_context", "按最近时段、绝对时间、关键词和分页读取指定用户的群聊发言。群聊默认查当前群，私聊须提供群号。用 self_user_id 和 is_self/target_is_self/quoted_is_self 识别 Agent 自己", userProperties, "user_id"),
 			Namespace:   "context",
 			ReadOnly:    true,
 			Idempotent:  true,
@@ -35,7 +36,8 @@ func (p *Persona) contextTools() []agent.Tool {
 			Handler:     p.handleReadUserContext,
 		},
 		{
-			Definition: agent.Function("read_messages_by_time", "从数据库读取当前群一个或多个时间区间内的消息，可选只看指定用户", map[string]any{
+			Definition: agent.Function("read_messages_by_time", "从数据库读取一个或多个时间区间内的群消息，可选只看指定用户。群聊默认查当前群，私聊须提供群号", map[string]any{
+				"group_id": groupQueryProperty(),
 				"ranges": map[string]any{
 					"type": "array", "minItems": 1, "maxItems": 10,
 					"description": "一个或多个时间区间，开始时间包含、结束时间不包含",
@@ -81,28 +83,34 @@ func cloneProperties(source map[string]any) map[string]any {
 }
 
 func (p *Persona) handleReadGroupContext(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-	input, err := p.decodeContextQuery(raw, 0)
-	if err != nil {
-		return nil, err
-	}
-	selfUserID, err := runSelfUserID(rc)
-	if err != nil {
-		return nil, err
-	}
-	return p.readContext(input, selfUserID)
+	return p.handleReadContext(rc, raw, false)
 }
 
 func (p *Persona) handleReadUserContext(rc *agent.RunContext, raw json.RawMessage) (any, error) {
+	return p.handleReadContext(rc, raw, true)
+}
+
+func (p *Persona) handleReadContext(rc *agent.RunContext, raw json.RawMessage, filterUser bool) (any, error) {
 	var input struct {
-		UserID int64 `json:"user_id"`
+		contextQueryInput
+		GroupID *int64 `json:"group_id"`
+		UserID  int64  `json:"user_id"`
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
 	}
-	if err := validateUserID(input.UserID); err != nil {
+	userID := int64(0)
+	if filterUser {
+		if err := validateUserID(input.UserID); err != nil {
+			return nil, err
+		}
+		userID = input.UserID
+	}
+	query, err := p.buildContextQuery(input.contextQueryInput, userID)
+	if err != nil {
 		return nil, err
 	}
-	query, err := p.decodeContextQuery(raw, input.UserID)
+	groupID, err := p.resolveGroupQuery(rc, input.GroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +118,13 @@ func (p *Persona) handleReadUserContext(rc *agent.RunContext, raw json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	return p.readContext(query, selfUserID)
+	messages, hasMore, err := p.queryContextMessages(groupID, query)
+	if err != nil {
+		return nil, err
+	}
+	result := newContextQueryResult(messages, hasMore, query.Offset, selfUserID)
+	result.GroupID = groupID
+	return result, nil
 }
 
 type contextQueryInput struct {
@@ -123,6 +137,7 @@ type contextQueryInput struct {
 }
 
 type contextQueryResult struct {
+	GroupID     int64               `json:"group_id,omitempty"`
 	CurrentTime string              `json:"current_time"`
 	SelfUserID  int64               `json:"self_user_id"`
 	Count       int                 `json:"count"`
@@ -136,6 +151,10 @@ func (p *Persona) decodeContextQuery(raw json.RawMessage, userID int64) (Context
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return ContextMessageQuery{}, err
 	}
+	return p.buildContextQuery(input, userID)
+}
+
+func (p *Persona) buildContextQuery(input contextQueryInput, userID int64) (ContextMessageQuery, error) {
 	if input.Offset < 0 {
 		return ContextMessageQuery{}, errors.New("offset must not be negative")
 	}
@@ -172,14 +191,6 @@ func (p *Persona) decodeContextQuery(raw json.RawMessage, userID int64) (Context
 	return query, nil
 }
 
-func (p *Persona) readContext(query ContextMessageQuery, selfUserID int64) (contextQueryResult, error) {
-	messages, hasMore, err := p.queryContextMessages(query)
-	if err != nil {
-		return contextQueryResult{}, err
-	}
-	return newContextQueryResult(messages, hasMore, query.Offset, selfUserID), nil
-}
-
 func newContextQueryResult(messages []GroupMessage, hasMore bool, offset int, selfUserID int64) contextQueryResult {
 	result := contextQueryResult{CurrentTime: time.Now().Format(time.RFC3339), SelfUserID: selfUserID, Count: len(messages), HasMore: hasMore, Messages: timeMessageResults(messages, selfUserID)}
 	if hasMore {
@@ -195,9 +206,10 @@ type messageTimeRangeInput struct {
 
 func (p *Persona) handleReadMessagesByTime(rc *agent.RunContext, raw json.RawMessage) (any, error) {
 	var input struct {
-		Ranges []messageTimeRangeInput `json:"ranges"`
-		UserID int64                   `json:"user_id"`
-		Limit  int                     `json:"limit"`
+		GroupID *int64                  `json:"group_id"`
+		Ranges  []messageTimeRangeInput `json:"ranges"`
+		UserID  int64                   `json:"user_id"`
+		Limit   int                     `json:"limit"`
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
@@ -223,7 +235,7 @@ func (p *Persona) handleReadMessagesByTime(rc *agent.RunContext, raw json.RawMes
 		}
 		ranges[i] = MessageTimeRange{Start: start, End: end}
 	}
-	messages, err := p.messagesInTimeRanges(ranges, input.UserID, p.contextLimit(input.Limit))
+	groupID, err := p.resolveGroupQuery(rc, input.GroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,12 +243,13 @@ func (p *Persona) handleReadMessagesByTime(rc *agent.RunContext, raw json.RawMes
 	if err != nil {
 		return nil, err
 	}
-	return contextQueryResult{
-		CurrentTime: time.Now().Format(time.RFC3339),
-		SelfUserID:  selfUserID,
-		Count:       len(messages),
-		Messages:    timeMessageResults(messages, selfUserID),
-	}, nil
+	messages, err := p.messagesInTimeRanges(groupID, ranges, input.UserID, p.contextLimit(input.Limit))
+	if err != nil {
+		return nil, err
+	}
+	result := newContextQueryResult(messages, false, 0, selfUserID)
+	result.GroupID = groupID
+	return result, nil
 }
 
 func (p *Persona) contextLimit(limit int) int {

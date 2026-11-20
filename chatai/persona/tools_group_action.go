@@ -23,6 +23,7 @@ func (p *Persona) chatActionTools() []agent.Tool {
 	text := "要发送的话；JSON 换行只转义一次，解码后应是真实换行"
 	batch := "按发送顺序排列的多句话；JSON 换行只转义一次"
 	quote := "可选，引用的消息 ID"
+	pokeRequired := []string{"user_id"}
 	if p.private != nil {
 		target, audience, rhythm = "当前私聊", "当前用户", "对话节奏"
 		imageURL = "公开的 HTTP/HTTPS 图片 URL，直接返回 PNG、JPEG、GIF 或 WebP，最大 5 MiB"
@@ -30,6 +31,7 @@ func (p *Persona) chatActionTools() []agent.Tool {
 			imageURL += "；也可使用 search_skill_files 返回的技能资源路径"
 		}
 		quote = "可选，引用本次私聊中的消息 ID"
+		pokeRequired = nil
 	} else {
 		text += "。需逐字保留代码、路径或转义符时使用 send_raw_message"
 		batch += "，需逐字保留转义符时使用 send_raw_message"
@@ -71,6 +73,14 @@ func (p *Persona) chatActionTools() []agent.Tool {
 			GroupAction: true,
 			Handler:     p.handleSendMessages,
 		},
+		{
+			Definition:  agent.Function("poke_user", "立即戳一戳当前群的指定成员或当前私聊对端；这是娱乐性可见动作，只在语境自然且不会打扰对方时使用", map[string]any{"user_id": integerProperty("群聊必填，指定成员的 QQ 号；私聊可省略，填写时必须是当前对端的 QQ 号")}, pokeRequired...),
+			Namespace:   "chat",
+			Risk:        agent.ToolRiskMedium,
+			SearchTerms: []string{"发送消息", "戳一戳", "戳某人", "poke"},
+			GroupAction: true,
+			Handler:     p.handlePokeUser,
+		},
 	}
 	if p.private != nil {
 		return tools
@@ -87,15 +97,6 @@ func (p *Persona) chatActionTools() []agent.Tool {
 			Scope:       agent.ToolScopeGroup,
 			GroupAction: true,
 			Handler:     p.handleAtUser,
-		},
-		agent.Tool{
-			Definition:  agent.Function("poke_user", "立即在当前群戳一戳某人；这是娱乐性可见动作，只在语境自然且不会打扰对方时使用", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"),
-			Namespace:   "chat",
-			Risk:        agent.ToolRiskMedium,
-			SearchTerms: []string{"发送消息", "戳一戳", "戳某人", "poke"},
-			Scope:       agent.ToolScopeGroup,
-			GroupAction: true,
-			Handler:     p.handlePokeUser,
 		},
 	)
 }
@@ -375,15 +376,39 @@ func (p *Persona) handleAtUser(rc *agent.RunContext, raw json.RawMessage) (any, 
 }
 
 func (p *Persona) handlePokeUser(rc *agent.RunContext, raw json.RawMessage) (any, error) {
-	userID, err := decodeUserID(raw)
-	if err != nil {
+	var input struct {
+		UserID *int64 `json:"user_id"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	var userID int64
+	if input.UserID != nil {
+		userID = *input.UserID
+	}
+	if p.private != nil {
+		if input.UserID != nil && userID != p.private.UserID {
+			return nil, errors.New("user_id must match the current private chat")
+		}
+		userID = p.private.UserID
+	}
+	if err := validateUserID(userID); err != nil {
 		return nil, err
 	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
 		return nil, err
 	}
-	ctx.CallAction("send_poke", zero.Params{"group_id": p.groupID, "user_id": userID})
+	params := zero.Params{"user_id": userID}
+	if p.private == nil {
+		params["group_id"] = p.groupID
+	} else if !p.matchesPrivateEvent(ctx) {
+		return nil, errors.New("private chat context does not match the current session")
+	}
+	response := ctx.CallAction("send_poke", params)
+	if response.Status != "ok" || response.RetCode != 0 {
+		return nil, fmt.Errorf("send_poke failed: %w", agent.ErrMessageDeliveryFailed)
+	}
 	markVisibleAction(rc, "poke_user")
 	return "ok", nil
 }

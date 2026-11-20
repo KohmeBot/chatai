@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -281,7 +282,11 @@ func (c *ChatPlugin) inspectMemory(r *http.Request, p *persona.Persona) (any, er
 			return nil, err
 		}
 		if p == nil {
-			return persona.PrivateMemorySnapshot(c.db, offset)
+			shortEnabled := c.conf.Agent.ConversationMemory.Enable && c.conf.PrivateChat.Enable && len(c.conf.PrivateChat.AllowedUsers) > 0
+			c.toolMu.Lock()
+			livePersonas := slices.Clone(c.toolPersonas)
+			c.toolMu.Unlock()
+			return persona.PrivateMemorySnapshot(c.db, offset, shortEnabled, livePersonas)
 		}
 		return p.MemorySnapshot(offset)
 	}

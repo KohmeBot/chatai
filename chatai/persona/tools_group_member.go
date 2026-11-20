@@ -6,12 +6,14 @@ import (
 	"fmt"
 
 	"github.com/kohmebot/chatai/chatai/agent"
+	zero "github.com/wdvxdr1123/ZeroBot"
 )
 
 func (p *Persona) groupMemberTools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Definition: agent.Function("get_group_member_info", "获取当前群指定成员的详细信息；缓存响应更快，no_cache=true 可获取较新的信息", map[string]any{
+			Definition: agent.Function("get_group_member_info", "获取指定群成员的详细信息。群聊默认查当前群，私聊须提供群号。no_cache=true 可获取较新的信息", map[string]any{
+				"group_id": groupQueryProperty(),
 				"user_id":  integerProperty("成员 QQ 号"),
 				"no_cache": map[string]any{"type": "boolean", "default": false, "description": "是否不使用缓存，默认 false"},
 			}, "user_id"),
@@ -23,7 +25,7 @@ func (p *Persona) groupMemberTools() []agent.Tool {
 			Handler:     p.handleGetGroupMemberInfo,
 		},
 		{
-			Definition:  agent.Function("get_group_member_list", "获取当前群的成员列表；部分字段可能不如单独查询成员信息完整", map[string]any{}),
+			Definition:  agent.Function("get_group_member_list", "获取群成员列表。群聊默认查当前群，私聊须提供群号。部分字段可通过成员详情补查", map[string]any{"group_id": groupQueryProperty()}),
 			Namespace:   "members",
 			ReadOnly:    true,
 			Idempotent:  true,
@@ -62,21 +64,31 @@ func (p *Persona) handleGetGroupMemberInfo(rc *agent.RunContext, raw json.RawMes
 		return nil, err
 	}
 
-	if input.GroupID != nil {
-		if err := p.validateCurrentGroupID(*input.GroupID); err != nil {
-			return nil, err
-		}
-	}
 	if err := validateUserID(input.UserID); err != nil {
+		return nil, err
+	}
+	groupID, err := p.resolveGroupQuery(rc, input.GroupID)
+	if err != nil {
 		return nil, err
 	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
 		return nil, err
 	}
+	return fetchGroupMemberInfo(ctx, groupID, input.UserID, input.NoCache)
+}
+
+func fetchGroupMemberInfo(ctx *zero.Ctx, groupID, userID int64, noCache bool) (groupMemberInfo, error) {
+	response := ctx.CallAction("get_group_member_info", zero.Params{"group_id": groupID, "user_id": userID, "no_cache": noCache})
+	if response.Status != "ok" || response.RetCode != 0 {
+		return groupMemberInfo{}, errors.New("无法读取群成员资料")
+	}
 	var member groupMemberInfo
-	if err := json.Unmarshal([]byte(ctx.GetThisGroupMemberInfo(input.UserID, input.NoCache).Raw), &member); err != nil {
-		return nil, fmt.Errorf("decode group member info: %w", err)
+	if err := json.Unmarshal([]byte(response.Data.Raw), &member); err != nil {
+		return groupMemberInfo{}, fmt.Errorf("decode group member info: %w", err)
+	}
+	if member.GroupID != groupID || member.UserID != userID {
+		return groupMemberInfo{}, errors.New("无法验证群成员资料的群号和用户 QQ")
 	}
 	return member, nil
 }
@@ -88,28 +100,26 @@ func (p *Persona) handleGetGroupMemberList(rc *agent.RunContext, raw json.RawMes
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
 	}
-	if input.GroupID != nil {
-		if err := p.validateCurrentGroupID(*input.GroupID); err != nil {
-			return nil, err
-		}
+	groupID, err := p.resolveGroupQuery(rc, input.GroupID)
+	if err != nil {
+		return nil, err
 	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
 		return nil, err
 	}
-	members := make([]groupMemberInfo, 0)
-	if err := json.Unmarshal([]byte(ctx.GetThisGroupMemberList().Raw), &members); err != nil {
+	response := ctx.CallAction("get_group_member_list", zero.Params{"group_id": groupID})
+	if response.Status != "ok" || response.RetCode != 0 || !response.Data.IsArray() {
+		return nil, errors.New("无法读取群成员列表")
+	}
+	var members []groupMemberInfo
+	if err := json.Unmarshal([]byte(response.Data.Raw), &members); err != nil {
 		return nil, fmt.Errorf("decode group member list: %w", err)
 	}
+	for _, member := range members {
+		if member.GroupID != 0 && member.GroupID != groupID {
+			return nil, errors.New("群成员列表包含其他群的资料")
+		}
+	}
 	return members, nil
-}
-
-func (p *Persona) validateCurrentGroupID(groupID int64) error {
-	if groupID <= 0 {
-		return errors.New("group_id must be positive")
-	}
-	if groupID != p.groupID {
-		return fmt.Errorf("group_id must be the current group (%d)", p.groupID)
-	}
-	return nil
 }

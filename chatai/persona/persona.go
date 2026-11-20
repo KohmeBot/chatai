@@ -107,9 +107,6 @@ type Persona struct {
 	searchMu                sync.Mutex
 	preferredSearchProvider string
 	preferredSearchUntil    time.Time
-	followUpMu              sync.Mutex
-	followUps               map[int64]*followUpWaiter
-	followUpTimeout         time.Duration
 
 	defaultAgentTools []agent.Tool
 }
@@ -155,8 +152,6 @@ func newPersona(groupID int64, private *PrivateSession, env plugin.Env, db *gorm
 		opts.WebSearchPrefer = time.Hour
 	}
 	p := &Persona{groupID: groupID, private: private, env: env, db: db, opts: opts, tools: agent.NewRegistryWithToolPreferences(opts.ToolPreferences)}
-	p.followUps = make(map[int64]*followUpWaiter)
-	p.followUpTimeout = 30 * time.Second
 	p.registerBuiltinTools()
 	for _, tool := range opts.ExtraTools {
 		_ = p.tools.Register(tool)
@@ -196,12 +191,6 @@ func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
 	saveErr := p.saveMessage(msg)
 	if saveErr == nil {
 		p.opts.MemoryMaintainer.Observe(p.groupID, ctx.Event.SelfID)
-	}
-	// A reply captured by ask_user_and_wait belongs to the existing Agent run.
-	// Deliver it even if persistence failed, and do not start another run even
-	// when the user @s or replies to the bot.
-	if p.deliverFollowUp(msg) {
-		return saveErr
 	}
 	if saveErr != nil {
 		return saveErr
@@ -265,9 +254,12 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	if p.private == nil && scheduledInstruction == "" && deliveryErr == nil && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
 		runCtx.Values[continuationTurnKey] = true
 	}
-	if p.private == nil && (p.opts.ConversationMemory || p.opts.MemoryMaintainer.conversationMode()) && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
-		finish := p.opts.MemoryMaintainer.beginConversation(p.groupID, msg.User.UserId)
-		defer finish()
+	maintainGroupMemory := p.private == nil && p.opts.MemoryMaintainer.conversationMode()
+	if (p.opts.ConversationMemory || maintainGroupMemory) && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
+		if maintainGroupMemory {
+			finish := p.opts.MemoryMaintainer.beginConversation(p.groupID, msg.User.UserId)
+			defer finish()
+		}
 		runCtx.Values[conversationTurnKey] = &conversationTurn{}
 		p.rememberDialogue(runCtx, "user", msg.User.UserId, msg.MsgID, msg.Content, msg.MsgType)
 		defer p.finishConversation(runCtx)

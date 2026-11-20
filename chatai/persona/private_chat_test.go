@@ -21,6 +21,105 @@ type privateReplyTestModel struct {
 	requests []model.Request
 }
 
+func TestPrivateChatActionsDeliverToCurrentPeer(t *testing.T) {
+	const botID, userID = 987654339, 123
+	db := memoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&PrivateChatMessageRecord{}))
+	p := NewPrivatePersona(PrivateSession{BotID: botID, UserID: userID}, nil, db, Options{})
+	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":-42}`)}}
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{PostType: "message", DetailType: "private", SelfID: botID, UserID: userID, GroupID: 777}
+	for _, tc := range []struct {
+		name, args, action, param, want string
+		handler                         agent.Handler
+	}{
+		{"video", `{"url":"https://example.com/a.mp4"}`, "send_private_msg", "message", `[{"type":"video","data":{"file":"https://example.com/a.mp4"}}]`, p.handleSendVideo},
+		{"record", `{"url":"https://example.com/a.wav"}`, "send_private_msg", "message", `[{"type":"record","data":{"file":"https://example.com/a.wav"}}]`, p.handleSendRecord},
+		{"music", `{"type":"qq","id":"123"}`, "send_private_msg", "message", `[{"type":"music","data":{"type":"qq","id":"123"}}]`, p.handleSendMusic},
+		{"raw", `{"message":[{"type":"text","data":{"text":"literal\\n"}}]}`, "send_private_msg", "message", `[{"type":"text","data":{"text":"literal\\n"}}]`, p.handleSendRawMessage},
+		{"forward", `{"message":[{"type":"node","data":{"content":"[{\"type\":\"text\",\"data\":{\"text\":\"hello\"}}]"}}]}`, "send_private_forward_msg", "messages", `[{"type":"node","data":{"content":[{"type":"text","data":{"text":"hello"}}]}}]`, p.handleSendRawMessage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller.requests = nil
+			rc := &agent.RunContext{Private: true, Values: map[string]any{"zero_ctx": ctx}}
+			result, err := tc.handler(rc, json.RawMessage(tc.args))
+			require.NoError(t, err)
+			require.Equal(t, int64(-42), result.(map[string]any)["message_id"])
+			require.True(t, rc.ResponseDelivered())
+			require.Len(t, caller.requests, 1)
+			req := caller.requests[0]
+			require.Equal(t, tc.action, req.Action)
+			require.EqualValues(t, userID, req.Params["user_id"])
+			require.NotContains(t, req.Params, "group_id")
+			payload, err := json.Marshal(req.Params[tc.param])
+			require.NoError(t, err)
+			require.JSONEq(t, tc.want, string(payload))
+			result, err = p.handleReadRawMessage(rc, json.RawMessage(`{"message_id":-42}`))
+			require.NoError(t, err)
+			require.JSONEq(t, tc.want, string(result.(map[string]any)["raw_segments"].(json.RawMessage)))
+			require.Len(t, caller.requests, 1, "private raw reads use the bound session's history")
+		})
+	}
+
+	caller.requests = nil
+	rc := &agent.RunContext{Private: true, Values: map[string]any{"zero_ctx": ctx}}
+	_, err := p.handlePokeUser(rc, json.RawMessage(`{"user_id":456}`))
+	require.ErrorContains(t, err, "current private chat")
+	ctx.Event.UserID++
+	_, err = p.handlePokeUser(rc, json.RawMessage(`{}`))
+	require.ErrorContains(t, err, "current session")
+	require.Empty(t, caller.requests)
+	ctx.Event.UserID = userID
+	caller.response = &zero.APIResponse{Status: "failed", RetCode: 100}
+	_, err = p.handlePokeUser(rc, json.RawMessage(`{}`))
+	require.ErrorIs(t, err, agent.ErrMessageDeliveryFailed)
+	require.False(t, rc.ResponseDelivered())
+	caller.response = &zero.APIResponse{Status: "ok"}
+	_, err = p.handlePokeUser(rc, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.True(t, rc.ResponseDelivered())
+	require.Equal(t, "send_poke", caller.requests[1].Action)
+	require.Equal(t, zero.Params{"user_id": int64(userID)}, caller.requests[1].Params)
+}
+
+func TestPrivateRawMessagesStayInCurrentSession(t *testing.T) {
+	const botID, userID = 987654340, 123
+	db := memoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&PrivateChatMessageRecord{}, &ChatMessageRecord{}))
+	p := NewPrivatePersona(PrivateSession{BotID: botID, UserID: userID}, nil, db, Options{})
+	other := NewPrivatePersona(PrivateSession{BotID: botID, UserID: userID + 1}, nil, db, Options{})
+	msg := GroupMessage{MsgID: 7, RawSegments: `[{"type":"forward","data":{"id":"other-forward"}}]`}
+	require.NoError(t, other.saveMessage(msg))
+	require.NoError(t, db.Create(&ChatMessageRecord{GroupID: 777, MessageID: 7, RawSegments: msg.RawSegments}).Error)
+	caller := &deliveryTestCaller{}
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{PostType: "message", DetailType: "private", SelfID: botID, UserID: userID, GroupID: 777}
+	rc := &agent.RunContext{Private: true, Values: map[string]any{"zero_ctx": ctx}}
+	_, err := p.handleReadRawMessage(rc, json.RawMessage(`{"message_id":7}`))
+	require.ErrorContains(t, err, "current private conversation")
+	for _, segmentType := range []string{"reply", "node"} {
+		raw := fmt.Sprintf(`{"message":[{"type":%q,"data":{"id":"7"}}]}`, segmentType)
+		_, err := p.handleSendRawMessage(rc, json.RawMessage(raw))
+		require.ErrorContains(t, err, "current private conversation")
+	}
+	require.Empty(t, caller.requests)
+
+	const nodes = `{"messages":[{"content":[{"type":"text","data":{"text":"hello"}}]}]}`
+	caller.responses = map[string]zero.APIResponse{"get_forward_msg": {Status: "ok", Data: gjson.Parse(nodes)}}
+	msg.RawSegments = `[{"type":"forward","data":{"id":"local-forward"}}]`
+	require.NoError(t, p.saveMessage(msg))
+	result, err := p.handleReadRawMessage(rc, json.RawMessage(`{"message_id":7}`))
+	require.NoError(t, err)
+	forwards := result.(map[string]any)["forwards"].(map[string]json.RawMessage)
+	require.JSONEq(t, nodes, string(forwards["local-forward"]))
+	require.Len(t, caller.requests, 1)
+	require.Equal(t, zero.Params{"id": "local-forward"}, caller.requests[0].Params)
+}
+
 func (m *privateReplyTestModel) Request(req *model.Request, res *model.Response) error {
 	var event agentEventEnvelope
 	if err := json.NewDecoder(strings.NewReader(req.Question)).Decode(&event); err != nil {
@@ -108,9 +207,7 @@ func TestPrivateConversationInjectsBothProfiles(t *testing.T) {
 	tools := p.ToolNames()
 	require.Contains(t, tools, "read_user_memory")
 	require.Contains(t, tools, "update_user_memory")
-	for _, name := range []string{"update_impression", "update_user_favor", "read_group_context"} {
-		require.NotContains(t, tools, name)
-	}
+	require.Contains(t, tools, "read_group_context")
 	profileTool := p.privateProfileTools()[0]
 	require.True(t, profileTool.ReadOnly)
 	lookup, err := profileTool.Handler(nil, json.RawMessage(`{"user_id":999}`))
@@ -143,6 +240,10 @@ func TestPrivateConversationInjectsBothProfiles(t *testing.T) {
 	first, second := llm.events[0], llm.events[1]
 	require.Equal(t, "private_message", first.Kind)
 	require.Nil(t, first.GroupMemory)
+	require.Nil(t, first.Conversation)
+	require.NotNil(t, second.Conversation)
+	require.Contains(t, second.Conversation.Dialogue, first.Message.Content)
+	require.Contains(t, second.Conversation.Dialogue, "收到")
 	require.Equal(t, before.Summary, first.UserMemory.Summary)
 	require.Len(t, first.UserMemory.Items, 1)
 	require.Equal(t, "style", first.UserMemory.Items[0].Key)
@@ -239,7 +340,7 @@ func TestPrivateUserMemoryWritesAndConsoleEditsStayInSession(t *testing.T) {
 	require.Equal(t, "群聊画像", groupRead.(UserProfile).Summary)
 	require.Empty(t, groupRead.(UserProfile).Items)
 
-	snapshot, err := PrivateMemorySnapshot(db, 0)
+	snapshot, err := PrivateMemorySnapshot(db, 0, false, nil)
 	require.NoError(t, err)
 	entries := snapshot.(map[string]any)["users"].([]map[string]any)
 	require.Len(t, entries, 2)

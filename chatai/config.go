@@ -79,7 +79,7 @@ type ConfiguredSkill struct {
 type AgentConfig struct {
 	Work                   WorkConfig               `yaml:"work" jsonschema:"description=持久工作目录及宿主命令执行"`
 	ContinuationSeconds    int                      `yaml:"continuation_seconds" jsonschema:"description=连续对话存留秒数，默认60,minimum=1"`
-	ConversationMemory     ConversationMemoryConfig `yaml:"conversation_memory" jsonschema:"description=按群和用户隔离的短期对话记忆"`
+	ConversationMemory     ConversationMemoryConfig `yaml:"conversation_memory" jsonschema:"description=群聊和私聊的短期对话记忆，按会话隔离"`
 	MaxSteps               int                      `yaml:"max_steps" jsonschema:"description=单次 Agent 最大模型决策轮数,minimum=1,maximum=20"`
 	MaxToolCalls           int                      `yaml:"max_tool_calls" jsonschema:"description=单次 Agent 最大工具调用总数,minimum=1,maximum=100"`
 	RunTimeoutSeconds      int                      `yaml:"run_timeout_seconds" jsonschema:"description=单次 Agent 执行超时秒数,minimum=30,maximum=900"`

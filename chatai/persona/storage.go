@@ -3,6 +3,8 @@ package persona
 import (
 	"sort"
 	"time"
+
+	"github.com/wdvxdr1123/ZeroBot/message"
 )
 
 // ChatMessageRecord 持久化群聊上下文；复读窗口不依赖此表。
@@ -25,6 +27,7 @@ type ChatMessageRecord struct {
 	URL               string
 	FileName          string
 	QuotedMessageID   int64
+	QuotedGroupID     int64
 	QuotedURL         string
 	Referred          bool
 	CreatedAt         time.Time `gorm:"index:idx_chat_group_created;index:idx_chat_group_user_created"`
@@ -52,14 +55,24 @@ func messageRecord(groupID int64, msg GroupMessage) ChatMessageRecord {
 		TargetUserID: msg.TargetUser.UserId, TargetNickname: msg.TargetUser.Nickname, Content: msg.Content,
 		QuotedUserID: msg.QuotedUser.UserId, QuotedNickname: msg.QuotedUser.Nickname, QuotedContent: msg.QuotedContent,
 		MsgType: msg.MsgType, MessageID: msg.MsgID, QuotedMessageID: msg.QuotedMsgID, URL: msg.Url, FileName: msg.FileName,
-		QuotedURL: msg.QuotedURL, Referred: msg.Refer, CreatedAt: msg.CreatedAt}
+		QuotedURL: msg.QuotedURL, QuotedGroupID: msg.QuotedGroupID, Referred: msg.Refer, CreatedAt: msg.CreatedAt}
 }
 
 func (r ChatMessageRecord) message() GroupMessage {
-	return GroupMessage{SourceID: r.ID, RawMessage: r.RawMessage, RawSegments: r.RawSegments, QuotedRawSegments: r.QuotedRawSegments, User: User{UserId: r.UserID, Nickname: r.UserNickname}, TargetUser: User{UserId: r.TargetUserID, Nickname: r.TargetNickname},
+	msg := GroupMessage{SourceID: r.ID, RawMessage: r.RawMessage, RawSegments: r.RawSegments, QuotedRawSegments: r.QuotedRawSegments, User: User{UserId: r.UserID, Nickname: r.UserNickname}, TargetUser: User{UserId: r.TargetUserID, Nickname: r.TargetNickname},
 		QuotedUser: User{UserId: r.QuotedUserID, Nickname: r.QuotedNickname}, Content: r.Content, QuotedContent: r.QuotedContent,
 		MsgType: r.MsgType, MsgID: r.MessageID, QuotedMsgID: r.QuotedMessageID, CreatedAt: r.CreatedAt, Url: r.URL,
-		FileName: r.FileName, QuotedURL: r.QuotedURL, Refer: r.Referred}
+		FileName: r.FileName, QuotedURL: r.QuotedURL, QuotedGroupID: r.QuotedGroupID, Refer: r.Referred}
+	// Older rows may have copied content and attachments from an unchecked get_msg response.
+	if r.QuotedMessageID != 0 && r.QuotedGroupID != r.GroupID {
+		segments := message.ParseMessage([]byte(r.RawSegments))
+		msg.QuotedUser, msg.QuotedRawSegments, msg.QuotedContent, msg.QuotedURL = User{}, "", "", ""
+		msg.Url, msg.FileName = getUrl(segments), getFileName(segments)
+		if firstMentionedUserID(segments) != r.TargetUserID {
+			msg.TargetUser = User{}
+		}
+	}
+	return msg
 }
 
 func (p *Persona) saveMessage(msg GroupMessage) error {
@@ -103,11 +116,11 @@ func (p *Persona) recentUserMessages(userID int64, limit int) ([]GroupMessage, e
 	return result, nil
 }
 
-func (p *Persona) queryContextMessages(input ContextMessageQuery) ([]GroupMessage, bool, error) {
+func (p *Persona) queryContextMessages(groupID int64, input ContextMessageQuery) ([]GroupMessage, bool, error) {
 	if input.Limit <= 0 {
 		return nil, false, nil
 	}
-	query := p.db.Where("group_id = ?", p.groupID)
+	query := p.db.Where("group_id = ?", groupID)
 	if input.UserID > 0 {
 		query = query.Where("user_id = ?", input.UserID)
 	}
@@ -137,13 +150,13 @@ func (p *Persona) queryContextMessages(input ContextMessageQuery) ([]GroupMessag
 
 // messagesInTimeRanges 从持久化消息中查询一个或多个时间段，去重后按时间正序返回。
 // userID 为 0 时查询全群，否则只返回指定用户的消息。
-func (p *Persona) messagesInTimeRanges(ranges []MessageTimeRange, userID int64, limit int) ([]GroupMessage, error) {
+func (p *Persona) messagesInTimeRanges(groupID int64, ranges []MessageTimeRange, userID int64, limit int) ([]GroupMessage, error) {
 	if len(ranges) == 0 || limit <= 0 {
 		return nil, nil
 	}
 	unique := make(map[uint]ChatMessageRecord)
 	for _, item := range ranges {
-		query := p.db.Where("group_id = ? AND created_at >= ? AND created_at < ?", p.groupID, item.Start, item.End)
+		query := p.db.Where("group_id = ? AND created_at >= ? AND created_at < ?", groupID, item.Start, item.End)
 		if userID > 0 {
 			query = query.Where("user_id = ?", userID)
 		}

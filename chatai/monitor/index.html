@@ -185,10 +185,8 @@ function renderCatalog(){if(catalogData===null)return;const root=$('catalog-cont
  if(currentView==='skills'){renderSkills(root,d);return}
  if(currentView==='tools'){renderTools(root,d);return}
  $('catalog-status').textContent='仅显示有效记忆 · 用户记忆搜索限当前页';
- if(catalogScopes.memory==='group'){
-  section(root,'群长期记忆',[d.group_memory],groupMemoryCard);
-  section(root,'短期对话'+(d.short_enabled?'':' · 未启用'),d.short,s=>{const c=card('用户 '+s.user_id,[s.note.summary,s.note.dialogue].filter(Boolean).join('\n\n')||'暂无摘要','短期 · 内存');identifyCard(c,'user',s.user_id);if(s.note.first_action)c.append(el('p','','续聊建议：'+s.note.first_action));c.append(el('div','meta',`更新 ${time(s.updated_at)} · 到期 ${time(s.expires_at)}`));return c});
- }
+ if(catalogScopes.memory==='group')section(root,'群长期记忆',[d.group_memory],groupMemoryCard);
+ section(root,'短期对话'+(d.short_enabled?'':' · 未启用'),d.short||[],shortMemoryCard);
  section(root,'用户长期记忆',d.users||[],userMemoryCard);$('pagination').hidden=false;$('previous').disabled=offset===0;$('next').disabled=!d.has_more;$('page-number').textContent=`第 ${offset/50+1} 页`;
 }
 $('catalog-query').oninput=renderCatalog;$('catalog-refresh').onclick=()=>ConsoleMotion.busy($('catalog-refresh'),catalogScopes[currentView]==='group'?loadGroups:loadCatalog);$('group').onchange=()=>{updateGroupIdentity();offset=0;loadCatalog()};$('previous').onclick=()=>{offset=Math.max(0,offset-50);loadCatalog()};$('next').onclick=()=>{offset+=50;loadCatalog()};
