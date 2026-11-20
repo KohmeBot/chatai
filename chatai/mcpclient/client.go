@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,16 +23,17 @@ import (
 )
 
 type ServerConfig struct {
-	Name           string               `yaml:"name"`
-	Transport      string               `yaml:"transport" jsonschema:"enum=stdio,enum=streamable_http,enum=sse"`
-	Command        string               `yaml:"command,omitempty"`
-	Args           []string             `yaml:"args,omitempty"`
-	Env            map[string]ui.Secret `yaml:"env,omitempty"`
-	Dir            string               `yaml:"dir,omitempty"`
-	URL            string               `yaml:"url,omitempty"`
-	Headers        map[string]ui.Secret `yaml:"headers,omitempty"`
-	AllowedTools   []string             `yaml:"allowed_tools,omitempty"`
-	TimeoutSeconds int                  `yaml:"timeout_seconds,omitempty" jsonschema:"minimum=1,maximum=900"`
+	Name           string                     `yaml:"name"`
+	Transport      string                     `yaml:"transport" jsonschema:"enum=stdio,enum=streamable_http,enum=sse"`
+	Command        string                     `yaml:"command,omitempty"`
+	Args           []string                   `yaml:"args,omitempty"`
+	Env            map[string]ui.Secret       `yaml:"env,omitempty"`
+	Dir            string                     `yaml:"dir,omitempty"`
+	URL            string                     `yaml:"url,omitempty"`
+	Headers        map[string]ui.Secret       `yaml:"headers,omitempty"`
+	AllowedTools   []string                   `yaml:"allowed_tools,omitempty"`
+	ToolScopes     map[string]agent.ToolScope `yaml:"tool_scopes,omitempty" jsonschema:"description=按 MCP 原始工具名设置 group、private 或 both，默认 both"`
+	TimeoutSeconds int                        `yaml:"timeout_seconds,omitempty" jsonschema:"minimum=1,maximum=900"`
 }
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
@@ -42,6 +44,11 @@ func (c ServerConfig) validate() error {
 	}
 	if c.TimeoutSeconds < 0 || c.TimeoutSeconds > 900 {
 		return fmt.Errorf("MCP %s: timeout_seconds must be 0..900", c.Name)
+	}
+	for name, scope := range c.ToolScopes {
+		if !scope.Valid() {
+			return fmt.Errorf("MCP %s tool %q: invalid chat scope %q", c.Name, name, scope)
+		}
 	}
 	switch c.Transport {
 	case "stdio":
@@ -159,10 +166,12 @@ func discover(ctx context.Context, c ServerConfig) ([]agent.Tool, error) {
 	}
 	var tools []agent.Tool
 	seen := map[string]bool{}
+	unmatchedScopes := maps.Clone(c.ToolScopes)
 	for remote, err := range session.Tools(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
+		delete(unmatchedScopes, remote.Name)
 		if _, ok := allowed[remote.Name]; len(allowed) > 0 && !ok {
 			continue
 		}
@@ -184,6 +193,9 @@ func discover(ctx context.Context, c ServerConfig) ([]agent.Tool, error) {
 			return nil, fmt.Errorf("allowed tool %q not found", name)
 		}
 	}
+	for name := range unmatchedScopes {
+		return nil, fmt.Errorf("tool_scopes references unknown tool %q", name)
+	}
 	return tools, nil
 }
 
@@ -203,9 +215,14 @@ func adapt(c ServerConfig, t *mcp.Tool) (agent.Tool, error) {
 	}
 	hash := sha256.Sum256([]byte(t.Name))
 	local := fmt.Sprintf("mcp_%s_%s_%x", c.Name, name, hash[:6])
+	scope := c.ToolScopes[t.Name]
+	if scope == "" {
+		scope = agent.ToolScopeBoth
+	}
 	return agent.Tool{
 		Definition: model.Tool{Type: "function", Function: model.ToolFunction{Name: local, Description: fmt.Sprintf("[MCP %s / %s] %s", c.Name, t.Name, t.Description), Parameters: schema}},
 		Namespace:  "mcp_" + c.Name, Risk: agent.ToolRiskHigh,
+		Scope:       scope,
 		SearchTerms: []string{"mcp", c.Name, t.Name, t.Description},
 		Handler: func(rc *agent.RunContext, args json.RawMessage) (any, error) {
 			if rc == nil || rc.Context == nil {

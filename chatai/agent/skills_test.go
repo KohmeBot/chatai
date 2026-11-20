@@ -65,13 +65,13 @@ func TestCatalogBudgetAndFailureKeepDiscoveryAvailable(t *testing.T) {
 	searcher := &catalogSearcher{items: []SkillSummary{{Name: "large", Description: strings.Repeat("长", 9000)}}}
 	runner := &Runner{Tools: registry, Skills: searcher}
 	active := map[string]bool{}
-	prompt := runner.skillCatalogPrompt(active)
+	prompt := runner.skillCatalogPrompt(active, ToolScopeGroup)
 	require.LessOrEqual(t, utf8.RuneCountInString(prompt), skillCatalogBudget)
 	require.Contains(t, prompt, "已截断")
 	require.True(t, active["list_skills"])
 	searcher.err = errors.New("unavailable")
 	active = map[string]bool{}
-	require.Contains(t, runner.skillCatalogPrompt(active), "加载失败")
+	require.Contains(t, runner.skillCatalogPrompt(active, ToolScopeGroup), "加载失败")
 	require.True(t, active["search_skills"])
 }
 
@@ -116,7 +116,7 @@ func TestSkillToolNames(t *testing.T) {
 		{"unclosed header", "---\ntools: [send_image]\nrun_skill_script", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.ElementsMatch(t, tc.want, registry.skillToolNames(tc.content))
+			require.ElementsMatch(t, tc.want, registry.skillToolNames(tc.content, ToolScopeGroup))
 		})
 	}
 }

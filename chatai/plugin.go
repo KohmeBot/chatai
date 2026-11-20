@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"sync"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
@@ -39,10 +39,16 @@ type ChatPlugin struct {
 	joinGroupModel model.LargeModel
 	otherModel     model.LargeModel
 	personaMap     map[int64]*persona.Persona
-	extraTools     []agent.Tool
 	db             *gorm.DB
 	skills         *skill.Service
 	memory         *persona.MemoryMaintainer
+
+	toolMu          sync.Mutex
+	toolCatalog     *agent.Registry
+	toolPreferences *agent.ToolPreferences
+	extraTools      []agent.Tool
+	mcpTools        []agent.Tool
+	toolPersonas    []*persona.Persona
 }
 
 func NewPlugin() plugin.Plugin         { return &ChatPlugin{personaMap: make(map[int64]*persona.Persona)} }
@@ -79,13 +85,62 @@ func (c *ChatPlugin) NewDefaultModel(online, thinking, responseJSON bool) model.
 
 // RegisterAgentTool 是稳定的工具扩展入口，其他插件可在初始化阶段注册自定义工具。
 func (c *ChatPlugin) RegisterAgentTool(tool agent.Tool) error {
-	for _, p := range c.personaMap {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	if c.toolCatalog == nil {
+		c.toolCatalog = agent.NewRegistry()
+	}
+	if err := c.toolCatalog.Register(tool); err != nil {
+		return err
+	}
+	for _, p := range c.toolPersonas {
 		if err := p.RegisterTool(tool); err != nil {
 			return err
 		}
 	}
 	c.extraTools = append(c.extraTools, tool)
 	return nil
+}
+
+func (c *ChatPlugin) initializeToolCatalog(opts persona.Options, mcpTools []agent.Tool) error {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	catalog := agent.NewRegistryWithToolPreferences(c.toolPreferences)
+	persona.RegisterToolCatalog(catalog, opts)
+	tools := append(append([]agent.Tool{}, c.extraTools...), mcpTools...)
+	for _, tool := range tools {
+		if err := catalog.Register(tool); err != nil {
+			return err
+		}
+	}
+	c.mcpTools, c.toolCatalog = mcpTools, catalog
+	c.toolPersonas = nil
+	return nil
+}
+
+func (c *ChatPlugin) setToolDisabled(name string, disabled bool) error {
+	if c.toolCatalog == nil {
+		return errors.New("工具目录未初始化")
+	}
+	return c.toolCatalog.SetDisabled(name, disabled, nil)
+}
+
+func (c *ChatPlugin) newAgentPersona(groupID int64, session *persona.PrivateSession, opts persona.Options) *persona.Persona {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	opts.ExtraTools = append(append([]agent.Tool{}, opts.ExtraTools...), c.extraTools...)
+	opts.ExtraTools = append(opts.ExtraTools, c.mcpTools...)
+	var p *persona.Persona
+	if session == nil {
+		p = persona.NewPersona(groupID, c.env, c.db, opts)
+	} else {
+		if opts.WorkDirectory != "" {
+			opts.WorkDirectory = filepath.Join(opts.WorkDirectory, "private", fmt.Sprint(session.BotID), fmt.Sprint(session.UserID))
+		}
+		p = persona.NewPrivatePersona(*session, c.env, c.db, opts)
+	}
+	c.toolPersonas = append(c.toolPersonas, p)
+	return p
 }
 
 func (c *ChatPlugin) routeModel(route ModelRouteConfig, system string, responseJSON bool) model.LargeModel {
@@ -116,6 +171,8 @@ func (c *ChatPlugin) conversationOptions(rules string, searcher search.Searcher)
 		WebBrowserEnable:  settings.WebBrowserEnable,
 		WebBrowserAddress: settings.WebBrowserAddress,
 		SearchAPI:         searcher,
+		Skills:            c.skills,
+		ToolPreferences:   c.toolPreferences,
 	}
 	if c.conf.Routes.Vision.Configured() {
 		// 带图事件使用和文本 Agent 一致的会话规则与工具说明。
@@ -178,6 +235,10 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		if err := db.AutoMigrate(table); err != nil {
 			return err
 		}
+	}
+	c.toolPreferences, err = agent.LoadToolPreferences(db)
+	if err != nil {
+		return fmt.Errorf("initialize tool preferences: %w", err)
 	}
 	if err := persona.MigrateUserMemories(db); err != nil {
 		return fmt.Errorf("migrate user memory: %w", err)
@@ -306,6 +367,13 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		}
 	}
 	searcher := c.newSearcher()
+	catalogOptions := c.conversationOptions("", searcher)
+	catalogOptions.WorkDirectory = workRoot
+	catalogOptions.WorkCommandEnable = c.conf.Agent.Work.CommandEnable
+	catalogOptions.ImpressionUpdateEnable = c.conf.Impression.Enable
+	if err := c.initializeToolCatalog(catalogOptions, mcpTools); err != nil {
+		return fmt.Errorf("initialize tool catalog: %w", err)
+	}
 	for group := range env.Groups().RangeGroup() {
 		var workDir string
 		if workRoot != "" {
@@ -330,9 +398,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		opts.RepeatEnable = c.conf.Repeat.Enable
 		opts.RepeatCount = c.conf.Repeat.TriggerCount
 		opts.ImpressionUpdateEnable = c.conf.Impression.Enable
-		opts.ExtraTools = append(append([]agent.Tool{}, c.extraTools...), mcpTools...)
-		opts.Skills = skillService
-		c.personaMap[group] = persona.NewPersona(group, env, db, opts)
+		c.personaMap[group] = c.newAgentPersona(group, nil, opts)
 	}
 	c.joinGroupModel = c.routeModel(c.conf.Routes.Join, string(c.conf.System), false)
 	c.otherModel = c.routeModel(c.conf.Routes.Agent, string(c.conf.System), false)
@@ -346,6 +412,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	if privateChatEnabled {
 		opts := c.conversationOptions(persona.PrivateAgentRules(), searcher)
 		opts.Scheduler = c.scheduler
+		opts.WorkDirectory = workRoot
+		opts.WorkCommandEnable = c.conf.Agent.Work.CommandEnable
+		opts.WorkRetentionDays = c.conf.Agent.Work.RetentionDays
 		opts.Observer = observer
 		opts.ImpressionUpdateEnable = c.conf.Impression.Enable
 		privatePersona = c.setOnPrivateMessage(engine, opts)
@@ -383,17 +452,10 @@ func (c *ChatPlugin) OnBoot() {
 		}
 	}
 	c.memory.Start(context.Background())
-	names := map[string]bool{"search_tools": true}
-	for _, p := range c.personaMap {
-		for _, name := range p.ToolNames() {
-			names[name] = true
-		}
+	tools := []string{"search_tools"}
+	if c.toolCatalog != nil {
+		tools = append(tools, c.toolCatalog.Names()...)
 	}
-	tools := make([]string, 0, len(names))
-	for name := range names {
-		tools = append(tools, name)
-	}
-	sort.Strings(tools)
 	logrus.Infof("[ChatAI][启动] tools=%v", tools)
 	if c.skills == nil {
 		logrus.Info("[ChatAI][启动] skills 已关闭")
@@ -418,4 +480,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.6.1" }
+func (c *ChatPlugin) Version() string      { return "v1.6.2" }

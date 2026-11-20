@@ -39,7 +39,7 @@ func (s *Service) ResidentKeys() (map[string]bool, error) {
 	return keys, nil
 }
 
-func (s *Service) SetResident(groupID int64, name string, id uint, enabled bool) error {
+func (s *Service) SetResident(_ int64, name string, id uint, enabled bool) error {
 	if s == nil || !s.opts.Enabled || s.db == nil {
 		return fmt.Errorf("Skills 未启用")
 	}
@@ -48,7 +48,7 @@ func (s *Service) SetResident(groupID int64, name string, id uint, enabled bool)
 	}
 	if enabled {
 		if id != 0 {
-			if _, err := s.residentRecord(groupID, id); err != nil {
+			if _, err := s.residentRecord(id); err != nil {
 				return err
 			}
 		} else {
@@ -81,18 +81,17 @@ func (s *Service) SetResident(groupID int64, name string, id uint, enabled bool)
 	return s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
-func (s *Service) residentRecord(groupID int64, id uint) (Record, error) {
+func (s *Service) residentRecord(id uint) (Record, error) {
 	var row Record
-	err := s.db.Where("id = ? AND status = ? AND (scope = ? OR (scope = ? AND group_id = ?))", id, StatusActive, ScopeGlobal, ScopeGroup, groupID).First(&row).Error
+	err := s.db.Where("id = ? AND status = ? AND scope = ?", id, StatusActive, ScopeGlobal).First(&row).Error
 	if err == nil && row.Source == SourceGenerated && !row.ExpiresAt.After(time.Now()) {
 		err = fmt.Errorf("Skill 已过期")
 	}
 	return row, err
 }
 
-// ResidentSkills reloads current content for every run; stale selections cannot
-// revive disabled, expired, deleted, or out-of-scope skills.
-func (s *Service) ResidentSkills(groupID int64) ([]agent.SkillMatch, error) {
+// ResidentSkills reloads current content from the shared catalog for every run.
+func (s *Service) ResidentSkills(_ int64) ([]agent.SkillMatch, error) {
 	if s == nil || !s.opts.Enabled || s.db == nil {
 		return nil, nil
 	}
@@ -129,7 +128,7 @@ func (s *Service) ResidentSkills(groupID int64) ([]agent.SkillMatch, error) {
 		}
 	}
 	var rows []Record
-	if err := s.db.Where("status = ? AND (scope = ? OR (scope = ? AND group_id = ?))", StatusActive, ScopeGlobal, ScopeGroup, groupID).Order("id").Find(&rows).Error; err != nil {
+	if err := s.db.Where("status = ? AND scope = ?", StatusActive, ScopeGlobal).Order("id").Find(&rows).Error; err != nil {
 		return result, err
 	}
 	for _, row := range rows {

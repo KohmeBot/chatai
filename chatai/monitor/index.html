@@ -59,7 +59,7 @@ function appendRunIdentities(node,run){
 }
 async function api(url,options){const r=await fetch(url,options);if(r.status===401){disconnect();throw Error('访问口令无效或会话已失效')}if(!r.ok)throw Error((await r.text()).trim()||`请求失败 (${r.status})`);return r.status===204?null:r.json()}
 function disconnect(){ConsoleMotion.reset();document.querySelectorAll('dialog').forEach(d=>d.close());authenticated=false,detailFingerprint='';catalogSerial++;runSerial++;detailSerial++;runs=[];selected="";catalogData=null;$("catalog-content").replaceChildren();$("detail").replaceChildren();if(source)source.close();source=null;$('app').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('connection').textContent='尚未连接';$('connection').dataset.state='offline';}
-function connect(){authenticated=true;loadGroups();if(catalogScopes[currentView]==='private')loadCatalog();api("/api/retention").then(r=>{if(authenticated)$("retention-note").textContent=r.persistent?`记录保留 ${r.days} 天 · 仅展示模型返回的推理内容。`:"当前为内存预览，重启后清空。"}).catch(()=>{});$('login').hidden=true;$('app').hidden=false;ConsoleMotion.view($(currentView==='runs'?'run-view':'catalog-view'));$('logout').hidden=false;if(source)source.close();source=new EventSource('/api/events');source.onopen=()=>{$('connection').dataset.state='live';$('connection').textContent='● 实时连接';refresh()};source.onmessage=()=>refresh();source.onerror=()=>{$('connection').dataset.state='reconnecting';$('connection').textContent='连接中断 · 正在重连'};refresh()}
+function connect(){authenticated=true;loadGroups();if(currentView!=='runs'&&catalogScopes[currentView]!=='group')loadCatalog();api("/api/retention").then(r=>{if(authenticated)$("retention-note").textContent=r.persistent?`记录保留 ${r.days} 天 · 仅展示模型返回的推理内容。`:"当前为内存预览，重启后清空。"}).catch(()=>{});$('login').hidden=true;$('app').hidden=false;ConsoleMotion.view($(currentView==='runs'?'run-view':'catalog-view'));$('logout').hidden=false;if(source)source.close();source=new EventSource('/api/events');source.onopen=()=>{$('connection').dataset.state='live';$('connection').textContent='● 实时连接';refresh()};source.onmessage=()=>refresh();source.onerror=()=>{$('connection').dataset.state='reconnecting';$('connection').textContent='连接中断 · 正在重连'};refresh()}
 $('login-form').onsubmit=async e=>{e.preventDefault();await ConsoleMotion.busy(e.submitter||$('login-form').querySelector('button'),async()=>{try{await api('/api/session',{method:'POST',headers:{Authorization:'Bearer '+$('token').value}});$('token').value='';$('login-error').textContent='';connect()}catch(e){$('login-error').textContent=e.message}})};
 $('logout').onclick=async()=>{try{await api('/api/session',{method:'DELETE'})}finally{disconnect()}};
 async function refresh(){
@@ -122,13 +122,15 @@ let currentView='runs',catalogData=null,catalogSerial=0,offset=0;
 const viewInfo={schedules:'定时任务',skills:'Skills 技能库',tools:'Tools 工具目录',memory:'记忆中心'};
 const catalogScopes={memory:'group',schedules:'group'};
 function catalogEndpoint(view=currentView){
- const query=catalogScopes[view]==='private'?'scope=private':'group='+encodeURIComponent($('group').value);
- return '/api/inspect/'+view+'?'+query;
+ const endpoint='/api/inspect/'+view;
+ if(catalogScopes[view]==='private')return endpoint+'?scope=private';
+ if(catalogScopes[view]==='group')return endpoint+'?group='+encodeURIComponent($('group').value);
+ return endpoint;
 }
 function syncCatalogScope(){
  const scope=catalogScopes[currentView];
  $('catalog-scope').hidden=!scope;
- $('group-picker').hidden=scope==='private';
+ $('group-picker').hidden=scope!=='group';
  closeGroupPicker();
  if(scope){
   $('catalog-scope').setAttribute('aria-label',viewInfo[currentView]+'范围');
@@ -148,8 +150,8 @@ async function loadGroups(){
   $('group').replaceChildren(...groups.map(id=>{const o=el('option','','群 '+id);o.value=id;return o}));
   if(groups.includes(old))$('group').value=old;
   updateGroupIdentity();
-  if(currentView!=='runs'&&catalogScopes[currentView]!=='private')await loadCatalog();
- }catch(e){if(catalogScopes[currentView]!=='private')$('catalog-status').textContent=e.message}
+  if(catalogScopes[currentView]==='group')await loadCatalog();
+ }catch(e){if(catalogScopes[currentView]==='group')$('catalog-status').textContent=e.message}
 }
 for(const button of $('nav').querySelectorAll('button'))button.onclick=()=>{
  if(currentView===button.dataset.view)return;
@@ -159,22 +161,24 @@ for(const button of $('nav').querySelectorAll('button'))button.onclick=()=>{
  ConsoleMotion.view($(currentView==='runs'?'run-view':'catalog-view'));
  if(currentView==='runs')return;
  offset=0;$('catalog-query').value='';
- $('catalog-mode').textContent=currentView==='memory'?'记忆管理':currentView==='schedules'?'任务管理':'运行数据与设置';
+ $('catalog-mode').textContent=currentView==='memory'?'记忆管理':currentView==='schedules'?'任务管理':'全局设置';
  $('catalog-title').textContent=viewInfo[currentView];syncCatalogScope();loadCatalog();
 };
 async function loadCatalog(){
  const serial=++catalogSerial;
  $('catalog-filters').hidden=true;catalogData=null;$('catalog-content').replaceChildren();$('pagination').hidden=true;
- if(catalogScopes[currentView]!=='private'&&!$('group').value){$('catalog-status').textContent='暂无已启用 Agent 的群聊';return}
+ const scope=catalogScopes[currentView];
+ if(scope==='group'&&!$('group').value){$('catalog-status').textContent='暂无已启用 Agent 的群聊';return}
  $('catalog-status').textContent='正在读取运行数据…';
  try{
-  const data=await api(catalogEndpoint()+'&offset='+offset);
+  const endpoint=catalogEndpoint();
+  const data=await api(scope?endpoint+'&offset='+offset:endpoint);
   if(serial!==catalogSerial||!authenticated)return;
   catalogData=data;mountCatalogFilters(currentView,data);renderCatalog();ConsoleMotion.catalog($('catalog-content'));
  }catch(e){if(serial===catalogSerial)$('catalog-status').textContent='读取失败：'+e.message}
 }
 function card(title,description,tag){const c=el('article','resource-card');if(tag)c.append(el('span','badge',tag));c.append(el('h3','',title));if(description)c.append(el('p','',description));return c}
-function matches(value){return JSON.stringify(value).toLowerCase().includes($('catalog-query').value.toLowerCase())}
+function matches(value){const text=JSON.stringify(value)+(currentView==='tools'?' '+toolScopeLabel(value?.scope):'');return text.toLowerCase().includes($('catalog-query').value.toLowerCase())}
 function section(root,title,items,render){root.append(el('h3','section-heading',title));const grid=el('div','resource-grid');for(const item of items.filter(matches))grid.append(render(item));if(!grid.children.length)grid.append(el('div','empty','暂无符合条件的内容'));root.append(grid)}
 function renderCatalog(){if(catalogData===null)return;const root=$('catalog-content');root.replaceChildren();$('pagination').hidden=true;const d=catalogData;
  if(currentView==='schedules'){renderSchedules(root,d);return}
@@ -187,7 +191,7 @@ function renderCatalog(){if(catalogData===null)return;const root=$('catalog-cont
  }
  section(root,'用户长期记忆',d.users||[],userMemoryCard);$('pagination').hidden=false;$('previous').disabled=offset===0;$('next').disabled=!d.has_more;$('page-number').textContent=`第 ${offset/50+1} 页`;
 }
-$('catalog-query').oninput=renderCatalog;$('catalog-refresh').onclick=()=>ConsoleMotion.busy($('catalog-refresh'),catalogScopes[currentView]==='private'?loadCatalog:loadGroups);$('group').onchange=()=>{updateGroupIdentity();offset=0;loadCatalog()};$('previous').onclick=()=>{offset=Math.max(0,offset-50);loadCatalog()};$('next').onclick=()=>{offset+=50;loadCatalog()};
+$('catalog-query').oninput=renderCatalog;$('catalog-refresh').onclick=()=>ConsoleMotion.busy($('catalog-refresh'),catalogScopes[currentView]==='group'?loadGroups:loadCatalog);$('group').onchange=()=>{updateGroupIdentity();offset=0;loadCatalog()};$('previous').onclick=()=>{offset=Math.max(0,offset-50);loadCatalog()};$('next').onclick=()=>{offset+=50;loadCatalog()};
 fetch('/api/runs').then(r=>{if(r.ok)connect()}).catch(()=>{});
 </script>
 

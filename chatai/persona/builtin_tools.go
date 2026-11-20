@@ -7,36 +7,60 @@ import (
 	"github.com/kohmebot/chatai/chatai/agent"
 )
 
-// registerBuiltinTools 汇总各领域的内建工具。工具定义和处理逻辑放在对应领域文件中。
-func (p *Persona) registerBuiltinTools() {
-	var groups [][]agent.Tool
+func (p *Persona) builtinTools() [][]agent.Tool {
+	shared := [][]agent.Tool{
+		p.workTools(),
+		p.imageTools(),
+		p.skillTools(),
+		p.chatActionTools(),
+		p.scheduleTools(),
+		p.webTools(),
+	}
 	if p.private != nil {
-		groups = [][]agent.Tool{
+		return append(shared,
 			p.privateContextTools(),
 			p.privateProfileTools(),
-			p.imageTools(),
-			p.chatActionTools(),
-			p.scheduleTools(),
-			p.webTools(),
-		}
-	} else {
-		groups = [][]agent.Tool{
-			p.workTools(),
-			p.groupMemberTools(),
-			p.contextTools(),
-			p.imageTools(),
-			p.memoryTools(),
-			p.structuredMemoryTools(),
-			p.groupMemoryTools(),
-			p.skillTools(),
-			p.chatActionTools(),
-			p.mediaTools(),
-			p.rawMessageTools(),
-			p.scheduleTools(),
-			p.webTools(),
+		)
+	}
+	groupOnly := [][]agent.Tool{
+		p.groupMemberTools(),
+		p.contextTools(),
+		p.memoryTools(),
+		p.groupMemoryTools(),
+		p.mediaTools(),
+		p.rawMessageTools(),
+	}
+	for _, tools := range groupOnly {
+		for i := range tools {
+			tools[i].Scope = agent.ToolScopeGroup
 		}
 	}
-	for _, tools := range groups {
+	return append(append(shared, p.structuredMemoryTools()), groupOnly...)
+}
+
+// RegisterToolCatalog lists the built-in capabilities of both conversation modes.
+// The registry is for administration and is never used to execute tools.
+func RegisterToolCatalog(catalog *agent.Registry, opts Options) {
+	seen := make(map[string]bool)
+	for _, template := range []*Persona{{opts: opts}, {opts: opts, private: &PrivateSession{}}} {
+		for _, tools := range template.builtinTools() {
+			for _, tool := range tools {
+				name := tool.Definition.Function.Name
+				if seen[name] {
+					continue
+				}
+				seen[name] = true
+				if err := catalog.Register(tool); err != nil {
+					panic(fmt.Sprintf("register builtin tool %q: %v", name, err))
+				}
+			}
+		}
+	}
+}
+
+// registerBuiltinTools binds tool handlers to the current conversation.
+func (p *Persona) registerBuiltinTools() {
+	for _, tools := range p.builtinTools() {
 		for _, tool := range tools {
 			if tool.Namespace == "skill" && p.opts.Skills != nil {
 				handler := tool.Handler

@@ -7,6 +7,14 @@ function catalogCategory(item,key){
  return item[key]||'unknown';
 }
 function filterCatalog(items,filters){return items.filter(item=>Object.entries(filters).every(([key,value])=>!value||catalogCategory(item,key)===value))}
+function toolScopeLabel(scope){
+ switch(scope){
+  case 'group':return '群聊';
+  case 'private':return '私聊';
+  case 'both':return '群聊和私聊';
+  default:return '未标注';
+ }
+}
 function mountCatalogFilters(view,data){
  const root=$('catalog-filters');root.replaceChildren();root.hidden=!catalogFilters[view];if(root.hidden)return;
  const items=view==='skills'?data.items:data,state=catalogFilters[view];
@@ -38,13 +46,13 @@ function metadataList(root,label,values){
  root.append(el('h4','',label));if(!values?.length){root.append(el('p','muted','未声明'));return}
  const list=el('ul');for(const value of values)list.append(el('li','',value));root.append(list);
 }
-function disableControl(item,kind,group,card,status,onUpdate=()=>{}){
+function disableControl(item,kind,card,status,onUpdate=()=>{}){
  const name=kind==='tools'?item.definition.function.name:item.name;
  const button=action('',async()=>{
   button.disabled=true;button.setAttribute('aria-busy','true');status.textContent='保存中…';
   try{
    const identity=kind==='skills'&&item.id?{id:item.id}:{name};
-   const saved=await api('/api/inspect/'+kind+'?group='+encodeURIComponent(group),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...identity,disabled:!item.disabled})});
+   const saved=await api('/api/inspect/'+kind,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...identity,disabled:!item.disabled})});
    item.disabled=saved.disabled;update();onUpdate();status.textContent='已保存';
   }catch(e){status.textContent=e.message}finally{button.disabled=false;button.removeAttribute('aria-busy')}
  });
@@ -56,20 +64,19 @@ function disableControl(item,kind,group,card,status,onUpdate=()=>{}){
 function renderSkills(root,data){
  const visible=filterCatalog(data.items,catalogFilters.skills).filter(matches);
  $('catalog-status').textContent=data.enabled?`显示 ${visible.length} / ${data.items.length} 项技能`:'Skills 功能未启用';
- root.append(el('p','muted','常驻技能增加输入 Token；禁用后停止加载和调用，保留常驻设置。技能设置影响所有群，已加载的内容在下次运行移除。'));
- const group=$('group').value;
+ root.append(el('p','muted','常驻和禁用设置对所有群聊和私聊生效。常驻技能会增加输入 Token，禁用时保留常驻设置，已加载内容在下次运行移除。'));
  section(root,'技能目录',visible,s=>{const c=card(s.name,s.description,s.source);c.classList.add('catalog-summary');if(s.path)c.append(el('div','meta',s.path));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');const toggle=action('',async()=>{
   toggle.disabled=true;toggle.setAttribute('aria-busy','true');status.textContent='保存中…';
-  try{const saved=await api(`/api/inspect/skills?group=${encodeURIComponent(group)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update(true);status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false;toggle.removeAttribute('aria-busy')}
- });ConsoleControls.iconButton(toggle,'pin','常驻');toggle.classList.add('resident-toggle');toggle.setAttribute('role','switch');const update=(animate=false)=>{ConsoleControls.setResident(toggle,!!s.resident,animate);toggle.setAttribute('aria-label',`${s.name} 常驻`);toggle.title=s.resident?'已常驻 · 点击取消':'未常驻 · 点击每次运行自动加载'};update();buttons.classList.add('skill-actions');buttons.append(action('查看详情',()=>showSkillDetail(s)),toggle);const disable=disableControl(s,'skills',group,c,status);buttons.append(disable);c.append(status,buttons);return c});
+  try{const saved=await api('/api/inspect/skills',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({...s.id?{id:s.id}:{name:s.name},resident:!s.resident})});s.resident=saved.resident;update(true);status.textContent='已保存，下次运行生效'}catch(e){status.textContent=e.message}finally{toggle.disabled=false;toggle.removeAttribute('aria-busy')}
+ });ConsoleControls.iconButton(toggle,'pin','常驻');toggle.classList.add('resident-toggle');toggle.setAttribute('role','switch');const update=(animate=false)=>{ConsoleControls.setResident(toggle,!!s.resident,animate);toggle.setAttribute('aria-label',`${s.name} 常驻`);toggle.title=s.resident?'已常驻 · 点击取消':'未常驻 · 点击每次运行自动加载'};update();buttons.classList.add('skill-actions');buttons.append(action('查看详情',()=>showSkillDetail(s)),toggle);const disable=disableControl(s,'skills',c,status);buttons.append(disable);c.append(status,buttons);return c});
 }
 async function showSkillDetail(skill){
- const group=$('group').value,{dialog,body}=resourceDialog(skill.name,skill.description);
- const endpoint=section=>`/api/inspect/${section}?group=${encodeURIComponent(group)}&name=${encodeURIComponent(skill.name)}`;
+ const {dialog,body}=resourceDialog(skill.name,skill.description);
+ const endpoint=section=>`/api/inspect/${section}?name=${encodeURIComponent(skill.name)}`;
  const content=el('section'),metadata=el('section'),files=el('section');body.append(content,metadata,files);
  const render=s=>{
   content.replaceChildren(el('h3','section-heading','SKILL.md · 完整正文'),renderMarkdown(s.content||'暂无正文'));
-  metadata.replaceChildren(el('h3','section-heading','技能元数据'),detailFields([['来源',skill.source],['路径',skill.path||'存储于数据库'],...(s.scope?[['作用范围',s.scope==='global'?'全局':'当前群']]:[]),...(s.version?[['版本',s.version],['更新时间',time(s.updated_at)]]:[])]));
+  metadata.replaceChildren(el('h3','section-heading','技能元数据'),detailFields([['来源',skill.source],['路径',skill.path||'存储于数据库'],...(s.version?[['版本',s.version],['更新时间',time(s.updated_at)]]:[])]));
   metadataList(metadata,'触发条件',s.triggers);metadataList(metadata,'不触发条件',s.non_triggers);metadataList(metadata,'依赖工具',s.required_tools);
  };
  if(!skill.path){render(skill);files.append(el('h3','section-heading','Skills 目录'),el('p','muted','此技能存储于数据库，没有关联的文件夹。'));return}
@@ -126,12 +133,12 @@ function renderMarkdown(source){
 function renderTools(root,data){
  const visible=filterCatalog(data,catalogFilters.tools).filter(matches);
  $('catalog-status').textContent=`显示 ${visible.length} / ${data.length} 个已注册工具`;
- root.append(el('p','muted','工具禁用仅影响当前群；保存后停止新的调用，已开始的调用继续完成。'));
- section(root,'工具能力',visible,t=>{const f=t.definition.function,c=card(f.name,f.description,t.namespace);c.classList.add('catalog-summary');c.append(el('div','meta',`${t.read_only?'只读':'可执行写操作'} · 风险 ${t.risk}`));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');buttons.append(action('查看详情',()=>showToolDetail(t)));const disable=disableControl(t,'tools',$('group').value,c,status);if(f.name==='search_tools'){disable.disabled=true;disable.title='工具发现入口，不支持禁用'}buttons.append(disable);c.append(status,buttons);return c});
+ root.append(el('p','muted','工具禁用对所有群聊和私聊生效。保存后停止新的调用，已开始的调用继续完成。'));
+ section(root,'工具能力',visible,t=>{const f=t.definition.function,c=card(f.name,f.description,`${t.namespace} · ${toolScopeLabel(t.scope)}`);c.classList.add('catalog-summary');c.append(el('div','meta',`${t.read_only?'只读':'可执行写操作'} · 风险 ${t.risk}`));const buttons=el('div','actions card-actions'),status=el('span','muted skill-save-status');status.setAttribute('role','status');buttons.append(action('查看详情',()=>showToolDetail(t)));const disable=disableControl(t,'tools',c,status);if(f.name==='search_tools'){disable.disabled=true;disable.title='工具发现入口，不支持禁用'}buttons.append(disable);c.append(status,buttons);return c});
 }
 function showToolDetail(tool){
  const f=tool.definition.function,{body}=resourceDialog(f.name,f.description);
- body.append(detailFields([['能力分类',tool.namespace],['访问方式',tool.read_only?'只读':'可执行写操作'],['风险等级',tool.risk],['幂等',tool.idempotent?'是':'否'],['群聊动作',tool.group_action?'是':'否']]),el('h3','section-heading','参数定义'));
+ body.append(detailFields([['能力分类',tool.namespace],['适用会话',toolScopeLabel(tool.scope)],['访问方式',tool.read_only?'只读':'可执行写操作'],['风险等级',tool.risk],['幂等',tool.idempotent?'是':'否'],['会话交付',tool.group_action?'是':'否']]),el('h3','section-heading','参数定义'));
  let schema=f.parameters;try{if(typeof schema==='string')schema=JSON.parse(schema)}catch{body.append(el('p','warning','参数定义无法解析'));return}body.append(renderSchema(schema??{type:'object',properties:{}},schema));
 }
 function readableValue(value){if(value===null)return'空值';if(typeof value==='boolean')return value?'是':'否';if(Array.isArray(value))return value.map(readableValue).join('、')||'空列表';if(typeof value==='object')return Object.entries(value).map(([k,v])=>`${k}：${readableValue(v)}`).join('；')||'空对象';return String(value)}

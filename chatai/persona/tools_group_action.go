@@ -26,6 +26,9 @@ func (p *Persona) chatActionTools() []agent.Tool {
 	if p.private != nil {
 		target, audience, rhythm = "当前私聊", "当前用户", "对话节奏"
 		imageURL = "公开的 HTTP/HTTPS 图片 URL，直接返回 PNG、JPEG、GIF 或 WebP，最大 5 MiB"
+		if p.opts.Skills != nil && p.opts.Skills.Directory != nil {
+			imageURL += "；也可使用 search_skill_files 返回的技能资源路径"
+		}
 		quote = "可选，引用本次私聊中的消息 ID"
 	} else {
 		text += "。需逐字保留代码、路径或转义符时使用 send_raw_message"
@@ -81,6 +84,7 @@ func (p *Persona) chatActionTools() []agent.Tool {
 			Namespace:   "chat",
 			Risk:        agent.ToolRiskMedium,
 			SearchTerms: []string{"发送消息", "At某人", "@某人", "提醒某人", "指定用户回复"},
+			Scope:       agent.ToolScopeGroup,
 			GroupAction: true,
 			Handler:     p.handleAtUser,
 		},
@@ -89,6 +93,7 @@ func (p *Persona) chatActionTools() []agent.Tool {
 			Namespace:   "chat",
 			Risk:        agent.ToolRiskMedium,
 			SearchTerms: []string{"发送消息", "戳一戳", "戳某人", "poke"},
+			Scope:       agent.ToolScopeGroup,
 			GroupAction: true,
 			Handler:     p.handlePokeUser,
 		},
@@ -109,9 +114,13 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	if err := p.validateChatText(input.Text); err != nil {
 		return nil, err
 	}
-	source, err := p.resolveImageSource(input.URL)
-	if err != nil {
-		return nil, fmt.Errorf("resolve image path: %w", err)
+	source := strings.TrimSpace(input.URL)
+	if p.private == nil {
+		var err error
+		source, err = p.resolveImageSource(source)
+		if err != nil {
+			return nil, fmt.Errorf("resolve image path: %w", err)
+		}
 	}
 	ctx, err := zeroContext(rc)
 	if err != nil {
@@ -119,7 +128,7 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	}
 	var upload string
 	if p.private != nil {
-		upload, err = fetchPrivateImage(rc.Context, source)
+		upload, err = p.privateImage(rc.Context, source)
 		if err != nil {
 			return nil, err
 		}
@@ -145,8 +154,20 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	return map[string]any{"message_id": id}, nil
 }
 
+const maxPrivateImageBytes = 5 << 20
+
+func (p *Persona) privateImage(ctx context.Context, source string) (string, error) {
+	if _, err := normalizeImageURL(source); err == nil || p.opts.Skills == nil || p.opts.Skills.Directory == nil {
+		return fetchPrivateImage(ctx, source)
+	}
+	data, err := p.opts.Skills.ReadAsset(source, maxPrivateImageBytes)
+	if err != nil {
+		return "", err
+	}
+	return encodePrivateImage(data)
+}
+
 func fetchPrivateImage(ctx context.Context, source string) (string, error) {
-	const maxImageBytes = 5 << 20
 	source, err := normalizeImageURL(source)
 	if err != nil {
 		return "", err
@@ -197,11 +218,15 @@ func fetchPrivateImage(ctx context.Context, source string) (string, error) {
 	if res.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("image URL returned HTTP %d", res.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxPrivateImageBytes+1))
 	if err != nil {
 		return "", err
 	}
-	if len(data) > maxImageBytes {
+	return encodePrivateImage(data)
+}
+
+func encodePrivateImage(data []byte) (string, error) {
+	if len(data) > maxPrivateImageBytes {
 		return "", errors.New("image exceeds 5 MiB")
 	}
 	switch http.DetectContentType(data) {

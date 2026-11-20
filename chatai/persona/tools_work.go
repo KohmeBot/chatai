@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
+	zero "github.com/wdvxdr1123/ZeroBot"
 )
 
 const workFileLimit = 4 << 20
@@ -23,15 +24,18 @@ func (p *Persona) workTools() []agent.Tool {
 	if p.opts.WorkDirectory == "" {
 		return nil
 	}
-	path := map[string]any{"path": stringProperty("相对当前群工作目录的路径，不允许越界")}
+	path := map[string]any{"path": stringProperty("相对当前会话工作目录的路径，不允许越界")}
 	tools := []agent.Tool{
 		{Definition: agent.Function("work_info", "查看持久工作目录绝对路径、操作系统和命令执行是否可用；文件按 retention_days 自动过期清理，可用 send_file 交付", nil), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"工作目录", "环境", "生成文件", "workspace"}, Handler: func(_ *agent.RunContext, _ json.RawMessage) (any, error) {
+			if err := p.ensureWorkDirectory(); err != nil {
+				return nil, err
+			}
 			return map[string]any{"directory": p.opts.WorkDirectory, "os": runtime.GOOS, "command_enabled": p.opts.WorkCommandEnable, "retention_days": p.workRetentionDays()}, nil
 		}},
 		{Definition: agent.Function("list_work_files", "列出工作目录下指定文件夹的直接子项，最多200项；默认根目录", path), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"目录", "文件", "list files"}, Handler: p.handleListWorkFiles},
 		{Definition: agent.Function("read_work_file", "读取工作目录文件，最多4MiB；encoding 默认 utf8，二进制用 base64", map[string]any{"path": path["path"], "encoding": stringProperty("utf8 或 base64")}, "path"), Namespace: "work", ReadOnly: true, Idempotent: true, Risk: agent.ToolRiskLow, SearchTerms: []string{"读取文件", "read file"}, Handler: p.handleReadWorkFile},
 		{Definition: agent.Function("write_work_file", "持久保存文件并创建父目录，最多4MiB；默认拒绝覆盖，覆盖已有文件必须显式 overwrite=true；二进制可用 base64", map[string]any{"path": path["path"], "content": stringProperty("文件内容"), "encoding": stringProperty("utf8 或 base64"), "overwrite": map[string]any{"type": "boolean"}}, "path", "content"), Namespace: "work", Risk: agent.ToolRiskMedium, SearchTerms: []string{"保存文件", "生成文件", "写文件", "write file"}, Handler: p.handleWriteWorkFile},
-		{Definition: agent.Function("send_file", "将工作目录内文件上传到当前群文件；成功上传即完成文件交付，不要重复发送。OneBot 服务必须能访问同一个绝对路径", map[string]any{"path": path["path"], "name": stringProperty("可选的展示文件名，默认原文件名")}, "path"), Namespace: "chat", GroupAction: true, Risk: agent.ToolRiskMedium, SearchTerms: []string{"发送文件", "上传文件", "交付文件", "send file"}, Handler: p.handleSendFile},
+		{Definition: agent.Function("send_file", "将工作目录内文件上传到当前会话；成功上传即完成文件交付，不要重复发送。OneBot 服务必须能访问同一个绝对路径", map[string]any{"path": path["path"], "name": stringProperty("可选的展示文件名，默认原文件名")}, "path"), Namespace: "chat", GroupAction: true, Risk: agent.ToolRiskMedium, SearchTerms: []string{"发送文件", "上传文件", "交付文件", "send file"}, Handler: p.handleSendFile},
 	}
 	if p.opts.WorkCommandEnable {
 		tools = append(tools, agent.Tool{Definition: agent.Function("execute_command", "以宿主机器人进程权限执行命令（非沙箱）；默认在持久工作目录运行。Windows 使用 PowerShell，其他系统使用 /bin/sh。仅执行用户任务需要的操作，生成文件保存在工作目录并用 send_file 交付。默认60秒，最多180秒且受本轮时间限制；返回退出码、输出、超时和截断状态", map[string]any{"command": stringProperty("shell 命令"), "directory": stringProperty("工作目录内相对子目录，默认 ."), "timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 180}}, "command"), Namespace: "work", Risk: agent.ToolRiskHigh, SearchTerms: []string{"执行命令", "运行脚本", "生成文件", "shell", "python"}, Handler: p.handleExecuteCommand})
@@ -39,9 +43,19 @@ func (p *Persona) workTools() []agent.Tool {
 	return tools
 }
 
-func (p *Persona) openWorkRoot() (*os.Root, error) {
+func (p *Persona) ensureWorkDirectory() error {
 	if p.opts.WorkDirectory == "" {
-		return nil, fmt.Errorf("work tools disabled")
+		return fmt.Errorf("work tools disabled")
+	}
+	if p.private != nil {
+		return os.MkdirAll(p.opts.WorkDirectory, 0700)
+	}
+	return nil
+}
+
+func (p *Persona) openWorkRoot() (*os.Root, error) {
+	if err := p.ensureWorkDirectory(); err != nil {
+		return nil, err
 	}
 	return os.OpenRoot(p.opts.WorkDirectory)
 }
@@ -194,6 +208,9 @@ func (p *Persona) absoluteWorkPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := p.ensureWorkDirectory(); err != nil {
+		return "", err
+	}
 	base, err := filepath.EvalSymlinks(p.opts.WorkDirectory)
 	if err != nil {
 		return "", err
@@ -235,7 +252,15 @@ func (p *Persona) handleSendFile(rc *agent.RunContext, raw json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	result := ctx.UploadGroupFile(p.groupID, path, in.Name, "")
+	var result zero.APIResponse
+	if p.private != nil {
+		if !p.matchesPrivateEvent(ctx) {
+			return nil, fmt.Errorf("当前上下文与私聊会话不匹配")
+		}
+		result = ctx.CallAction("upload_private_file", zero.Params{"user_id": p.private.UserID, "file": path, "name": in.Name})
+	} else {
+		result = ctx.UploadGroupFile(p.groupID, path, in.Name, "")
+	}
 	if result.Status != "ok" || result.RetCode != 0 {
 		return nil, fmt.Errorf("file upload failed: status=%s retcode=%d", result.Status, result.RetCode)
 	}

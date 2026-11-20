@@ -48,10 +48,14 @@ func (p *Persona) sendMessage(ctx *zero.Ctx, segments message.Message) int64 {
 	if p.private == nil {
 		return ctx.SendGroupMessage(p.groupID, segments)
 	}
-	if ctx.Event == nil || ctx.Event.SelfID != p.private.BotID || ctx.Event.UserID != p.private.UserID || !zero.OnlyPrivate(ctx) {
+	if !p.matchesPrivateEvent(ctx) {
 		return 0
 	}
 	return ctx.SendPrivateMessage(p.private.UserID, segments)
+}
+
+func (p *Persona) matchesPrivateEvent(ctx *zero.Ctx) bool {
+	return p.private != nil && ctx != nil && ctx.Event != nil && ctx.Event.SelfID == p.private.BotID && ctx.Event.UserID == p.private.UserID && zero.OnlyPrivate(ctx)
 }
 
 // SendHostMessage checks delivery for host-generated messages as well.

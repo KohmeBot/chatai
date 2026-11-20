@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +13,8 @@ import (
 
 const maxProjectFiles = 1000
 const maxProjectBytes = 20 * 1024 * 1024
+
+var errSkillFileTooLarge = errors.New("skill file exceeds size limit")
 
 type FileInfo struct {
 	Path string `json:"path"`
@@ -139,7 +142,10 @@ func (d *Directory) Snapshot(ctx context.Context, name, entry string) (dir strin
 			return
 		}
 		var data []byte
-		data, err = readProjectFile(root, file.Path, maxProjectBytes-copied)
+		data, err = readLimitedSkillFile(root, file.Path, maxProjectBytes-copied)
+		if errors.Is(err, errSkillFileTooLarge) {
+			err = fmt.Errorf("skill project exceeds 10 MiB")
+		}
 		if err != nil {
 			return
 		}
@@ -155,13 +161,23 @@ func (d *Directory) Snapshot(ctx context.Context, name, entry string) (dir strin
 	return
 }
 
-func readProjectFile(root *os.Root, path string, limit int64) ([]byte, error) {
+func readLimitedSkillFile(root *os.Root, path string, limit int64) ([]byte, error) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("non-regular skill file: %s", path)
+	}
+	if info.Size() > limit {
+		return nil, errSkillFileTooLarge
+	}
 	f, err := root.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	info, err := f.Stat()
+	info, err = f.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +189,7 @@ func readProjectFile(root *os.Root, path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("skill project exceeds 10 MiB")
+		return nil, errSkillFileTooLarge
 	}
 	return data, nil
 }

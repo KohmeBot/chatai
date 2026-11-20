@@ -46,7 +46,9 @@ func TestStdioHelper(t *testing.T) {
 func TestTransports(t *testing.T) {
 	for _, transport := range []string{"streamable_http", "sse", "stdio"} {
 		t.Run(transport, func(t *testing.T) {
-			c := ServerConfig{Name: "test", Transport: transport, TimeoutSeconds: 5}
+			c := ServerConfig{Name: "test", Transport: transport, TimeoutSeconds: 5,
+				ToolScopes: map[string]agent.ToolScope{"echo": agent.ToolScopePrivate},
+			}
 			if transport == "stdio" {
 				c.Command = os.Args[0]
 				c.Args = []string{"-test.run=^TestStdioHelper$"}
@@ -78,6 +80,13 @@ func TestTransports(t *testing.T) {
 			for _, tool := range tools {
 				if len(tool.Definition.Function.Name) > 64 {
 					t.Fatal("name too long")
+				}
+				wantScope := agent.ToolScopeBoth
+				if strings.Contains(tool.Definition.Function.Name, "_echo_") {
+					wantScope = agent.ToolScopePrivate
+				}
+				if tool.Scope != wantScope {
+					t.Errorf("%s scope = %q, want %q", tool.Definition.Function.Name, tool.Scope, wantScope)
 				}
 				if strings.Contains(tool.Definition.Function.Name, "_slow_") {
 					continue
@@ -130,6 +139,14 @@ func TestCancellationAndValidation(t *testing.T) {
 	}
 	if _, err = Discover(context.Background(), []ServerConfig{c, c}); err == nil {
 		t.Fatal("duplicate server accepted")
+	}
+	c.ToolScopes = map[string]agent.ToolScope{"missing": agent.ToolScopePrivate}
+	if _, err = Discover(context.Background(), []ServerConfig{c}); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("expected unknown tool scope error, got %v", err)
+	}
+	c.ToolScopes = map[string]agent.ToolScope{"slow": "invalid"}
+	if err := c.validate(); err == nil {
+		t.Fatal("invalid tool scope accepted")
 	}
 	for _, bad := range []ServerConfig{{Name: "bad name"}, {Name: "ok", Transport: "bad"}, {Name: "ok", Transport: "stdio"}, {Name: "ok", Transport: "sse", URL: "file:///x"}} {
 		if err := bad.validate(); err == nil {

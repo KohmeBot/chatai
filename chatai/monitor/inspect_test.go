@@ -51,7 +51,7 @@ func TestResidentMutationRequiresSessionAndJSON(t *testing.T) {
 		{true, "application/json", "same-origin", 200},
 	} {
 		called = false
-		r := httptest.NewRequest("PATCH", "/api/inspect/skills?group=10", strings.NewReader(`{"name":"demo","resident":true}`))
+		r := httptest.NewRequest("PATCH", "/api/inspect/skills", strings.NewReader(`{"name":"demo","resident":true}`))
 		if tc.auth {
 			r.AddCookie(cookie)
 		}

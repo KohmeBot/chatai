@@ -1,12 +1,13 @@
 package chatai
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/kohmebot/chatai/chatai/persona"
+	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -19,9 +20,9 @@ func TestMonitorSkillDetailsAndFiles(t *testing.T) {
 	body := "---\nname: demo\ndescription: Demo\ntriggers: [report]\nnon_triggers: [chat]\ntools: [search_web]\n---\n# Complete skill"
 	require.NoError(t, directory.Save("demo", "SKILL.md", body, false))
 	require.NoError(t, directory.Save("demo", "refs/help.md", "# Help", false))
-	c := &ChatPlugin{skills: &skill.Service{Directory: directory}, personaMap: map[int64]*persona.Persona{10: {}}}
+	c := &ChatPlugin{skills: &skill.Service{Directory: directory}}
 	request := func(section, query string) (any, error) {
-		r := httptest.NewRequest("GET", "/api/inspect/"+section+"?group=10&name=demo"+query, nil)
+		r := httptest.NewRequest("GET", "/api/inspect/"+section+"?name=demo"+query, nil)
 		r.SetPathValue("section", section)
 		return c.inspectMonitor(r)
 	}
@@ -40,9 +41,9 @@ func TestMonitorSkillDetailsAndFiles(t *testing.T) {
 	require.Equal(t, "# Help", value.(map[string]any)["content"])
 	_, err = request("skill-file", "&file=../SKILL.md")
 	require.Error(t, err)
-	delete(c.personaMap, 10)
-	_, err = request("skill-file", "&file=SKILL.md")
-	require.Error(t, err)
+	value, err = request("skill-file", "&file=SKILL.md&group=10")
+	require.NoError(t, err)
+	require.Equal(t, body, value.(map[string]any)["content"])
 }
 
 func TestMonitorResidentSkillSettings(t *testing.T) {
@@ -57,9 +58,9 @@ func TestMonitorResidentSkillSettings(t *testing.T) {
 	require.NoError(t, directory.Save("demo", "SKILL.md", "---\nname: demo\ndescription: Demo\n---\nBody", false))
 	s := skill.NewService(db, nil, skill.Options{Enabled: true})
 	s.Directory = directory
-	c := &ChatPlugin{db: db, skills: s, personaMap: map[int64]*persona.Persona{10: {}}}
+	c := &ChatPlugin{db: db, skills: s}
 	request := func(method, body string) (any, error) {
-		r := httptest.NewRequest(method, "/api/inspect/skills?group=10", strings.NewReader(body))
+		r := httptest.NewRequest(method, "/api/inspect/skills", strings.NewReader(body))
 		r.SetPathValue("section", "skills")
 		return c.inspectMonitor(r)
 	}
@@ -119,9 +120,9 @@ func TestMonitorDisabledSkillRemainsVisible(t *testing.T) {
 	require.NoError(t, d.Save("demo", "SKILL.md", "---\nname: demo\ndescription: Demo\n---\nBody", false))
 	s := skill.NewService(db, nil, skill.Options{Enabled: true})
 	s.Directory = d
-	c := &ChatPlugin{db: db, skills: s, personaMap: map[int64]*persona.Persona{10: {}}}
+	c := &ChatPlugin{db: db, skills: s}
 	request := func(method, body string) (any, error) {
-		r := httptest.NewRequest(method, "/api/inspect/skills?group=10", strings.NewReader(body))
+		r := httptest.NewRequest(method, "/api/inspect/skills", strings.NewReader(body))
 		r.SetPathValue("section", "skills")
 		return c.inspectMonitor(r)
 	}
@@ -138,4 +139,41 @@ func TestMonitorDisabledSkillRemainsVisible(t *testing.T) {
 		require.Len(t, items, 1)
 		require.Equal(t, value == "true", items[0]["disabled"])
 	}
+}
+
+func TestMonitorSharedToolsWithoutGroups(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "tools.db")), &gorm.Config{})
+	require.NoError(t, err)
+	conn, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+	require.NoError(t, db.AutoMigrate(&agent.ToolPreference{}))
+	preferences, err := agent.LoadToolPreferences(db)
+	require.NoError(t, err)
+	c := &ChatPlugin{db: db, toolCatalog: agent.NewRegistryWithToolPreferences(preferences)}
+	tool := agent.Tool{
+		Definition: agent.Function("demo", "Shared tool", nil),
+		Handler: func(_ *agent.RunContext, _ json.RawMessage) (any, error) {
+			return nil, nil
+		},
+	}
+	require.NoError(t, c.toolCatalog.Register(tool))
+
+	request := func(method, query, body string) (any, error) {
+		r := httptest.NewRequest(method, "/api/inspect/tools"+query, strings.NewReader(body))
+		r.SetPathValue("section", "tools")
+		return c.inspectMonitor(r)
+	}
+	_, err = request("PATCH", "", `{"name":"demo","disabled":true}`)
+	require.NoError(t, err)
+	for _, query := range []string{"", "?group=10", "?scope=private"} {
+		data, err := request("GET", query, "")
+		require.NoError(t, err)
+		catalog := data.([]map[string]any)
+		require.Len(t, catalog, 2)
+		require.Equal(t, true, catalog[1]["disabled"])
+	}
+	var stored []agent.ToolPreference
+	require.NoError(t, db.Find(&stored).Error)
+	require.Equal(t, []agent.ToolPreference{{Name: "demo"}}, stored)
 }

@@ -72,6 +72,30 @@ func TestWorkToolRegistrationAndFileUpload(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestPrivateWorkCreatesDirectoryAndUploadsToBoundPeer(t *testing.T) {
+	const botID, userID = int64(987654339), int64(321)
+	workspace := filepath.Join(t.TempDir(), "private", "bot", "user")
+	p := NewPrivatePersona(PrivateSession{BotID: botID, UserID: userID}, nil, nil, Options{WorkDirectory: workspace})
+	require.Contains(t, p.ToolNames(), "send_file")
+	_, err := p.handleWriteWorkFile(nil, json.RawMessage(`{"path":"report.txt","content":"report"}`))
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(workspace, "report.txt"))
+	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok"}}
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{PostType: "message", DetailType: "private", SelfID: botID, UserID: userID}
+	rc := &agent.RunContext{Values: map[string]any{"zero_ctx": ctx}}
+	_, err = p.handleSendFile(rc, json.RawMessage(`{"path":"report.txt"}`))
+	require.NoError(t, err)
+	require.Equal(t, "upload_private_file", caller.requests[0].Action)
+	require.Equal(t, userID, caller.requests[0].Params["user_id"])
+	ctx.Event.UserID++
+	_, err = p.handleSendFile(rc, json.RawMessage(`{"path":"report.txt"}`))
+	require.Error(t, err)
+	require.Len(t, caller.requests, 1)
+}
+
 func TestWorkOutputIsBounded(t *testing.T) {
 	b := new(workOutput)
 	n, err := b.Write(make([]byte, 100000))

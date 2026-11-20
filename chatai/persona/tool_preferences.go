@@ -2,11 +2,15 @@ package persona
 
 import (
 	"fmt"
+
 	"github.com/kohmebot/chatai/chatai/agent"
 	"gorm.io/gorm/clause"
 )
 
 func (p *Persona) SetToolDisabled(name string, disabled bool) error {
+	if p.opts.ToolPreferences != nil {
+		return p.tools.SetDisabled(name, disabled, nil)
+	}
 	if p.db == nil {
 		return fmt.Errorf("数据库不可用")
 	}

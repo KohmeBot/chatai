@@ -177,11 +177,15 @@ func (p *Persona) readContext(query ContextMessageQuery, selfUserID int64) (cont
 	if err != nil {
 		return contextQueryResult{}, err
 	}
+	return newContextQueryResult(messages, hasMore, query.Offset, selfUserID), nil
+}
+
+func newContextQueryResult(messages []GroupMessage, hasMore bool, offset int, selfUserID int64) contextQueryResult {
 	result := contextQueryResult{CurrentTime: time.Now().Format(time.RFC3339), SelfUserID: selfUserID, Count: len(messages), HasMore: hasMore, Messages: timeMessageResults(messages, selfUserID)}
 	if hasMore {
-		result.NextOffset = query.Offset + len(messages)
+		result.NextOffset = offset + len(messages)
 	}
-	return result, nil
+	return result
 }
 
 type messageTimeRangeInput struct {

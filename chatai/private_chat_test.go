@@ -1,12 +1,17 @@
 package chatai
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/plugin/v2"
+	"github.com/stretchr/testify/require"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"gopkg.in/yaml.v3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type privateChatTestEngine struct {
@@ -85,5 +90,55 @@ func TestPrivateChatRequiresOptInAndAllowlist(t *testing.T) {
 		if config.allows(42, 100) {
 			t.Fatalf("private chat allowed without explicit opt-in and allowlist: %+v", config)
 		}
+	}
+}
+
+func TestAgentToolsShareCatalogAcrossGroupsAndPrivateSessions(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&agent.ToolPreference{}))
+	prefs, err := agent.LoadToolPreferences(db)
+	require.NoError(t, err)
+	tool := func(name string) agent.Tool {
+		return agent.Tool{
+			Definition: agent.Function(name, name, nil),
+			Handler:    func(*agent.RunContext, json.RawMessage) (any, error) { return true, nil },
+		}
+	}
+	c := &ChatPlugin{db: db, toolPreferences: prefs}
+	require.NoError(t, c.RegisterAgentTool(tool("plugin_example")))
+	opts := persona.Options{ToolPreferences: prefs}
+	require.NoError(t, c.initializeToolCatalog(opts, []agent.Tool{tool("mcp_example")}))
+	group := c.newAgentPersona(200, nil, opts)
+	engine := &privateChatTestEngine{Engine: zero.New()}
+	t.Cleanup(engine.Delete)
+	lookup := c.setOnPrivateMessage(engine, opts)
+	private := lookup(persona.PrivateSession{BotID: 42, UserID: 100})
+
+	require.NoError(t, c.RegisterAgentTool(tool("late_example")))
+	require.Error(t, c.RegisterAgentTool(tool("read_private_context")))
+	privateTool := tool("private_example")
+	privateTool.Scope = agent.ToolScopePrivate
+	require.NoError(t, c.RegisterAgentTool(privateTool))
+	require.Contains(t, c.toolCatalog.Names(), "private_example")
+	require.Contains(t, private.ToolNames(), "private_example")
+	require.NotContains(t, group.ToolNames(), "private_example")
+	for _, names := range [][]string{group.ToolNames(), private.ToolNames(), c.toolCatalog.Names()} {
+		require.Subset(t, names, []string{"plugin_example", "mcp_example", "late_example"})
+	}
+	require.Subset(t, c.toolCatalog.Names(), []string{"read_group_context", "read_private_context"})
+	require.Subset(t, c.toolCatalog.NamesInScope(agent.ToolScopeGroup), []string{"read_group_context", "read_user_memory", "send_message"})
+	require.NotContains(t, c.toolCatalog.NamesInScope(agent.ToolScopeGroup), "read_private_context")
+	require.Subset(t, c.toolCatalog.NamesInScope(agent.ToolScopePrivate), []string{"read_private_context", "read_user_memory", "send_message"})
+	require.NotContains(t, c.toolCatalog.NamesInScope(agent.ToolScopePrivate), "read_group_context")
+	require.NoError(t, c.setToolDisabled("mcp_example", true))
+	later := lookup(persona.PrivateSession{BotID: 42, UserID: 101})
+	otherGroup := c.newAgentPersona(201, nil, opts)
+	for _, p := range []*persona.Persona{group, otherGroup, private, later} {
+		require.NotContains(t, p.ToolNames(), "mcp_example")
+	}
+	require.NoError(t, c.setToolDisabled("mcp_example", false))
+	for _, p := range []*persona.Persona{group, otherGroup, private, later} {
+		require.Contains(t, p.ToolNames(), "mcp_example")
 	}
 }

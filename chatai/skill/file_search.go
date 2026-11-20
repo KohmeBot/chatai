@@ -2,8 +2,10 @@ package skill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -46,6 +48,52 @@ func (d *Directory) ResolveFile(p string) (string, error) {
 		return "", fmt.Errorf("not a regular skill file: %s", p)
 	}
 	return filepath.Abs(filepath.Join(d.path, filepath.FromSlash(p)))
+}
+
+// ReadAsset reads a binary resource within an enabled directory skill. It
+// accepts either form of path returned by SearchFiles for such resources.
+func (s *Service) ReadAsset(source string, maxBytes int64) ([]byte, error) {
+	if s == nil || !s.opts.Enabled || s.Directory == nil {
+		return nil, fmt.Errorf("Skills 未启用")
+	}
+	if maxBytes <= 0 || maxBytes == math.MaxInt64 {
+		return nil, fmt.Errorf("invalid skill asset size limit")
+	}
+	d := s.Directory
+	relative := source
+	if filepath.IsAbs(source) {
+		if filepath.Clean(source) != filepath.FromSlash(source) {
+			return nil, fmt.Errorf("invalid skill asset path")
+		}
+		base, err := filepath.Abs(d.path)
+		if err != nil {
+			return nil, err
+		}
+		relative, err = filepath.Rel(base, source)
+		if err != nil {
+			return nil, err
+		}
+		relative = filepath.ToSlash(relative)
+	}
+	name, file, nested := strings.Cut(relative, "/")
+	if !nested || !validAssetPath(relative) {
+		return nil, fmt.Errorf("asset path must be inside a skill directory")
+	}
+	if err := s.CheckEnabled(name); err != nil {
+		return nil, err
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	root, err := d.openProject(name)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	data, err := readLimitedSkillFile(root, file, maxBytes)
+	if errors.Is(err, errSkillFileTooLarge) {
+		return nil, fmt.Errorf("skill asset exceeds the %d-byte limit", maxBytes)
+	}
+	return data, err
 }
 
 // SearchFiles searches resource paths without parsing routing metadata or bodies.

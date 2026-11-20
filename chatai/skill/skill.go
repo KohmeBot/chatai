@@ -505,9 +505,9 @@ func (s *Service) Observe(exp Experience) error {
 	return s.createCandidate(exp)
 }
 
-// SearchActiveSkills 实现 agent.SkillSearcher。
-func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]agent.SkillMatch, error) {
-	if s == nil || !s.opts.Enabled || groupID == 0 {
+// SearchActiveSkills searches the shared catalog for all conversations.
+func (s *Service) SearchActiveSkills(_ int64, query string, limit int) ([]agent.SkillMatch, error) {
+	if s == nil || !s.opts.Enabled {
 		return nil, nil
 	}
 	limit = agent.SkillSearchLimit(limit)
@@ -527,7 +527,7 @@ func (s *Service) SearchActiveSkills(groupID int64, query string, limit int) ([]
 		Updates(map[string]any{"status": StatusStale}).Error; err != nil {
 		return nil, err
 	}
-	rows, err := s.searchRecords(query, []string{StatusActive}, 0, 0.22, groupID)
+	rows, err := s.searchRecords(query, []string{StatusActive}, 0, 0.22)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +582,7 @@ func (s *Service) updateUsedSkills(exp Experience) error {
 	actualTools := successfulToolNames(exp.Trace)
 	for _, id := range exp.Trace.UsedSkillIDs {
 		var row Record
-		if err := s.db.Where("id = ? AND (scope = ? OR (scope = ? AND group_id = ?))", id, ScopeGlobal, ScopeGroup, exp.Trace.GroupID).First(&row).Error; err != nil {
+		if err := s.db.Where("id = ? AND scope = ?", id, ScopeGlobal).First(&row).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
@@ -633,7 +633,7 @@ func skillUseSucceeded(trace agent.RunTrace, requiredTools, actualTools []string
 }
 
 func (s *Service) validateShadowSkills(exp Experience, success bool) (bool, error) {
-	rows, err := s.searchRecords(exp.Trace.Prompt, []string{StatusCandidate, StatusShadow, StatusStale}, 3, 0.28, 0)
+	rows, err := s.searchRecords(exp.Trace.Prompt, []string{StatusCandidate, StatusShadow, StatusStale}, 3, 0.28)
 	if err != nil || len(rows) == 0 {
 		return false, err
 	}
@@ -741,7 +741,7 @@ func (s *Service) createCandidate(exp Experience) error {
 		return nil
 	}
 	existing, err := s.searchRecords(clean.Description+" "+strings.Join(clean.Triggers, " "),
-		[]string{StatusCandidate, StatusShadow, StatusActive}, 5, 0.42, 0)
+		[]string{StatusCandidate, StatusShadow, StatusActive}, 5, 0.42)
 	if err != nil {
 		return err
 	}
@@ -844,18 +844,12 @@ type scoredRecord struct {
 	score  float64
 }
 
-func (s *Service) searchRecords(query string, statuses []string, limit int, threshold float64, legacyGroupID int64) ([]Record, error) {
+func (s *Service) searchRecords(query string, statuses []string, limit int, threshold float64) ([]Record, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
 	var rows []Record
-	queryDB := s.db.Where("status IN ?", statuses)
-	if legacyGroupID > 0 {
-		queryDB = queryDB.Where("scope = ? OR (scope = ? AND group_id = ?)", ScopeGlobal, ScopeGroup, legacyGroupID)
-	} else {
-		queryDB = queryDB.Where("scope = ?", ScopeGlobal)
-	}
-	if err := queryDB.Find(&rows).Error; err != nil {
+	if err := s.db.Where("status IN ? AND scope = ?", statuses, ScopeGlobal).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	scored := make([]scoredRecord, 0, len(rows))

@@ -132,13 +132,15 @@ func newMonitorPreview() *Store {
 		"created_at": privateStart, "next_run_at": now.Add(24 * time.Hour), "runs": []previewObject{},
 	}}
 	tools := []previewObject{}
-	for _, name := range []string{"search_context", "send_message", "read_skill"} {
-		tools = append(tools, previewObject{"namespace": "demo", "read_only": name != "send_message", "risk": "low", "idempotent": true, "group_action": name == "send_message", "definition": previewObject{"type": "function", "function": previewObject{"name": name, "description": "用于检查工具卡片和参数详情的模拟工具。", "parameters": previewObject{"type": "object", "properties": previewObject{"query": previewObject{"type": "string", "description": "待处理内容"}}, "required": []string{"query"}}}}})
+	for _, tool := range []struct{ name, namespace, scope, risk string }{
+		{"read_group_context", "context", "group", "low"},
+		{"read_private_context", "context", "private", "low"},
+		{"send_message", "chat", "both", "medium"},
+		{"read_skill", "mcp_demo", "both", "high"},
+	} {
+		sendsMessage := tool.name == "send_message"
+		tools = append(tools, previewObject{"namespace": tool.namespace, "scope": tool.scope, "read_only": !sendsMessage, "risk": tool.risk, "idempotent": true, "group_action": sendsMessage, "definition": previewObject{"type": "function", "function": previewObject{"name": tool.name, "description": "用于检查工具卡片和参数详情的模拟工具。", "parameters": previewObject{"type": "object", "properties": previewObject{"query": previewObject{"type": "string", "description": "待处理内容"}}, "required": []string{"query"}}}}})
 	}
-
-	tools[0]["namespace"] = "context"
-	tools[1]["namespace"], tools[1]["risk"] = "chat", "medium"
-	tools[2]["namespace"], tools[2]["risk"] = "mcp_demo", "high"
 	var mu sync.Mutex
 	s.Inspect = func(r *http.Request) (any, error) {
 		mu.Lock()

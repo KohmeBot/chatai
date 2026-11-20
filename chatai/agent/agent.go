@@ -243,6 +243,8 @@ const (
 type Tool struct {
 	Definition model.Tool
 	Handler    Handler
+	// Scope defaults to both conversation types for existing tool providers.
+	Scope ToolScope
 	// Namespace groups tools by capability so search results expose a legible
 	// high-level surface without renaming the stable function identifiers.
 	Namespace string
@@ -261,13 +263,22 @@ type Tool struct {
 }
 
 type Registry struct {
-	mu       sync.RWMutex
-	tools    map[string]Tool
-	disabled map[string]bool
+	mu          sync.RWMutex
+	tools       map[string]Tool
+	preferences *ToolPreferences
 }
 
 func NewRegistry() *Registry {
-	return &Registry{tools: make(map[string]Tool), disabled: make(map[string]bool)}
+	return NewRegistryWithToolPreferences(nil)
+}
+
+// NewRegistryWithToolPreferences gives a registry its own handlers and shared
+// enabled state. Nil creates independent preferences for standalone use.
+func NewRegistryWithToolPreferences(preferences *ToolPreferences) *Registry {
+	if preferences == nil {
+		preferences = &ToolPreferences{}
+	}
+	return &Registry{tools: make(map[string]Tool), preferences: preferences}
 }
 
 func (r *Registry) Register(tool Tool) error {
@@ -277,6 +288,12 @@ func (r *Registry) Register(tool Tool) error {
 	}
 	if name == "search_tools" {
 		return errors.New("agent tool name search_tools is reserved")
+	}
+	if tool.Scope == "" {
+		tool.Scope = ToolScopeBoth
+	}
+	if !tool.Scope.Valid() {
+		return fmt.Errorf("agent tool %q has invalid scope %q", name, tool.Scope)
 	}
 	if tool.Namespace == "" {
 		tool.Namespace = "uncategorized"
@@ -306,11 +323,16 @@ func (r *Registry) Register(tool Tool) error {
 }
 
 func (r *Registry) Definitions(names map[string]bool) []model.Tool {
+	return r.definitionsInScope(names, "")
+}
+
+func (r *Registry) definitionsInScope(names map[string]bool, scope ToolScope) []model.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	disabled := r.preferences.snapshot()
 	selected := make([]string, 0, len(names))
-	for name := range r.tools {
-		if names[name] && !r.disabled[name] {
+	for name, tool := range r.tools {
+		if names[name] && !disabled[name] && tool.Scope.allows(scope) {
 			selected = append(selected, name)
 		}
 	}
@@ -323,12 +345,31 @@ func (r *Registry) Definitions(names map[string]bool) []model.Tool {
 	return result
 }
 
-func (r *Registry) GroupActionDefinitions() []model.Tool {
+func (r *Registry) appendRunDefinitions(definitions []model.Tool, tools []Tool, scope ToolScope) []model.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	disabled := r.preferences.snapshot()
+	for _, tool := range tools {
+		name := tool.Definition.Function.Name
+		if disabled[name] || !tool.Scope.allows(scope) || !r.tools[name].Scope.allows(scope) {
+			continue
+		}
+		definitions = append(definitions, tool.Definition)
+	}
+	return definitions
+}
+
+func (r *Registry) GroupActionDefinitions() []model.Tool {
+	return r.groupActionDefinitionsInScope("")
+}
+
+func (r *Registry) groupActionDefinitionsInScope(scope ToolScope) []model.Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	disabled := r.preferences.snapshot()
 	names := make([]string, 0)
 	for name, tool := range r.tools {
-		if tool.GroupAction && !r.disabled[name] {
+		if tool.GroupAction && !disabled[name] && tool.Scope.allows(scope) {
 			names = append(names, name)
 		}
 	}
@@ -341,18 +382,19 @@ func (r *Registry) GroupActionDefinitions() []model.Tool {
 }
 
 type SearchResult struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Namespace   string `json:"namespace,omitempty"`
-	ReadOnly    bool   `json:"read_only"`
-	Idempotent  bool   `json:"idempotent"`
-	SideEffect  bool   `json:"side_effect"`
-	GroupAction bool   `json:"group_action"`
-	Risk        string `json:"risk"`
-	Kind        string `json:"kind,omitempty"`
-	SkillID     uint   `json:"skill_id,omitempty"`
-	Markdown    string `json:"markdown,omitempty"`
-	Path        string `json:"path,omitempty"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Namespace   string    `json:"namespace,omitempty"`
+	Scope       ToolScope `json:"scope,omitempty"`
+	ReadOnly    bool      `json:"read_only"`
+	Idempotent  bool      `json:"idempotent"`
+	SideEffect  bool      `json:"side_effect"`
+	GroupAction bool      `json:"group_action"`
+	Risk        string    `json:"risk"`
+	Kind        string    `json:"kind,omitempty"`
+	SkillID     uint      `json:"skill_id,omitempty"`
+	Markdown    string    `json:"markdown,omitempty"`
+	Path        string    `json:"path,omitempty"`
 }
 
 // SkillMatch 是 Skill 系统向 Runner 暴露的只读、已验证能力说明。
@@ -372,8 +414,14 @@ type SkillSearcher interface {
 }
 
 func (r *Registry) Search(query string, limit int) []SearchResult {
+	return r.SearchInScope(query, limit, "")
+}
+
+// SearchInScope searches enabled tools available to the given conversation type.
+func (r *Registry) SearchInScope(query string, limit int, scope ToolScope) []SearchResult {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	disabled := r.preferences.snapshot()
 	if limit <= 0 || limit > 8 {
 		limit = 5
 	}
@@ -384,7 +432,7 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 	}
 	matches := make([]scored, 0)
 	for name, tool := range r.tools {
-		if r.disabled[name] {
+		if disabled[name] || !tool.Scope.allows(scope) {
 			continue
 		}
 		description := tool.Definition.Function.Description
@@ -420,7 +468,7 @@ func (r *Registry) Search(query string, limit int) []SearchResult {
 				risk = ToolRiskLow
 			}
 			matches = append(matches, scored{SearchResult{
-				Name: name, Description: description, Namespace: tool.Namespace,
+				Name: name, Description: description, Namespace: tool.Namespace, Scope: tool.Scope,
 				ReadOnly: tool.ReadOnly, Idempotent: tool.Idempotent,
 				SideEffect: !tool.ReadOnly, GroupAction: tool.GroupAction, Risk: string(risk),
 			}, score})
@@ -497,7 +545,7 @@ func maxFloat(a, b float64) float64 {
 }
 
 func searchToolDefinition() model.Tool {
-	return Function("search_tools", "按当前任务搜索并加载少量相关工具或已验证 Skill，只搜索工具能力，当前未暴露不代表不存在", map[string]any{
+	return Function("search_tools", "按当前任务搜索并加载当前会话可用的相关工具或已验证 Skill，只搜索工具能力，当前未暴露不代表不存在", map[string]any{
 		"query": map[string]any{"type": "string", "description": "完整任务目标或所需能力，例如：总结当前对话、联网搜索不确定的信息、发送回复"},
 		"limit": map[string]any{"type": "integer", "description": "最多加载几个工具，默认5，最大8"},
 	}, "query")
@@ -511,13 +559,16 @@ func (r *Registry) execute(ctx *RunContext, call model.ToolCall) (result any, er
 	}()
 	r.mu.RLock()
 	tool, ok := r.tools[call.Function.Name]
-	disabled := r.disabled[call.Function.Name]
+	disabled := r.preferences.snapshot()[call.Function.Name]
 	r.mu.RUnlock()
 	if disabled {
 		return nil, fmt.Errorf("tool %q is disabled", call.Function.Name)
 	}
 	if !ok {
 		return nil, fmt.Errorf("unknown tool %q", call.Function.Name)
+	}
+	if !tool.Scope.allows(ctx.ToolScope()) {
+		return nil, fmt.Errorf("tool %q is unavailable in %s conversations", call.Function.Name, ctx.ToolScope())
 	}
 	return tool.Handler(ctx, json.RawMessage(call.Function.Arguments))
 }
@@ -561,10 +612,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	}
 	toolCallCount := 0
 	deliveryFailures := 0
-	toolsDefine := make([]model.Tool, 0, len(tools))
-	for _, tool := range tools {
-		toolsDefine = append(toolsDefine, tool.Definition)
-	}
+	scope := ctx.ToolScope()
 	runID := runSequence.Add(1)
 	ctx.startTrace(runID, prompt)
 	ctx.observer = r.Observer
@@ -579,7 +627,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 	}()
 	history := make([]model.Message, 0, steps*2)
 	activeTools := make(map[string]bool)
-	question := prompt + r.skillCatalogPrompt(activeTools) + r.residentSkillPrompt(ctx, activeTools)
+	question := prompt + r.skillCatalogPrompt(activeTools, scope) + r.residentSkillPrompt(ctx, activeTools)
 	finalize := func(cause error) (string, error) {
 		if errors.Is(runContextError(ctx), context.DeadlineExceeded) {
 			cause = fmt.Errorf("%v: %w", cause, context.DeadlineExceeded)
@@ -613,13 +661,14 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			question = finalActionPrompt(question)
 		}
 		requestQuestion, requestImageURL := question, imageURL
-		definitions := r.Tools.Definitions(activeTools)
-		definitions = append(definitions, toolsDefine...)
+		definitions := r.Tools.definitionsInScope(activeTools, scope)
 		if finalActionStep {
-			definitions = r.Tools.GroupActionDefinitions()
+			definitions = r.Tools.groupActionDefinitionsInScope(scope)
 			for _, definition := range definitions {
 				activeTools[definition.Function.Name] = true
 			}
+		} else if len(tools) > 0 {
+			definitions = r.Tools.appendRunDefinitions(definitions, tools, scope)
 		}
 		definitions = withFinishParameter(definitions)
 		logrus.Infof("[Agent][run=%d][请求模型] step=%d/%d history=%d action_done=%t active_tools=%v exposed_tools=%v", runID, i+1, steps, len(history), ctx.ActionPerformed(), sortedActiveToolNames(activeTools), definitionNames(definitions))
@@ -707,7 +756,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		deliveryFailed := false
 		batchOK, finishRequested := true, false
 		for callIndex, call := range response.ToolCalls {
-			if r.Tools.isDecisionBoundary(call.Function.Name) {
+			if r.Tools.isDecisionBoundary(call.Function.Name, scope) {
 				boundaryCallIndex, boundaryToolName = callIndex, call.Function.Name
 				break
 			}
@@ -718,7 +767,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			var callErr error
 			callStarted := time.Now()
 			ctx.emit(Event{Kind: "tool_started", Step: i + 1, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments, Summary: r.Tools.toolProgress(call.Function.Name)})
-			groupAction := r.Tools.isGroupAction(call.Function.Name)
+			groupAction := r.Tools.isGroupAction(call.Function.Name, scope)
 			executionCall, finish, finishErr := parseFinishParameter(call)
 			if callIndex == len(response.ToolCalls)-1 {
 				finishRequested = finish
@@ -748,7 +797,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 				if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil {
 					callErr = err
 				} else {
-					found := r.Tools.Search(input.Query, input.Limit)
+					found := r.Tools.SearchInScope(input.Query, input.Limit, scope)
 					for i := range found {
 						found[i].Kind = "tool"
 					}
@@ -762,14 +811,14 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 								validTools := make([]string, 0, len(item.RequiredTools))
 								allToolsAvailable := true
 								for _, toolName := range item.RequiredTools {
-									if r.Tools.Has(toolName) {
+									if r.Tools.HasInScope(toolName, scope) {
 										validTools = append(validTools, toolName)
 									} else {
 										allToolsAvailable = false
 									}
 								}
 								if !allToolsAvailable {
-									logrus.Warnf("[Agent][run=%d][Skill 跳过] skill=%s 原因=存在未注册的所需工具", runID, item.Name)
+									logrus.Warnf("[Agent][run=%d][Skill 跳过] skill=%s 原因=当前会话缺少所需工具", runID, item.Name)
 									continue
 								}
 								found = append(found, SearchResult{Name: item.Name, Description: item.Description, Kind: "skill", SkillID: item.ID,
@@ -797,7 +846,7 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 			} else {
 				result, callErr = r.Tools.execute(ctx, executionCall)
 				if callErr == nil && call.Function.Name == "read_skill" {
-					r.activateReadSkillTools(result, activeTools)
+					r.activateReadSkillTools(result, activeTools, scope)
 				}
 				if callErr == nil && groupAction {
 					ctx.MarkActionPerformed()
@@ -961,10 +1010,11 @@ func decisionProgress(response *model.Response) string {
 	return "正在整理本轮处理结果。"
 }
 
-func (r *Registry) isGroupAction(name string) bool {
+func (r *Registry) isGroupAction(name string, scope ToolScope) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.tools[name].GroupAction
+	tool := r.tools[name]
+	return tool.GroupAction && tool.Scope.allows(scope)
 }
 
 func (r *Registry) toolProgress(name string) string {
@@ -987,27 +1037,39 @@ func (r *Registry) toolProgress(name string) string {
 	return conciseSummary("准备执行：" + parts[0])
 }
 
-func (r *Registry) isDecisionBoundary(name string) bool {
+func (r *Registry) isDecisionBoundary(name string, scope ToolScope) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.tools[name].DecisionBoundary
+	tool := r.tools[name]
+	return tool.DecisionBoundary && tool.Scope.allows(scope) && !r.preferences.snapshot()[name]
 }
 
 // Has 判断工具是否已经注册，用于 Skill 白名单激活。
 func (r *Registry) Has(name string) bool {
+	return r.HasInScope(name, "")
+}
+
+// HasInScope checks whether a tool is registered, enabled and available in scope.
+func (r *Registry) HasInScope(name string, scope ToolScope) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.tools[name]
-	return ok && !r.disabled[name]
+	tool, ok := r.tools[name]
+	return ok && !r.preferences.snapshot()[name] && tool.Scope.allows(scope)
 }
 
 // Names 返回所有已注册工具名的稳定排序副本。
 func (r *Registry) Names() []string {
+	return r.NamesInScope("")
+}
+
+// NamesInScope returns sorted names of enabled tools available in scope.
+func (r *Registry) NamesInScope(scope ToolScope) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	disabled := r.preferences.snapshot()
 	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		if r.disabled[name] {
+	for name, tool := range r.tools {
+		if disabled[name] || !tool.Scope.allows(scope) {
 			continue
 		}
 		names = append(names, name)

@@ -81,6 +81,7 @@ type Options struct {
 	RepeatCount            int
 	ImpressionUpdateEnable bool
 	ExtraTools             []agent.Tool
+	ToolPreferences        *agent.ToolPreferences
 	Skills                 *skill.Service
 
 	SearchAPI search.Searcher
@@ -153,7 +154,7 @@ func newPersona(groupID int64, private *PrivateSession, env plugin.Env, db *gorm
 	if opts.WebSearchPrefer <= 0 {
 		opts.WebSearchPrefer = time.Hour
 	}
-	p := &Persona{groupID: groupID, private: private, env: env, db: db, opts: opts, tools: agent.NewRegistry()}
+	p := &Persona{groupID: groupID, private: private, env: env, db: db, opts: opts, tools: agent.NewRegistryWithToolPreferences(opts.ToolPreferences)}
 	p.followUps = make(map[int64]*followUpWaiter)
 	p.followUpTimeout = 30 * time.Second
 	p.registerBuiltinTools()
@@ -161,7 +162,7 @@ func newPersona(groupID int64, private *PrivateSession, env plugin.Env, db *gorm
 		_ = p.tools.Register(tool)
 	}
 
-	if private == nil && db != nil && db.Migrator().HasTable(&agent.ToolPreference{}) {
+	if opts.ToolPreferences == nil && private == nil && db != nil && db.Migrator().HasTable(&agent.ToolPreference{}) {
 		var preferences []agent.ToolPreference
 		if err := db.Where("group_id = ?", groupID).Find(&preferences).Error; err != nil {
 			panic(fmt.Errorf("load tool preferences: %w", err))
@@ -175,7 +176,13 @@ func newPersona(groupID int64, private *PrivateSession, env plugin.Env, db *gorm
 
 func (p *Persona) RegisterTool(tool agent.Tool) error { return p.tools.Register(tool) }
 
-func (p *Persona) ToolNames() []string { return p.tools.Names() }
+func (p *Persona) ToolNames() []string {
+	scope := agent.ToolScopeGroup
+	if p.private != nil {
+		scope = agent.ToolScopePrivate
+	}
+	return p.tools.NamesInScope(scope)
+}
 
 // UpdateContext 记录消息；明确触发直接运行，存留窗口内先判断是否值得续聊。
 func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
@@ -305,8 +312,8 @@ func (p *Persona) agentRunner(agentModel model.LargeModel) agent.Runner {
 
 func (p *Persona) observeRun(runCtx *agent.RunContext) {
 	runCtx.RefreshTraceOutcome()
-	if p.opts.Skills != nil {
-		p.opts.Skills.ObserveAsync(skill.Experience{Trace: runCtx.Trace(), AvailableTools: p.tools.Names()})
+	if p.private == nil && p.opts.Skills != nil {
+		p.opts.Skills.ObserveAsync(skill.Experience{Trace: runCtx.Trace(), AvailableTools: p.ToolNames()})
 	}
 }
 

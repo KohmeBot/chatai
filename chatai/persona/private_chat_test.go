@@ -9,6 +9,7 @@ import (
 
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
+	"github.com/kohmebot/chatai/chatai/skill"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	zero "github.com/wdvxdr1123/ZeroBot"
@@ -16,21 +17,62 @@ import (
 )
 
 type privateReplyTestModel struct {
-	events []agentEventEnvelope
+	events   []agentEventEnvelope
+	requests []model.Request
 }
 
 func (m *privateReplyTestModel) Request(req *model.Request, res *model.Response) error {
 	var event agentEventEnvelope
-	prompt, _, _ := strings.Cut(req.Question, "\n\n")
-	if err := json.Unmarshal([]byte(prompt), &event); err != nil {
+	if err := json.NewDecoder(strings.NewReader(req.Question)).Decode(&event); err != nil {
 		return err
 	}
 	m.events = append(m.events, event)
+	m.requests = append(m.requests, *req)
 	res.ToolCalls = []model.ToolCall{{
 		ID: "reply", Type: "function",
 		Function: model.ToolCallFunction{Name: "send_message", Arguments: `{"text":"收到","_finish_after_success":true}`},
 	}}
 	return nil
+}
+
+func TestPrivateAgentPreloadsSharedResidentSkill(t *testing.T) {
+	const botID, userID = 987654338, 123
+	db := memoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&PrivateChatMessageRecord{}, &PrivateUserMemory{}, &agent.ToolPreference{}))
+	require.NoError(t, db.AutoMigrate(skill.Models()...))
+	prefs, err := agent.LoadToolPreferences(db)
+	require.NoError(t, err)
+	s := skill.NewService(db, nil, skill.Options{Enabled: true})
+	s.Directory, err = skill.NewDirectory(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, s.Directory.Save("demo", "SKILL.md", "---\nname: demo\ndescription: Shared directory skill\ntools: [send_message, shared_tool, group_only_tool]\n---\nRESIDENT_PRIVATE_BODY", false))
+	require.NoError(t, s.SetResident(12345, "demo", 0, true))
+	llm := new(privateReplyTestModel)
+	p := NewPrivatePersona(PrivateSession{BotID: botID, UserID: userID}, nil, db, Options{
+		Skills: s, AgentModel: llm, ToolPreferences: prefs, ProgressAfter: time.Hour,
+		ExtraTools: []agent.Tool{
+			{Definition: agent.Function("shared_tool", "Shared tool", nil),
+				Handler: func(*agent.RunContext, json.RawMessage) (any, error) { return true, nil }},
+			{Definition: agent.Function("group_only_tool", "Group-only tool", nil), Scope: agent.ToolScopeGroup,
+				Handler: func(*agent.RunContext, json.RawMessage) (any, error) { return true, nil }},
+		},
+	})
+	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":42}`)}}
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{PostType: "message", DetailType: "private", SelfID: botID, UserID: userID,
+		MessageID: int64(11), Message: message.Message{message.Text("demo")}}
+	require.NoError(t, p.UpdateContext(ctx))
+	require.Len(t, llm.requests, 1)
+	require.Contains(t, llm.requests[0].Question, "RESIDENT_PRIVATE_BODY")
+	var exposed []string
+	for _, tool := range llm.requests[0].Tools {
+		exposed = append(exposed, tool.Function.Name)
+	}
+	require.Subset(t, exposed, []string{"search_tools", "read_skill", "list_skills", "search_skills", "shared_tool"})
+	require.NotContains(t, exposed, "group_only_tool")
+	require.Equal(t, "send_private_msg", caller.requests[0].Action)
 }
 
 func TestPrivateConversationInjectsBothProfiles(t *testing.T) {

@@ -17,7 +17,7 @@ var skillToolToken = regexp.MustCompile(`[A-Za-z0-9_-]+`)
 // skillToolNames resolves an explicit tools list, falling back to references in
 // the body only when the list is absent. An empty list opts out of discovery.
 // Resolution only exposes already registered tools; it never executes them.
-func (r *Registry) skillToolNames(content string) []string {
+func (r *Registry) skillToolNames(content string, scope ToolScope) []string {
 	body := content
 	var declared []string
 	line, rest, _ := strings.Cut(content, "\n")
@@ -47,10 +47,11 @@ func (r *Registry) skillToolNames(content string) []string {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	disabled := r.preferences.snapshot()
 	names := make([]string, 0)
 	seen := make(map[string]bool)
 	for _, name := range candidates {
-		if _, ok := r.tools[name]; ok && !r.disabled[name] && !seen[name] {
+		if tool, ok := r.tools[name]; ok && !disabled[name] && !seen[name] && tool.Scope.allows(scope) {
 			seen[name] = true
 			names = append(names, name)
 		}
@@ -61,7 +62,7 @@ func (r *Registry) skillToolNames(content string) []string {
 
 // activateReadSkillTools runs only after a successful read_skill call. It keeps
 // activation local to this run and returns the resolved names alongside the text.
-func (r *Runner) activateReadSkillTools(result any, active map[string]bool) {
+func (r *Runner) activateReadSkillTools(result any, active map[string]bool, scope ToolScope) {
 	document, ok := result.(map[string]any)
 	if !ok {
 		return
@@ -70,7 +71,7 @@ func (r *Runner) activateReadSkillTools(result any, active map[string]bool) {
 	if !ok {
 		return
 	}
-	names := r.Tools.skillToolNames(content)
+	names := r.Tools.skillToolNames(content, scope)
 	for _, name := range names {
 		active[name] = true
 	}
@@ -116,15 +117,15 @@ func (r *Runner) residentSkillPrompt(ctx *RunContext, active map[string]bool) st
 	if err != nil {
 		logrus.Warnf("[Skill][常驻加载失败] %v", err)
 	}
+	scope := ctx.ToolScope()
 	var b strings.Builder
 	for _, item := range items {
 		if strings.TrimSpace(item.Markdown) == "" {
 			continue
 		}
-		names := r.Tools.skillToolNames(item.Markdown)
 		valid := true
 		for _, name := range item.RequiredTools {
-			if !r.Tools.Has(name) {
+			if !r.Tools.HasInScope(name, scope) {
 				valid = false
 				break
 			}
@@ -132,6 +133,7 @@ func (r *Runner) residentSkillPrompt(ctx *RunContext, active map[string]bool) st
 		if !valid {
 			continue
 		}
+		names := r.Tools.skillToolNames(item.Markdown, scope)
 		for _, name := range append(names, item.RequiredTools...) {
 			active[name] = true
 		}
@@ -147,13 +149,13 @@ func (r *Runner) residentSkillPrompt(ctx *RunContext, active map[string]bool) st
 	return b.String()
 }
 
-func (r *Runner) skillCatalogPrompt(active map[string]bool) string {
+func (r *Runner) skillCatalogPrompt(active map[string]bool, scope ToolScope) string {
 	catalog, ok := r.Skills.(SkillCatalog)
-	if !ok || !r.Tools.Has("read_skill") {
+	if !ok || !r.Tools.HasInScope("read_skill", scope) {
 		return ""
 	}
 	for _, name := range []string{"read_skill", "list_skills", "search_skills"} {
-		if r.Tools.Has(name) {
+		if r.Tools.HasInScope(name, scope) {
 			active[name] = true
 		}
 	}

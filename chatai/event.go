@@ -63,7 +63,7 @@ func (c *ChatPlugin) setOnPrivateMessage(engine plugin.Engine, opts persona.Opti
 		defer mu.Unlock()
 		p := sessions[session]
 		if p == nil {
-			p = persona.NewPrivatePersona(session, c.env, c.db, opts)
+			p = c.newAgentPersona(0, &session, opts)
 			sessions[session] = p
 		}
 		return p

@@ -22,7 +22,7 @@ func (d *Directory) MonitorPreview(name, file string) (map[string]any, error) {
 		return nil, err
 	}
 	defer root.Close()
-	data, err := readProjectFile(root, file, maxSkillFile)
+	data, err := readLimitedSkillFile(root, file, maxSkillFile)
 	if err != nil {
 		return nil, fmt.Errorf("无法预览文件（仅支持不超过 5 MiB 的普通文件）: %w", err)
 	}

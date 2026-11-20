@@ -34,7 +34,7 @@ func (s *Service) CheckEnabled(name string) error {
 	}
 	return nil
 }
-func (s *Service) SetDisabled(groupID int64, name string, id uint, disabled bool) error {
+func (s *Service) SetDisabled(_ int64, name string, id uint, disabled bool) error {
 	if s == nil || !s.opts.Enabled || s.db == nil {
 		return fmt.Errorf("Skills 未启用")
 	}
@@ -42,7 +42,7 @@ func (s *Service) SetDisabled(groupID int64, name string, id uint, disabled bool
 		return fmt.Errorf("必须指定技能名称或记录 ID，不能同时指定")
 	}
 	if id != 0 {
-		if _, err := s.residentRecord(groupID, id); err != nil {
+		if _, err := s.residentRecord(id); err != nil {
 			return err
 		}
 	} else {
