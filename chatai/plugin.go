@@ -165,7 +165,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	tables := []any{
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
 		&persona.ChatMessageRecord{}, &model.TokenUsage{},
-		&persona.GroupMemory{}, &persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
+		&persona.GroupMemory{}, &persona.UserMemory{}, &persona.PrivateUserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
 	}
 	privateChatEnabled := c.conf.PrivateChat.Enable && len(c.conf.PrivateChat.AllowedUsers) > 0
 	if privateChatEnabled {
@@ -294,14 +294,6 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	}
 	c.personaMap = make(map[int64]*persona.Persona)
 	c.scheduler = schedule.New(db)
-	c.scheduler.Ready = func(t schedule.Task) bool { return c.personaMap[t.GroupID] != nil && zero.GetBot(t.BotID) != nil }
-	c.scheduler.Execute = func(t schedule.Task) error {
-		p := c.personaMap[t.GroupID]
-		if p == nil {
-			return fmt.Errorf("该群未启用 Agent")
-		}
-		return p.RunScheduled(t)
-	}
 	var workRoot string
 	if c.conf.Agent.Work.Enable {
 		dataDir, err := env.FilePath()
@@ -350,8 +342,33 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnUsage(engine)
+	var privatePersona func(persona.PrivateSession) *persona.Persona
 	if privateChatEnabled {
-		c.setOnPrivateMessage(engine, c.conversationOptions(persona.PrivateAgentRules(), searcher))
+		opts := c.conversationOptions(persona.PrivateAgentRules(), searcher)
+		opts.Scheduler = c.scheduler
+		opts.Observer = observer
+		opts.ImpressionUpdateEnable = c.conf.Impression.Enable
+		privatePersona = c.setOnPrivateMessage(engine, opts)
+	}
+	c.scheduler.Ready = func(t schedule.Task) bool {
+		enabled := c.personaMap[t.GroupID] != nil
+		if t.IsPrivate() {
+			enabled = privatePersona != nil && c.conf.PrivateChat.allows(t.BotID, t.UserID)
+		}
+		return enabled && zero.GetBot(t.BotID) != nil
+	}
+	c.scheduler.Execute = func(t schedule.Task) error {
+		if t.IsPrivate() {
+			if privatePersona == nil || !c.conf.PrivateChat.allows(t.BotID, t.UserID) {
+				return fmt.Errorf("该用户未启用私聊 Agent")
+			}
+			return privatePersona(persona.PrivateSession{BotID: t.BotID, UserID: t.UserID}).RunScheduled(t)
+		}
+		p := c.personaMap[t.GroupID]
+		if p == nil {
+			return fmt.Errorf("该群未启用 Agent")
+		}
+		return p.RunScheduled(t)
 	}
 	if workRoot != "" {
 		c.startWorkCleanup(workRoot)
@@ -401,4 +418,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.6.0" }
+func (c *ChatPlugin) Version() string      { return "v1.6.1" }

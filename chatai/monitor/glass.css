@@ -81,11 +81,13 @@ summary { color:var(--muted); }
 .run-date-filter { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; }
 .run-date-filter .status-segments { flex:0 0 auto; max-width:100%; }
 .run-date-filter>p { margin:0; font-size:12px; }
+.catalog-view-controls { display:flex; align-items:center; gap:12px; }
 .filters input { min-width:180px; }
 .catalog-filters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) 44px; align-items:center; gap:12px; margin:20px 0; }
 .catalog-filter-hint { grid-column:1 / -1; }
 .catalog-filter-reset { grid-column:4; grid-row:1; }
 @media(max-width:600px) {
+ .catalog-view-controls { margin-top:10px; }
  .catalog-filters { grid-template-columns:minmax(0,1fr) 44px; gap:10px; }
  .catalog-filters>.glass-choice { grid-column:1; }
  .catalog-filter-reset { grid-column:2; grid-row:3; }

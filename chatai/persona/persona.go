@@ -251,6 +251,9 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	executionCtx, cancel := context.WithTimeout(context.Background(), p.opts.RunTimeout)
 	defer cancel()
 	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, UserName: msg.User.Nickname, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
+	if p.private != nil {
+		runCtx.Private, runCtx.BotID = true, p.private.BotID
+	}
 	runCtx.ReportDeliveryFailure(deliveryErr)
 	if p.private == nil && scheduledInstruction == "" && deliveryErr == nil && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
 		runCtx.Values[continuationTurnKey] = true

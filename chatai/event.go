@@ -55,27 +55,32 @@ func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 	})
 }
 
-func (c *ChatPlugin) setOnPrivateMessage(engine plugin.Engine, opts persona.Options) {
+func (c *ChatPlugin) setOnPrivateMessage(engine plugin.Engine, opts persona.Options) func(persona.PrivateSession) *persona.Persona {
 	var mu sync.Mutex
 	sessions := make(map[persona.PrivateSession]*persona.Persona)
+	lookup := func(session persona.PrivateSession) *persona.Persona {
+		mu.Lock()
+		defer mu.Unlock()
+		p := sessions[session]
+		if p == nil {
+			p = persona.NewPrivatePersona(session, c.env, c.db, opts)
+			sessions[session] = p
+		}
+		return p
+	}
 	allowed := func(ctx *zero.Ctx) bool {
 		return c.conf.PrivateChat.allows(ctx.Event.SelfID, ctx.Event.UserID)
 	}
 	// 默认优先级的命令先处理，拦截的命令不会再触发私聊 Agent。
 	engine.OnMessage(zero.OnlyPrivate, allowed).SecondPriority().Handle(func(ctx *zero.Ctx) {
 		session := persona.PrivateSession{BotID: ctx.Event.SelfID, UserID: ctx.Event.UserID}
-		mu.Lock()
-		p := sessions[session]
-		if p == nil {
-			p = persona.NewPrivatePersona(session, c.env, c.db, opts)
-			sessions[session] = p
-		}
-		mu.Unlock()
+		p := lookup(session)
 		if err := p.UpdateContext(ctx); err != nil {
 			logrus.Errorf("[ChatAI][私聊][bot=%d user=%d] %v", session.BotID, session.UserID, err)
 			ctx.SendPrivateMessage(session.UserID, message.Message{message.Text("这次处理失败了，请稍后再试。")})
 		}
 	})
+	return lookup
 }
 
 func (c *ChatPlugin) SetOnJoinGroup(engine plugin.Engine) {

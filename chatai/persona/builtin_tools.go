@@ -16,6 +16,7 @@ func (p *Persona) registerBuiltinTools() {
 			p.privateProfileTools(),
 			p.imageTools(),
 			p.chatActionTools(),
+			p.scheduleTools(),
 			p.webTools(),
 		}
 	} else {

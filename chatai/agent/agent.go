@@ -22,6 +22,8 @@ type RunContext struct {
 	GroupID  int64
 	UserID   int64
 	UserName string
+	Private  bool
+	BotID    int64
 	Values   map[string]any
 
 	actionMu              sync.RWMutex

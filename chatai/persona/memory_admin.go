@@ -15,6 +15,7 @@ import (
 type MemoryEdit struct {
 	Target      string     `json:"target"`
 	UserID      string     `json:"user_id"`
+	BotID       string     `json:"bot_id"`
 	Version     uint64     `json:"version"`
 	Key         string     `json:"key"`
 	Text        string     `json:"text"`
@@ -28,12 +29,20 @@ type MemoryEdit struct {
 	Previous    string     `json:"previous"`
 }
 
+func EditPrivateMemory(db *gorm.DB, session PrivateSession, edit MemoryEdit, remove bool) error {
+	p := Persona{db: db, private: &session}
+	return p.EditMemory(session.UserID, edit, remove)
+}
+
 func (p *Persona) EditMemory(userID int64, edit MemoryEdit, remove bool) error {
 	return p.db.Transaction(func(tx *gorm.DB) error {
 		if strings.HasPrefix(edit.Target, "group") {
+			if p.private != nil {
+				return errors.New("私聊页面仅支持编辑私聊用户记忆")
+			}
 			return p.editGroupMemory(tx, edit, remove)
 		}
-		profile, err := readUserMemory(tx, userID)
+		profile, err := p.readWritableUserMemory(tx, userID)
 		if err != nil {
 			return err
 		}
@@ -86,7 +95,7 @@ func (p *Persona) EditMemory(userID int64, edit MemoryEdit, remove bool) error {
 				profile.Relationship = RelationshipMemory{Score: edit.Score, Description: edit.Description, Reason: edit.Reason}
 			}
 		case "item":
-			visible := visibleUserProfile(profile, p.groupID, time.Now(), int(^uint(0)>>1))
+			visible := p.visibleWritableUserMemory(profile, time.Now(), int(^uint(0)>>1))
 			found := false
 			for _, item := range visible.Items {
 				if item.Key == edit.Key {
@@ -94,7 +103,7 @@ func (p *Persona) EditMemory(userID int64, edit MemoryEdit, remove bool) error {
 				}
 			}
 			if !found {
-				return errors.New("记忆条目不存在、已过期或不属于当前群")
+				return errors.New("记忆条目不存在、已过期或不属于当前会话")
 			}
 			for i := range profile.Items {
 				item := &profile.Items[i]
@@ -127,11 +136,13 @@ func (p *Persona) EditMemory(userID int64, edit MemoryEdit, remove bool) error {
 		default:
 			return errors.New("不支持的记忆操作")
 		}
-		var latest ChatMessageRecord
-		if err := tx.Where("user_id = ?", userID).Order("id DESC").Limit(1).Find(&latest).Error; err != nil {
-			return err
+		if p.private == nil {
+			var latest ChatMessageRecord
+			if err := tx.Where("user_id = ?", userID).Order("id DESC").Limit(1).Find(&latest).Error; err != nil {
+				return err
+			}
+			profile.ManualThrough = max(profile.ManualThrough, latest.ID)
 		}
-		profile.ManualThrough = max(profile.ManualThrough, latest.ID)
-		return writeUserMemory(tx, profile)
+		return saveUserMemory(tx, profile, p.private)
 	})
 }

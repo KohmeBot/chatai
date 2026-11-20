@@ -24,6 +24,16 @@ type UserMemory struct {
 	UpdatedAt   time.Time
 }
 
+// PrivateUserMemory is scoped to a single bot and peer, independently of group memory.
+type PrivateUserMemory struct {
+	BotID       int64 `gorm:"primaryKey;autoIncrement:false"`
+	UserID      int64 `gorm:"primaryKey;autoIncrement:false"`
+	ProfileJSON string
+	Score       int64
+	Version     uint64
+	UpdatedAt   time.Time
+}
+
 type MemoryItem struct {
 	Key        string     `json:"key"`
 	Kind       string     `json:"kind"` // fact, preference, boundary, state, experience
@@ -57,6 +67,23 @@ func readUserMemory(db *gorm.DB, userID int64) (UserProfile, error) {
 	}
 	var row UserMemory
 	err := db.First(&row, "user_id = ?", userID).Error
+	return decodeUserMemory(row, userID, err)
+}
+
+func readPrivateUserMemory(db *gorm.DB, session PrivateSession) (UserProfile, error) {
+	if session.BotID <= 0 || session.UserID <= 0 || session.BotID == session.UserID {
+		return UserProfile{}, errors.New("invalid private session")
+	}
+	var row PrivateUserMemory
+	err := db.First(&row, "bot_id = ? AND user_id = ?", session.BotID, session.UserID).Error
+	return decodeUserMemory(row.userMemory(), session.UserID, err)
+}
+
+func (row PrivateUserMemory) userMemory() UserMemory {
+	return UserMemory{UserID: row.UserID, ProfileJSON: row.ProfileJSON, Score: row.Score, Version: row.Version, UpdatedAt: row.UpdatedAt}
+}
+
+func decodeUserMemory(row UserMemory, userID int64, err error) (UserProfile, error) {
 	profile := UserProfile{UserID: userID, Items: []MemoryItem{}}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		profile.Relationship.Level = favor.GetFavorLevelInfo(0).Name
@@ -76,6 +103,10 @@ func readUserMemory(db *gorm.DB, userID int64) (UserProfile, error) {
 
 // CAS is enforced by the database, including concurrent first writes.
 func writeUserMemory(db *gorm.DB, profile UserProfile) error {
+	return saveUserMemory(db, profile, nil)
+}
+
+func saveUserMemory(db *gorm.DB, profile UserProfile, session *PrivateSession) error {
 	version := profile.Version
 	profile.Version++
 	profile.Relationship.Score = max(favor.FavorMin, min(favor.FavorMax, profile.Relationship.Score))
@@ -85,15 +116,24 @@ func writeUserMemory(db *gorm.DB, profile UserProfile) error {
 		return err
 	}
 	row := UserMemory{UserID: profile.UserID, ProfileJSON: string(encoded), Score: profile.Relationship.Score, Version: profile.Version, UpdatedAt: time.Now()}
+	var record any = &row
+	query := db.Model(&UserMemory{})
+	if session != nil {
+		if session.BotID <= 0 || session.UserID <= 0 || session.BotID == session.UserID || profile.UserID != session.UserID {
+			return errors.New("invalid private session")
+		}
+		record = &PrivateUserMemory{BotID: session.BotID, UserID: row.UserID, ProfileJSON: row.ProfileJSON, Score: row.Score, Version: row.Version, UpdatedAt: row.UpdatedAt}
+		query = db.Model(&PrivateUserMemory{}).Where("bot_id = ?", session.BotID)
+	}
 	if version == 0 {
 		// A plain INSERT is intentional: MySQL CLIENT_FOUND_ROWS can report a
 		// no-op upsert as one affected row, which is not a successful CAS.
-		if err := db.Create(&row).Error; err != nil {
+		if err := db.Create(record).Error; err != nil {
 			return fmt.Errorf("user memory changed or could not be created; read it again before updating: %w", err)
 		}
 		return nil
 	}
-	result := db.Model(&UserMemory{}).Where("user_id = ? AND version = ?", row.UserID, version).
+	result := query.Where("user_id = ? AND version = ?", row.UserID, version).
 		Updates(map[string]any{"profile_json": row.ProfileJSON, "score": row.Score, "version": row.Version, "updated_at": row.UpdatedAt})
 	if result.Error != nil {
 		return result.Error
@@ -179,7 +219,7 @@ func applyMemoryChange(profile UserProfile, change MemoryChange, messages []Chat
 	for _, id := range change.EvidenceIDs {
 		msg, ok := evidence[id]
 		if !ok {
-			return profile, errors.New("evidence must be this user's messages in this group")
+			return profile, errors.New("evidence must be this user's messages in the current chat")
 		}
 		selected[id] = msg
 	}
@@ -263,13 +303,21 @@ func applyMemoryContent(profile UserProfile, change MemoryChange, selected map[u
 
 // Keep automatic input bounded; full, unexpired memory remains available by tool.
 func visibleUserProfile(profile UserProfile, groupID int64, now time.Time, limit int) UserProfile {
+	return visibleUserProfileForChat(profile, groupID, false, now, limit)
+}
+
+func visiblePrivateUserProfile(profile UserProfile, now time.Time, limit int) UserProfile {
+	return visibleUserProfileForChat(profile, 0, true, now, limit)
+}
+
+func visibleUserProfileForChat(profile UserProfile, groupID int64, private bool, now time.Time, limit int) UserProfile {
 	items := make([]MemoryItem, 0)
 	for _, item := range profile.Items {
 		if item.ExpiresAt != nil && !item.ExpiresAt.After(now) {
 			continue
 		}
 		// Shared preferences are global; events/states stay in their source group.
-		if (item.Kind == "state" || item.Kind == "experience") && (groupID == 0 || item.GroupID != groupID) {
+		if !private && (item.Kind == "state" || item.Kind == "experience") && (groupID == 0 || item.GroupID != groupID) {
 			continue
 		}
 		items = append(items, item)

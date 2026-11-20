@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kohmebot/chatai/chatai/monitor"
 	"github.com/kohmebot/chatai/chatai/persona"
 	"github.com/kohmebot/chatai/chatai/schedule"
 	"github.com/kohmebot/chatai/chatai/skill"
@@ -27,8 +28,20 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		sort.Strings(groups)
 		return groups, nil
 	}
+	if section == "schedules" || section == "memory" {
+		scope, err := monitor.ChatScope(r)
+		if err != nil {
+			return nil, err
+		}
+		if scope == "private" {
+			if section == "schedules" {
+				return c.inspectSchedules(r, 0)
+			}
+			return c.inspectMemory(r, nil)
+		}
+	}
 	id, err := strconv.ParseInt(r.URL.Query().Get("group"), 10, 64)
-	if err != nil {
+	if err != nil || id <= 0 {
 		return nil, fmt.Errorf("请选择有效群聊")
 	}
 	p := c.personaMap[id]
@@ -37,58 +50,7 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 	}
 	switch section {
 	case "schedules":
-		if c.scheduler == nil {
-			return nil, fmt.Errorf("定时任务未启用")
-		}
-		if r.Method == http.MethodGet {
-			offset := 0
-			if raw := r.URL.Query().Get("offset"); raw != "" {
-				offset, err = strconv.Atoi(raw)
-			}
-			if err != nil || offset < 0 || offset > 1000000 {
-				return nil, fmt.Errorf("无效分页参数")
-			}
-			items, err := c.scheduler.List(id, 0, offset)
-			bots := []string{}
-			zero.RangeBot(func(id int64, _ *zero.Ctx) bool { bots = append(bots, strconv.FormatInt(id, 10)); return true })
-			sort.Strings(bots)
-			return map[string]any{"items": items, "bots": bots, "has_more": len(items) == 50}, err
-		}
-		var input struct {
-			schedule.Input
-			TaskID uint   `json:"task_id"`
-			UserID string `json:"user_id"`
-			BotID  string `json:"bot_id"`
-		}
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&input); err != nil {
-			return nil, fmt.Errorf("无效任务数据: %w", err)
-		}
-		if decoder.Decode(new(any)) != io.EOF {
-			return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
-		}
-		if r.Method == http.MethodDelete {
-			if input.TaskID == 0 {
-				return nil, fmt.Errorf("无效任务 ID")
-			}
-			if err := c.scheduler.Delete(id, 0, input.TaskID); err != nil {
-				return nil, err
-			}
-			return map[string]bool{"deleted": true}, nil
-		}
-		if r.Method != http.MethodPost {
-			return nil, fmt.Errorf("不支持的请求方法")
-		}
-		user, err := strconv.ParseInt(input.UserID, 10, 64)
-		if err != nil || user <= 0 {
-			return nil, fmt.Errorf("无效用户 ID")
-		}
-		bot, err := strconv.ParseInt(input.BotID, 10, 64)
-		if err != nil || bot <= 0 {
-			return nil, fmt.Errorf("无效机器人 ID")
-		}
-		return c.scheduler.Create(id, user, bot, input.Input)
+		return c.inspectSchedules(r, id)
 	case "tools":
 		if r.Method == http.MethodPatch {
 			var input struct {
@@ -110,36 +72,7 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		}
 		return p.ToolCatalog(), nil
 	case "memory":
-		if r.Method != http.MethodGet {
-			var edit persona.MemoryEdit
-			decoder := json.NewDecoder(r.Body)
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&edit); err != nil {
-				return nil, fmt.Errorf("无效记忆数据：%w", err)
-			}
-			if decoder.Decode(new(any)) != io.EOF {
-				return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
-			}
-			var userID int64
-			if edit.Target != "group" && edit.Target != "group_profile" && edit.Target != "group_item" && edit.Target != "group_item_create" {
-				userID, err = strconv.ParseInt(edit.UserID, 10, 64)
-				if err != nil || userID <= 0 {
-					return nil, fmt.Errorf("无效用户 ID")
-				}
-			}
-			if err := p.EditMemory(userID, edit, r.Method == http.MethodDelete); err != nil {
-				return nil, err
-			}
-			return map[string]bool{"ok": true}, nil
-		}
-		offset := 0
-		if raw := r.URL.Query().Get("offset"); raw != "" {
-			offset, err = strconv.Atoi(raw)
-			if err != nil || offset < 0 || offset > 1000000 {
-				return nil, fmt.Errorf("无效分页参数")
-			}
-		}
-		return p.MemorySnapshot(offset)
+		return c.inspectMemory(r, p)
 	case "skill":
 		if c.skills == nil || c.skills.Directory == nil {
 			return nil, fmt.Errorf("Skills 未启用")
@@ -240,6 +173,144 @@ func (c *ChatPlugin) inspectMonitor(r *http.Request) (any, error) {
 		return map[string]any{"enabled": true, "items": items}, nil
 	}
 	return nil, fmt.Errorf("未知数据分类")
+}
+
+func monitorOffset(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("offset")
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 || offset > 1000000 {
+		return 0, fmt.Errorf("无效分页参数")
+	}
+	return offset, nil
+}
+
+func (c *ChatPlugin) inspectSchedules(r *http.Request, groupID int64) (any, error) {
+	if c.scheduler == nil {
+		return nil, fmt.Errorf("定时任务未启用")
+	}
+	if r.Method == http.MethodGet {
+		offset, err := monitorOffset(r)
+		if err != nil {
+			return nil, err
+		}
+		var items []schedule.Task
+		if groupID == 0 {
+			items, err = c.scheduler.ListPrivate(0, 0, offset)
+		} else {
+			items, err = c.scheduler.List(groupID, 0, offset)
+		}
+		if err != nil {
+			return nil, err
+		}
+		bots := []string{}
+		zero.RangeBot(func(id int64, _ *zero.Ctx) bool { bots = append(bots, strconv.FormatInt(id, 10)); return true })
+		sort.Strings(bots)
+		return map[string]any{"items": items, "bots": bots, "has_more": len(items) == 50}, nil
+	}
+	var input struct {
+		schedule.Input
+		TaskID uint   `json:"task_id"`
+		UserID string `json:"user_id"`
+		BotID  string `json:"bot_id"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		return nil, fmt.Errorf("无效任务数据: %w", err)
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if input.TaskID == 0 {
+			return nil, fmt.Errorf("无效任务 ID")
+		}
+		var err error
+		if groupID == 0 {
+			err = c.scheduler.DeletePrivate(0, 0, input.TaskID)
+		} else {
+			err = c.scheduler.Delete(groupID, 0, input.TaskID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"deleted": true}, nil
+	case http.MethodPost:
+		user, err := strconv.ParseInt(input.UserID, 10, 64)
+		if err != nil || user <= 0 {
+			return nil, fmt.Errorf("无效用户 ID")
+		}
+		bot, err := strconv.ParseInt(input.BotID, 10, 64)
+		if err != nil || bot <= 0 {
+			return nil, fmt.Errorf("无效机器人 ID")
+		}
+		if groupID == 0 {
+			if !c.conf.PrivateChat.allows(bot, user) {
+				return nil, fmt.Errorf("该用户未获准与此机器人私聊")
+			}
+			return c.scheduler.CreatePrivate(user, bot, input.Input)
+		}
+		return c.scheduler.Create(groupID, user, bot, input.Input)
+	default:
+		return nil, fmt.Errorf("不支持的请求方法")
+	}
+}
+
+func (c *ChatPlugin) inspectMemory(r *http.Request, p *persona.Persona) (any, error) {
+	if r.Method == http.MethodGet {
+		offset, err := monitorOffset(r)
+		if err != nil {
+			return nil, err
+		}
+		if p == nil {
+			return persona.PrivateMemorySnapshot(c.db, offset)
+		}
+		return p.MemorySnapshot(offset)
+	}
+	var edit persona.MemoryEdit
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&edit); err != nil {
+		return nil, fmt.Errorf("无效记忆数据：%w", err)
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("请求只能包含一个 JSON 对象")
+	}
+	var userID int64
+	switch edit.Target {
+	case "group", "group_profile", "group_item", "group_item_create":
+		if p == nil {
+			return nil, fmt.Errorf("无效私聊记忆操作")
+		}
+	default:
+		var err error
+		userID, err = strconv.ParseInt(edit.UserID, 10, 64)
+		if err != nil || userID <= 0 {
+			return nil, fmt.Errorf("无效用户 ID")
+		}
+	}
+	remove := r.Method == http.MethodDelete
+	var err error
+	if p == nil {
+		botID, parseErr := strconv.ParseInt(edit.BotID, 10, 64)
+		if parseErr != nil || botID <= 0 || botID == userID {
+			return nil, fmt.Errorf("无效机器人 ID")
+		}
+		err = persona.EditPrivateMemory(c.db, persona.PrivateSession{BotID: botID, UserID: userID}, edit, remove)
+	} else {
+		if edit.BotID != "" {
+			return nil, fmt.Errorf("无效群聊记忆操作")
+		}
+		err = p.EditMemory(userID, edit, remove)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]bool{"ok": true}, nil
 }
 
 // Classify attached files without reading their contents. Scripts include files

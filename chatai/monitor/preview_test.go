@@ -78,6 +78,10 @@ func newMonitorPreview() *Store {
 			s.Observe(e)
 		}
 	}
+	privateStart := now.Add(-5 * time.Minute)
+	s.Observe(agent.Event{RunID: 4, Private: true, BotID: 30001, UserID: 20001, UserName: "预览用户", Model: "demo-model", Kind: "run_started", Text: "明天上午提醒我查看项目进度", Time: privateStart})
+	s.Observe(agent.Event{RunID: 4, Private: true, BotID: 30001, UserID: 20001, Kind: "model_started", Step: 1, Time: privateStart.Add(time.Second)})
+	s.Observe(agent.Event{RunID: 4, Private: true, BotID: 30001, UserID: 20001, Kind: "run_finished", DurationMS: 2000, Summary: "模拟私聊任务已创建", Time: privateStart.Add(2 * time.Second)})
 
 	skills := []previewObject{
 		{"name": "weekly-summary", "description": "整理群聊中的项目进展、待办事项和风险，生成便于阅读的每周摘要。", "source": "目录技能", "path": "demo/skills/weekly-summary", "resident": true},
@@ -101,6 +105,14 @@ func newMonitorPreview() *Store {
 		"group_memory": previewObject{"summary": "用于后台 UI 预览的项目讨论群，所有内容均为模拟数据。", "version": 1, "updated_at": now, "items": []previewObject{{"key": "topic", "kind": "fact", "text": "主要讨论机器人与后台界面", "confidence": "explicit", "observed_at": now}}},
 		"short":        []previewObject{{"user_id": "20001", "note": previewObject{"summary": "正在讨论卡片按钮的一致性。", "dialogue": "用户：请把详情按钮统一放在左下角。", "first_action": "检查各类卡片布局"}, "updated_at": now, "expires_at": now.Add(time.Hour)}},
 	}
+	privateMemory := previewObject{
+		"has_more": false,
+		"users": []previewObject{{
+			"bot_id": "30001", "user_id": "20001", "summary": "偏好在上午接收私聊提醒。", "version": 1, "updated_at": now,
+			"relationship": previewObject{"score": 0, "level": "普通"},
+			"items":        []previewObject{{"key": "reminder-time", "kind": "preference", "text": "尽量在上午发送提醒", "confidence": "explicit", "observed_at": now}},
+		}},
+	}
 	tasks := []previewObject{}
 	for i, status := range []string{"active", "completed", "failed"} {
 		task := previewObject{"id": i + 1, "name": []string{"每日项目摘要", "会议提醒", "资料同步"}[i], "instruction": "汇总当前项目进展，提醒尚未完成的事项。（模拟任务，不会实际执行）", "status": status, "group_id": "10001", "user_id": "20001", "bot_id": "30001", "created_at": now.Add(-24 * time.Hour), "runs": []previewObject{}}
@@ -115,6 +127,10 @@ func newMonitorPreview() *Store {
 		}
 		tasks = append(tasks, task)
 	}
+	privateTasks := []previewObject{{
+		"id": 4, "name": "检查项目进度", "instruction": "发送私聊提醒，询问项目的最新进展。", "status": "active", "group_id": "0", "user_id": "20001", "bot_id": "30001",
+		"created_at": privateStart, "next_run_at": now.Add(24 * time.Hour), "runs": []previewObject{},
+	}}
 	tools := []previewObject{}
 	for _, name := range []string{"search_context", "send_message", "read_skill"} {
 		tools = append(tools, previewObject{"namespace": "demo", "read_only": name != "send_message", "risk": "low", "idempotent": true, "group_action": name == "send_message", "definition": previewObject{"type": "function", "function": previewObject{"name": name, "description": "用于检查工具卡片和参数详情的模拟工具。", "parameters": previewObject{"type": "object", "properties": previewObject{"query": previewObject{"type": "string", "description": "待处理内容"}}, "required": []string{"query"}}}}})
@@ -164,6 +180,7 @@ func newMonitorPreview() *Store {
 			return nil, fmt.Errorf("模拟资源不存在或缺少设置")
 		}
 		var result any
+		private := r.URL.Query().Get("scope") == "private"
 		switch section {
 		case "groups":
 			result = []string{"10001"}
@@ -173,8 +190,15 @@ func newMonitorPreview() *Store {
 			result = tools
 		case "memory":
 			result = memory
+			if private {
+				result = privateMemory
+			}
 		case "schedules":
-			result = previewObject{"items": tasks, "has_more": false, "bots": []string{"30001"}}
+			items := tasks
+			if private {
+				items = privateTasks
+			}
+			result = previewObject{"items": items, "has_more": false, "bots": []string{"30001"}}
 		case "skill":
 			result = previewObject{"content": "# " + r.URL.Query().Get("name") + "\n\n这是本地预览用的模拟 Skill。\n\n## 执行步骤\n\n1. 阅读用户需求\n2. 整理相关资料\n3. 输出简短结论", "triggers": []string{"用户要求整理资料"}, "non_triggers": []string{"闲聊"}, "required_tools": []string{"search_context"}}
 		case "skill-files":
@@ -204,7 +228,7 @@ func TestMonitorPreviewData(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	for _, path := range []string{"/", "/glass.css", "/catalog-ui.js", "/api/runs", "/api/runs/1", "/api/inspect/groups", "/api/inspect/skills", "/api/inspect/tools", "/api/inspect/memory", "/api/inspect/schedules", "/api/inspect/skill?name=weekly-summary", "/api/inspect/skill-files", "/api/inspect/skill-file?file=SKILL.md"} {
+	for _, path := range []string{"/", "/glass.css", "/catalog-ui.js", "/api/runs", "/api/runs/1", "/api/runs?scope=private", "/api/runs/4?scope=private", "/api/inspect/groups", "/api/inspect/skills", "/api/inspect/tools", "/api/inspect/memory", "/api/inspect/memory?scope=private", "/api/inspect/schedules", "/api/inspect/schedules?scope=private", "/api/inspect/skill?name=weekly-summary", "/api/inspect/skill-files", "/api/inspect/skill-file?file=SKILL.md"} {
 		w := request("GET", path, "")
 		require.Equal(t, http.StatusOK, w.Code, "%s: %s", path, w.Body.String())
 		if strings.HasPrefix(path, "/api/") {

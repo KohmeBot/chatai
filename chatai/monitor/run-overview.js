@@ -25,7 +25,7 @@ function filterRuns(runs, range, query = '', status = '') {
     const started = Date.parse(run.started_at);
     return range && started >= range.start && started < range.end
       && (!status || run.status === status)
-      && [run.prompt, run.group_id, run.user_id, run.user_name, run.model]
+      && [run.prompt, run.group_id, run.user_id, run.user_name, run.model, run.bot_id]
         .some(value => String(value || '').toLowerCase().includes(search));
   });
 }

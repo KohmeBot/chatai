@@ -1,6 +1,7 @@
 package chatai
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,41 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestMonitorPrivateScheduleCRUD(t *testing.T) {
+	c := schedulePlugin(t)
+	c.conf.PrivateChat = PrivateChatConfig{Enable: true, AllowedUsers: []int64{123}}
+	request := func(method, query, body string) (any, error) {
+		r := httptest.NewRequest(method, "/api/inspect/schedules?"+query, strings.NewReader(body))
+		r.SetPathValue("section", "schedules")
+		return c.inspectMonitor(r)
+	}
+	const body = `{"name":"提醒","instruction":"提醒我","delay_seconds":10,"user_id":"123","bot_id":"456"}`
+	group, err := request("POST", "group=10", body)
+	require.NoError(t, err)
+	private, err := request("POST", "scope=private", body)
+	require.NoError(t, err)
+	require.True(t, private.(*schedule.Task).IsPrivate())
+	_, err = request("POST", "scope=private", strings.Replace(body, "123", "999", 1))
+	require.Error(t, err)
+	_, err = request("GET", "group=10&scope=invalid", "")
+	require.Error(t, err)
+	_, err = request("DELETE", "scope=private", fmt.Sprintf(`{"task_id":%d}`, group.(*schedule.Task).ID))
+	require.Error(t, err)
+	deletePrivate := fmt.Sprintf(`{"task_id":%d}`, private.(*schedule.Task).ID)
+	_, err = request("DELETE", "group=10", deletePrivate)
+	require.Error(t, err)
+	value, err := request("GET", "scope=private", "")
+	require.NoError(t, err)
+	tasks := value.(map[string]any)["items"].([]schedule.Task)
+	require.Len(t, tasks, 1)
+	require.Equal(t, private.(*schedule.Task).ID, tasks[0].ID)
+	_, err = request("DELETE", "scope=private", deletePrivate)
+	require.NoError(t, err)
+	value, err = request("GET", "scope=private", "")
+	require.NoError(t, err)
+	require.Empty(t, value.(map[string]any)["items"])
+}
 
 func schedulePlugin(t *testing.T) *ChatPlugin {
 	t.Helper()

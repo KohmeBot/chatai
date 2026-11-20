@@ -1,7 +1,10 @@
 package monitor
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +16,57 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestPersistentConversationScopes(t *testing.T) {
+	db := storageDB(t, filepath.Join(t.TempDir(), "scopes.db"))
+	s, err := NewPersistent(db, 1, 7)
+	require.NoError(t, err)
+	now := time.Now()
+	legacy := monitorRun{ID: "legacy", StartedAt: now, Status: "success", Payload: []byte(`{"id":"legacy","group_id":"123","status":"success","metrics_version":1}`)}
+	require.NoError(t, db.Create(&legacy).Error)
+	private := agent.Event{RunID: 1, Kind: "run_started", Private: true, BotID: 789, UserID: 456, Text: "private message", Time: now}
+	s.Observe(private)
+	private.Kind = "run_finished"
+	s.Observe(private)
+	privateID := s.session + "-1"
+	require.NoError(t, s.Close())
+	restarted, err := NewPersistent(db, 1, 7)
+	require.NoError(t, err)
+	h := restarted.Handler("secret")
+	cookie := login(t, h)
+	request := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, tc := range []struct{ query, id, scope string }{
+		{"", "legacy", "group"},
+		{"?scope=group", "legacy", "group"},
+		{"?scope=private", privateID, "private"},
+	} {
+		w := request("/api/runs" + tc.query)
+		require.Equal(t, http.StatusOK, w.Code)
+		var runs []Run
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &runs))
+		require.Len(t, runs, 1)
+		require.Equal(t, tc.id, runs[0].ID)
+		require.Equal(t, tc.scope, runs[0].Scope)
+	}
+	require.Equal(t, http.StatusBadRequest, request("/api/runs?scope=unknown").Code)
+	require.Equal(t, http.StatusNotFound, request("/api/runs/"+privateID).Code)
+	require.Equal(t, http.StatusNotFound, request("/api/runs/legacy?scope=private").Code)
+	w := request("/api/runs/" + privateID + "?scope=private")
+	require.Equal(t, http.StatusOK, w.Code)
+	var detail Run
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detail))
+	require.Equal(t, "789", detail.BotID)
+	require.Equal(t, "456", detail.UserID)
+	require.Len(t, detail.Events, 2)
+	require.True(t, detail.Events[0].Private)
+	require.Equal(t, "private message", detail.Events[0].Text)
+}
 
 func storageDB(t *testing.T, path string) *gorm.DB {
 	t.Helper()

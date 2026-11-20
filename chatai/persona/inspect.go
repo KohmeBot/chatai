@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func (p *Persona) ToolCatalog() []map[string]any { return p.tools.Catalog() }
@@ -43,11 +45,39 @@ func (p *Persona) MemorySnapshot(offset int) (any, error) {
 			return nil, err
 		}
 		profile = visibleUserProfile(profile, p.groupID, time.Now(), int(^uint(0)>>1))
-		users = append(users, map[string]any{"user_id": strconv.FormatInt(row.UserID, 10), "summary": profile.Summary, "items": profile.Items, "relationship": profile.Relationship, "version": profile.Version, "updated_at": row.UpdatedAt})
+		users = append(users, memorySnapshotUser(profile, row.UpdatedAt))
 	}
 	group, err := readGroupMemory(p.db, p.groupID)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"short_enabled": p.opts.ConversationMemory, "short": p.ShortMemorySnapshot(), "users": users, "group_memory": visibleGroupProfile(group, time.Now(), 30), "group_impression": group.Summary, "has_more": more, "offset": offset}, nil
+}
+
+func PrivateMemorySnapshot(db *gorm.DB, offset int) (any, error) {
+	var rows []PrivateUserMemory
+	if err := db.Order("updated_at DESC").Order("bot_id ASC").Order("user_id ASC").Offset(offset).Limit(51).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	more := len(rows) > 50
+	if more {
+		rows = rows[:50]
+	}
+	users := make([]map[string]any, 0, len(rows))
+	now := time.Now()
+	for _, row := range rows {
+		profile, err := decodeUserMemory(row.userMemory(), row.UserID, nil)
+		if err != nil {
+			return nil, err
+		}
+		profile = visiblePrivateUserProfile(profile, now, 30)
+		user := memorySnapshotUser(profile, row.UpdatedAt)
+		user["bot_id"] = strconv.FormatInt(row.BotID, 10)
+		users = append(users, user)
+	}
+	return map[string]any{"short_enabled": false, "short": []any{}, "users": users, "has_more": more, "offset": offset}, nil
+}
+
+func memorySnapshotUser(profile UserProfile, updatedAt time.Time) map[string]any {
+	return map[string]any{"user_id": strconv.FormatInt(profile.UserID, 10), "summary": profile.Summary, "items": profile.Items, "relationship": profile.Relationship, "version": profile.Version, "updated_at": updatedAt}
 }

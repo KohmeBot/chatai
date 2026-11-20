@@ -17,6 +17,8 @@ type Event struct {
 	RunID        uint64    `json:"run_id,string"`
 	GroupID      int64     `json:"group_id,string"`
 	UserID       int64     `json:"user_id,string"`
+	Private      bool      `json:"private,omitempty"`
+	BotID        int64     `json:"bot_id,string,omitempty"`
 	Time         time.Time `json:"time"`
 	Kind         string    `json:"kind"`
 	Step         int       `json:"step,omitempty"`
@@ -69,6 +71,7 @@ func (r *RunContext) emit(event Event) {
 		return
 	}
 	event.RunID, event.GroupID, event.UserID = r.Trace().RunID, r.GroupID, r.UserID
+	event.Private, event.BotID = r.Private, r.BotID
 	event.Time = time.Now()
 	r.observer(event)
 }

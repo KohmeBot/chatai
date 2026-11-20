@@ -3,8 +3,8 @@ const scheduleLabels={active:'等待执行',running:'执行中',completed:'已�
 function scheduleBadge(status){return el('span','badge '+({failed:'error',interrupted:'error',completed:'success'}[status]||status),scheduleLabels[status]||status)}
 function renderSchedules(root,data){
  $('catalog-status').textContent='每 5 秒更新 · 离线任务等待连接恢复';
- root.append(action('＋ 新增任务',()=>createSchedule(data.bots)));
- section(root,'定时任务',data.items,t=>{
+ root.append(action('＋ 新增任务',()=>createSchedule(data.bots||[])));
+ section(root,'定时任务',data.items||[],t=>{
   const c=card(t.name,t.instruction,t.cron?'周期任务':'一次性任务');c.classList.add('catalog-summary');
   c.append(scheduleBadge(t.status),el('p','meta',`#${t.id} · 用户 ${t.user_id} · 机器人 ${t.bot_id}`));
   if(t.cron)c.append(el('p','',`${t.cron} · ${t.timezone}`));
@@ -16,8 +16,9 @@ function renderSchedules(root,data){
 }
 function showScheduleDetail(task){
  const {body}=resourceDialog(task.name);
+ const isPrivate=catalogScopes.schedules==='private';
  body.append(scheduleBadge(task.status),el('h3','section-heading','任务说明'),el('p','resource-description',task.instruction),el('h3','section-heading','执行配置'),detailFields([
-  ['任务 ID',task.id],['执行方式',task.cron?'周期任务':'一次性任务'],['所属群',task.group_id],['发起用户',task.user_id],['机器人',task.bot_id],['创建时间',time(task.created_at)],
+  ['任务 ID',task.id],['执行方式',task.cron?'周期任务':'一次性任务'],...(isPrivate?[]:[['所属群',task.group_id]]),[isPrivate?'接收用户':'发起用户',task.user_id],['机器人',task.bot_id],['创建时间',time(task.created_at)],
   ...(task.cron?[['Cron 表达式',task.cron],['调度时区',task.timezone]]:[]),['下次执行',task.next_run_at?time(task.next_run_at)+'（浏览器本地时间）':'无后续执行']
  ]));
  if(task.cron){const parts=task.cron.trim().split(/\s+/);body.append(el('h4','','周期规则'),detailFields(['分钟','小时','日期','月份','星期'].map((label,i)=>[label,parts[i]==='*'?'每个'+label:parts[i]])),el('p','muted','* 表示任意值，逗号表示多个值，连字符表示范围，/ 表示间隔；星期 0 表示周日。'))}
@@ -32,11 +33,12 @@ function scheduleDialog(title){
  return {dialog,form,error};
 }
 function createSchedule(bots){
- const group=$('group').value,{dialog,form,error}=scheduleDialog('新增定时任务');
- form.append(el('p','muted',`群 ${group}`));
+ const endpoint=catalogEndpoint('schedules'),isPrivate=catalogScopes.schedules==='private';
+ const {dialog,form,error}=scheduleDialog('新增定时任务');
+ if(!isPrivate)form.append(el('p','muted','群 '+$('group').value));
  const name=field(form,'任务名称','','text',60);name.required=true;
  const instruction=field(form,'任务说明','','textarea',4000);instruction.required=true;
- const user=field(form,'发起用户 QQ','','text',20);user.required=true;user.pattern='[1-9][0-9]*';
+ const user=field(form,isPrivate?'接收用户 QQ':'发起用户 QQ','','text',20);user.required=true;user.pattern='[1-9][0-9]*';
  const bot=field(form,'机器人 QQ',bots.length===1?bots[0]:'','text',20);bot.required=true;bot.pattern='[1-9][0-9]*';
  if(bots.length)form.append(el('p','muted','当前在线机器人：'+bots.join('、')));
  const mode=field(form,'执行方式','','select');mode.replaceChildren();for(const [v,label]of [['once','一次性'],['cron','周期 cron']]){const o=el('option','',label);o.value=v;mode.append(o)}
@@ -49,18 +51,18 @@ function createSchedule(bots){
  form.onsubmit=async e=>{e.preventDefault();save.disabled=true;save.setAttribute('aria-busy','true');error.textContent='';try{
   const payload={name:name.value,instruction:instruction.value,user_id:user.value.trim(),bot_id:bot.value.trim()};
   if(mode.value==='cron'){payload.cron=cron.value.trim();payload.timezone=zone.value.trim()}else{const date=new Date(at.value);if(!Number.isFinite(date.getTime())||date<=new Date())throw Error('请选择未来的执行时间');payload.run_at=date.toISOString()}
-  await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});ConsoleMotion.closeDialog(dialog);if(currentView==='schedules'&&$('group').value===group){offset=0;await loadCatalog()}
+  await api(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});ConsoleMotion.closeDialog(dialog);if(currentView==='schedules'&&catalogEndpoint('schedules')===endpoint){offset=0;await loadCatalog()}
  }catch(e){error.textContent=e.message}finally{save.disabled=false;save.removeAttribute('aria-busy')}};
  ConsoleMotion.openDialog(dialog);name.focus();
 }
 function deleteSchedule(task){
- const group=$('group').value,{dialog,form,error}=scheduleDialog('删除任务');form.append(el('p','',`确认删除「${task.name}」？后续将不再触发，已经开始的执行可能仍会完成。`));
+ const endpoint=catalogEndpoint('schedules'),{dialog,form,error}=scheduleDialog('删除任务');form.append(el('p','',`确认删除「${task.name}」？后续将不再触发，已经开始的执行可能仍会完成。`));
  const buttons=el('div','actions'),remove=el('button','danger','确认删除');ConsoleControls.iconButton(remove,'trash','确认删除');remove.type='submit';buttons.append(action('取消',()=>ConsoleMotion.closeDialog(dialog)),remove);form.append(error,buttons);
- form.onsubmit=async e=>{e.preventDefault();remove.disabled=true;remove.setAttribute('aria-busy','true');try{await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id})});ConsoleMotion.closeDialog(dialog);if(currentView==='schedules'&&$('group').value===group)await loadCatalog()}catch(e){error.textContent=e.message}finally{remove.disabled=false;remove.removeAttribute('aria-busy')}};ConsoleMotion.openDialog(dialog);
+ form.onsubmit=async e=>{e.preventDefault();remove.disabled=true;remove.setAttribute('aria-busy','true');try{await api(endpoint,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id})});ConsoleMotion.closeDialog(dialog);if(currentView==='schedules'&&catalogEndpoint('schedules')===endpoint)await loadCatalog()}catch(e){error.textContent=e.message}finally{remove.disabled=false;remove.removeAttribute('aria-busy')}};ConsoleMotion.openDialog(dialog);
 }
 // Refresh only the schedule view, without interrupting open forms.
 setInterval(async()=>{
- if(!authenticated||currentView!=='schedules'||document.querySelector('dialog[open]')||!$('group').value||document.hidden)return;
- const serial=catalogSerial,group=$('group').value,page=offset;
- try{const data=await api(`/api/inspect/schedules?group=${encodeURIComponent(group)}&offset=${page}`);if(serial!==catalogSerial||!authenticated||currentView!=='schedules'||document.querySelector('dialog[open]'))return;if(JSON.stringify(catalogData)!==JSON.stringify(data)){catalogData=data;renderCatalog()}}catch(e){if(serial===catalogSerial)$('catalog-status').textContent=e.message}
+ if(!authenticated||currentView!=='schedules'||!catalogData||document.querySelector('dialog[open]')||document.hidden)return;
+ const serial=catalogSerial;
+ try{const data=await api(catalogEndpoint()+'&offset='+offset);if(serial!==catalogSerial||!authenticated||currentView!=='schedules'||document.querySelector('dialog[open]'))return;if(JSON.stringify(catalogData)!==JSON.stringify(data)){catalogData=data;renderCatalog()}}catch(e){if(serial===catalogSerial)$('catalog-status').textContent=e.message}
 },5000);

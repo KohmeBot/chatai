@@ -54,8 +54,10 @@ type Run struct {
 	Summary        string        `json:"summary,omitempty"`
 	UserName       string        `json:"user_name,omitempty"`
 	ID             string        `json:"id"`
+	Scope          string        `json:"scope"`
 	GroupID        string        `json:"group_id"`
 	UserID         string        `json:"user_id"`
+	BotID          string        `json:"bot_id,omitempty"`
 	Model          string        `json:"model"`
 	Prompt         string        `json:"prompt"`
 	Status         string        `json:"status"`
@@ -125,7 +127,11 @@ func (s *Store) Observe(e agent.Event) {
 				delete(s.runs, oldest)
 			}
 		}
-		r = &Run{UserName: clip(e.UserName), ID: strconv.FormatUint(e.RunID, 10), GroupID: strconv.FormatInt(e.GroupID, 10), UserID: strconv.FormatInt(e.UserID, 10), Model: e.Model, Prompt: clip(e.Text), StartedAt: e.Time, Status: "running"}
+		r = &Run{UserName: clip(e.UserName), ID: strconv.FormatUint(e.RunID, 10), Scope: "group", GroupID: strconv.FormatInt(e.GroupID, 10), UserID: strconv.FormatInt(e.UserID, 10), Model: e.Model, Prompt: clip(e.Text), StartedAt: e.Time, Status: "running"}
+		if e.Private {
+			r.Scope = "private"
+			r.BotID = strconv.FormatInt(e.BotID, 10)
+		}
 		if s.db != nil {
 			r.ID = s.session + "-" + r.ID
 		}
@@ -210,6 +216,25 @@ func (s *Store) snapshot(id string) []Run {
 	return out
 }
 
+// ChatScope defaults to group for clients and records that predate private chat monitoring.
+func ChatScope(r *http.Request) (string, error) {
+	switch scope := r.URL.Query().Get("scope"); scope {
+	case "", "group":
+		return "group", nil
+	case "private":
+		return scope, nil
+	default:
+		return "", fmt.Errorf("无效会话范围")
+	}
+}
+
+func (r *Run) chatScope() string {
+	if r.Scope == "" {
+		return "group"
+	}
+	return r.Scope
+}
+
 // Handler requires a non-empty access token. Only the static login shell is public.
 func (s *Store) Handler(token string) http.Handler {
 	hash := sha256.Sum256([]byte(token))
@@ -275,24 +300,42 @@ func (s *Store) Handler(token string) http.Handler {
 		w.WriteHeader(204)
 	}))
 	mux.HandleFunc("GET /api/runs", auth(func(w http.ResponseWriter, r *http.Request) {
+		scope, err := ChatScope(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		items, err := s.readSnapshot("")
 		if err != nil {
 			http.Error(w, "读取运行记录失败，请稍后重试", 500)
 			return
 		}
+		visible := items[:0]
+		for _, item := range items {
+			if item.chatScope() == scope {
+				item.Scope = scope
+				visible = append(visible, item)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(items)
+		json.NewEncoder(w).Encode(visible)
 	}))
 	mux.HandleFunc("GET /api/runs/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
+		scope, err := ChatScope(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		items, err := s.readSnapshot(r.PathValue("id"))
 		if err != nil {
 			http.Error(w, "读取运行记录失败，请稍后重试", 500)
 			return
 		}
-		if len(items) == 0 {
+		if len(items) == 0 || items[0].chatScope() != scope {
 			http.NotFound(w, r)
 			return
 		}
+		items[0].Scope = scope
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(items[0])
 	}))

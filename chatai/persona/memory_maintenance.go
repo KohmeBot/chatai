@@ -24,6 +24,7 @@ type MemoryCursor struct {
 type MemoryAudit struct {
 	ID          uint `gorm:"primaryKey"`
 	GroupID     int64
+	BotID       int64 // For private changes, identifies the bot with GroupID zero.
 	UserID      int64
 	Version     uint64
 	EvidenceIDs string
@@ -325,7 +326,11 @@ func (m *MemoryMaintainer) processRows(ctx context.Context, groupID, selfID int6
 }
 
 func recordMemoryAudit(db *gorm.DB, groupID int64, profile UserProfile, change MemoryChange) error {
+	return recordUserMemoryAudit(db, groupID, 0, profile, change)
+}
+
+func recordUserMemoryAudit(db *gorm.DB, groupID, botID int64, profile UserProfile, change MemoryChange) error {
 	data, _ := json.Marshal(change.EvidenceIDs)
-	return db.Create(&MemoryAudit{GroupID: groupID, UserID: profile.UserID, Version: profile.Version + 1,
+	return db.Create(&MemoryAudit{GroupID: groupID, BotID: botID, UserID: profile.UserID, Version: profile.Version + 1,
 		EvidenceIDs: string(data), Reason: change.Reason, CreatedAt: time.Now()}).Error
 }

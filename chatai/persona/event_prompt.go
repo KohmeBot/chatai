@@ -12,17 +12,18 @@ import (
 // model. User-controlled text remains data inside this envelope instead of
 // being mixed with natural-language harness instructions.
 type agentEventEnvelope struct {
-	GroupMemory    *GroupProfile       `json:"group_memory,omitempty"`
-	Kind           string              `json:"kind"`
-	CurrentTime    string              `json:"current_time"`
-	GroupID        int64               `json:"group_id,omitempty"`
-	SelfUserID     int64               `json:"self_user_id"`
-	Actor          eventActor          `json:"actor"`
-	Message        *timeMessageResult  `json:"message,omitempty"`
-	RecentMessages []timeMessageResult `json:"recent_messages,omitempty"`
-	ScheduledTask  *scheduledTask      `json:"scheduled_task,omitempty"`
-	Conversation   *conversationNote   `json:"conversation_memory,omitempty"`
-	UserMemory     *UserProfile        `json:"user_memory,omitempty"`
+	GroupMemory       *GroupProfile       `json:"group_memory,omitempty"`
+	Kind              string              `json:"kind"`
+	CurrentTime       string              `json:"current_time"`
+	GroupID           int64               `json:"group_id,omitempty"`
+	SelfUserID        int64               `json:"self_user_id"`
+	Actor             eventActor          `json:"actor"`
+	Message           *timeMessageResult  `json:"message,omitempty"`
+	RecentMessages    []timeMessageResult `json:"recent_messages,omitempty"`
+	ScheduledTask     *scheduledTask      `json:"scheduled_task,omitempty"`
+	Conversation      *conversationNote   `json:"conversation_memory,omitempty"`
+	UserMemory        *UserProfile        `json:"user_memory,omitempty"`
+	PrivateUserMemory *UserProfile        `json:"private_user_memory,omitempty"`
 }
 
 type eventActor struct {
@@ -69,12 +70,22 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string, selfUserID int
 		}
 	}
 	if p.db != nil && msg.User.UserId > 0 && msg.User.UserId != selfUserID {
+		now := time.Now()
 		profile, err := readUserMemory(p.db, msg.User.UserId)
 		if err != nil {
 			logrus.Warnf("[Memory] 读取用户记忆失败: %v", err)
 		} else {
-			profile = visibleUserProfile(profile, p.groupID, time.Now(), 8)
+			profile = visibleUserProfile(profile, p.groupID, now, 8)
 			envelope.UserMemory = &profile
+		}
+		if p.private != nil && msg.User.UserId == p.private.UserID {
+			profile, err := readPrivateUserMemory(p.db, *p.private)
+			if err != nil {
+				logrus.Warnf("[Memory] 读取私聊用户记忆失败: %v", err)
+			} else {
+				profile = visiblePrivateUserProfile(profile, now, 8)
+				envelope.PrivateUserMemory = &profile
+			}
 		}
 	}
 	if strings.TrimSpace(scheduled) != "" {

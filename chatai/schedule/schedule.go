@@ -31,6 +31,9 @@ type Task struct {
 	Runs        []Run          `gorm:"-" json:"runs"`
 }
 
+// IsPrivate identifies tasks that target a bot's direct conversation with UserID.
+func (t Task) IsPrivate() bool { return t.GroupID == 0 }
+
 type Run struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`
 	TaskID      uint       `gorm:"index" json:"task_id"`
@@ -87,6 +90,17 @@ func (s *Service) Create(group, user, bot int64, in Input) (*Task, error) {
 	if group <= 0 || user <= 0 || bot <= 0 {
 		return nil, errors.New("群、用户和机器人 ID 必须为正数")
 	}
+	return s.create(group, user, bot, in)
+}
+
+func (s *Service) CreatePrivate(user, bot int64, in Input) (*Task, error) {
+	if user <= 0 || bot <= 0 || user == bot {
+		return nil, errors.New("私聊任务需要有效的用户和机器人 ID")
+	}
+	return s.create(0, user, bot, in)
+}
+
+func (s *Service) create(group, user, bot int64, in Input) (*Task, error) {
 	in.Name, in.Instruction, in.Cron = strings.TrimSpace(in.Name), strings.TrimSpace(in.Instruction), strings.TrimSpace(in.Cron)
 	if len(in.Cron) > 100 || len(in.Timezone) > 100 {
 		return nil, errors.New("cron 和时区最多 100 字节")
@@ -142,11 +156,19 @@ func (s *Service) Create(group, user, bot int64, in Input) (*Task, error) {
 }
 
 func (s *Service) List(group, user int64, offset int) ([]Task, error) {
-	items := []Task{}
-	q := s.db.Where("group_id = ?", group)
-	if user > 0 {
-		q = q.Where("user_id = ?", user)
+	if group <= 0 {
+		return nil, errors.New("无效群 ID")
 	}
+	return s.list(s.tasksIn(group, 0, user), offset)
+}
+
+// ListPrivate lists direct-conversation tasks. A zero bot or user ID omits that filter.
+func (s *Service) ListPrivate(bot, user int64, offset int) ([]Task, error) {
+	return s.list(s.tasksIn(0, bot, user), offset)
+}
+
+func (s *Service) list(q *gorm.DB, offset int) ([]Task, error) {
+	items := []Task{}
 	if err := q.Order("id DESC").Offset(offset).Limit(50).Find(&items).Error; err != nil {
 		return nil, err
 	}
@@ -161,9 +183,31 @@ func (s *Service) List(group, user int64, offset int) ([]Task, error) {
 
 // Delete prevents subsequent claims. An already running action may finish.
 func (s *Service) Delete(group, user int64, id uint) error {
+	if group <= 0 {
+		return errors.New("无效群 ID")
+	}
+	return deleteTask(s.tasksIn(group, 0, user), id)
+}
+
+// DeletePrivate removes a direct-conversation task. A zero bot or user ID omits that filter.
+func (s *Service) DeletePrivate(bot, user int64, id uint) error {
+	return deleteTask(s.tasksIn(0, bot, user), id)
+}
+
+func (s *Service) tasksIn(group, bot, user int64) *gorm.DB {
 	q := s.db.Where("group_id = ?", group)
-	if user > 0 {
+	if bot != 0 {
+		q = q.Where("bot_id = ?", bot)
+	}
+	if user != 0 {
 		q = q.Where("user_id = ?", user)
+	}
+	return q
+}
+
+func deleteTask(q *gorm.DB, id uint) error {
+	if id == 0 {
+		return errors.New("无效任务 ID")
 	}
 	r := q.Delete(&Task{}, id)
 	if r.Error != nil {
