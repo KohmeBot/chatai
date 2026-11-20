@@ -269,7 +269,7 @@ func visibleUserProfile(profile UserProfile, groupID int64, now time.Time, limit
 			continue
 		}
 		// Shared preferences are global; events/states stay in their source group.
-		if (item.Kind == "state" || item.Kind == "experience") && item.GroupID != groupID {
+		if (item.Kind == "state" || item.Kind == "experience") && (groupID == 0 || item.GroupID != groupID) {
 			continue
 		}
 		items = append(items, item)

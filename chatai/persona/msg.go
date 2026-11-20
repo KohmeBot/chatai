@@ -133,39 +133,17 @@ func (g GroupMessage) IsEmpty() bool {
 
 func newMessage(ctx *zero.Ctx) GroupMessage {
 	segments := incomingSegments(ctx.Event)
+	msg := messageFromEvent(ctx.Event, segments)
+	if msg.IsEmpty() {
+		return msg
+	}
+	msg.User.Nickname = ctx.CardOrNickName(ctx.Event.UserID)
 	quoted, quotedRaw := getQuotedMessage(ctx, segments)
-
-	msgType := getMsgType(segments)
-
-	if ctx.Event.SubType == MsgTypePoke {
-		msgType = MsgTypePoke
-	}
-
-	if len(segments) == 0 && msgType != MsgTypePoke {
-		return GroupMessage{}
-	}
-
-	msgId, _ := ctx.Event.MessageID.(int64)
-
-	msg := GroupMessage{
-		RawMessage:        ctx.Event.RawMessage,
-		RawSegments:       originalSegments(ctx.Event.NativeMessage, segments),
-		QuotedRawSegments: quotedRaw,
-		User: User{
-			UserId:   ctx.Event.UserID,
-			Nickname: ctx.CardOrNickName(ctx.Event.UserID),
-		},
-		TargetUser: User{},
-		Url:        firstNonEmpty(getUrl(segments), getUrl(quoted.Elements)),
-		Content:    getText(segments),
-		FileName:   firstNonEmpty(getFileName(segments), getFileName(quoted.Elements)),
-		MsgType:    msgType,
-		MsgID:      msgId,
-		CreatedAt:  time.Now(),
-	}
-	msg.QuotedMsgID = replyMessageID(segments)
+	msg.QuotedRawSegments = quotedRaw
 	msg.QuotedContent = getText(quoted.Elements)
 	msg.QuotedURL = getUrl(quoted.Elements)
+	msg.Url = firstNonEmpty(msg.Url, msg.QuotedURL)
+	msg.FileName = firstNonEmpty(msg.FileName, getFileName(quoted.Elements))
 	if quoted.Sender != nil {
 		msg.QuotedUser = User{UserId: quoted.Sender.ID, Nickname: quoted.Sender.Name()}
 	}
@@ -185,6 +163,29 @@ func newMessage(ctx *zero.Ctx) GroupMessage {
 		}
 	}
 	return msg
+}
+
+func messageFromEvent(event *zero.Event, segments message.Message) GroupMessage {
+	msgType := getMsgType(segments)
+	if event.SubType == MsgTypePoke {
+		msgType = MsgTypePoke
+	}
+	if len(segments) == 0 && msgType != MsgTypePoke {
+		return GroupMessage{}
+	}
+	msgID, _ := event.MessageID.(int64)
+	return GroupMessage{
+		RawMessage:  event.RawMessage,
+		RawSegments: originalSegments(event.NativeMessage, segments),
+		User:        User{UserId: event.UserID},
+		Url:         getUrl(segments),
+		Content:     getText(segments),
+		FileName:    getFileName(segments),
+		MsgType:     msgType,
+		MsgID:       msgID,
+		QuotedMsgID: replyMessageID(segments),
+		CreatedAt:   time.Now(),
+	}
 }
 
 // ZeroBot removes the bot's @ segment unless KeepAtMeMessage is enabled.

@@ -11,7 +11,46 @@ import (
 
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+	zero "github.com/wdvxdr1123/ZeroBot"
+	"github.com/wdvxdr1123/ZeroBot/message"
 )
+
+func TestPrivateSendUsesBoundBotAndUser(t *testing.T) {
+	const botID, peerID = int64(987654330), int64(321)
+	caller := &deliveryTestCaller{response: &zero.APIResponse{Status: "ok", Data: gjson.Parse(`{"message_id":-42}`)}}
+	zero.APICallers.Store(botID, caller)
+	t.Cleanup(func() { zero.APICallers.Delete(botID) })
+
+	p := &Persona{private: &PrivateSession{BotID: botID, UserID: peerID}}
+	ctx := zero.GetBot(botID)
+	ctx.Event = &zero.Event{PostType: "message", DetailType: "private", SelfID: botID, UserID: peerID}
+	segments := message.Message{message.Text("测试")}
+	require.Equal(t, int64(-42), p.sendMessage(ctx, segments))
+	require.Len(t, caller.requests, 1)
+	require.Equal(t, "send_private_msg", caller.requests[0].Action)
+	require.Equal(t, peerID, caller.requests[0].Params["user_id"])
+	require.NotContains(t, caller.requests[0].Params, "group_id")
+
+	ctx.Event.UserID = peerID + 1
+	require.Zero(t, p.sendMessage(ctx, segments))
+	ctx.Event.UserID = peerID
+	ctx.Event.SelfID = botID + 1
+	require.Zero(t, p.sendMessage(ctx, segments))
+	ctx.Event.SelfID = botID
+	ctx.Event.DetailType = "group"
+	require.Zero(t, p.sendMessage(ctx, segments))
+	require.Len(t, caller.requests, 1)
+}
+
+func TestPrivateImageFetchRejectsLocalSources(t *testing.T) {
+	for _, source := range []string{"/tmp/image.png", "file:///tmp/image.png", "base64://AAAA"} {
+		_, err := fetchPrivateImage(context.Background(), source)
+		require.ErrorContains(t, err, "http(s)")
+	}
+	_, err := fetchPrivateImage(context.Background(), "http://127.0.0.1/image.png")
+	require.ErrorContains(t, err, "public image host")
+}
 
 func TestBuiltinToolSearchFindsWebAndTimeRangeTools(t *testing.T) {
 	p := &Persona{tools: agent.NewRegistry()}

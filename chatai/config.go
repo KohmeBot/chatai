@@ -2,6 +2,8 @@ package chatai
 
 import (
 	"fmt"
+	"slices"
+
 	"github.com/kohmebot/chatai/chatai/mcpclient"
 
 	"github.com/kohmebot/plugin/v2/ui"
@@ -18,6 +20,7 @@ type MonitorConfig struct {
 type Config struct {
 	MCPServers   []mcpclient.ServerConfig `yaml:"mcp_servers,omitempty" jsonschema:"description=MCP 服务列表；启动时发现工具，空列表关闭"`
 	Monitor      MonitorConfig            `yaml:"monitor" jsonschema:"description=Agent 运行监控"`
+	PrivateChat  PrivateChatConfig        `yaml:"private_chat,omitempty" jsonschema:"description=QQ 私聊配置"`
 	System       ui.TextArea              `yaml:"system" jsonschema:"description=Agent 系统提示词"`
 	ProviderName string                   `yaml:"provider_name" jsonschema:"description=默认供应商,enum=tongyi,enum=deepseek"`
 	ModelName    string                   `yaml:"model_name" jsonschema:"description=默认模型名称"`
@@ -36,6 +39,15 @@ type Config struct {
 	Repeat          RepeatConfig     `yaml:"repeat" jsonschema:"description=群聊复读配置"`
 	Impression      ImpressionConfig `yaml:"impression" jsonschema:"description=Agent 印象工具配置"`
 	JoinGroupConfig `yaml:"join_group" jsonschema:"description=加群配置"`
+}
+
+type PrivateChatConfig struct {
+	Enable       bool    `yaml:"enable" jsonschema:"description=允许白名单用户与 Agent 私聊，默认关闭"`
+	AllowedUsers []int64 `yaml:"allowed_users" jsonschema:"description=允许私聊的用户 QQ 号，空列表不开放"`
+}
+
+func (c PrivateChatConfig) allows(botID, userID int64) bool {
+	return c.Enable && botID > 0 && userID > 0 && botID != userID && slices.Contains(c.AllowedUsers, userID)
 }
 
 type SkillConfig struct {

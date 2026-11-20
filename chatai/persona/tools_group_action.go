@@ -1,9 +1,14 @@
 package persona
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -12,11 +17,24 @@ import (
 	"github.com/wdvxdr1123/ZeroBot/message"
 )
 
-func (p *Persona) groupActionTools() []agent.Tool {
-	return []agent.Tool{
+func (p *Persona) chatActionTools() []agent.Tool {
+	target, audience, rhythm := "当前群", "群友", "群聊节奏"
+	imageURL := "图片URL、本地绝对路径或 search_skill_files 返回的相对整个 skills 目录的文件 path；不要使用 Skill 入口路径"
+	text := "要发送的话；JSON 换行只转义一次，解码后应是真实换行"
+	batch := "按发送顺序排列的多句话；JSON 换行只转义一次"
+	quote := "可选，引用的消息 ID"
+	if p.private != nil {
+		target, audience, rhythm = "当前私聊", "当前用户", "对话节奏"
+		imageURL = "公开的 HTTP/HTTPS 图片 URL，直接返回 PNG、JPEG、GIF 或 WebP，最大 5 MiB"
+		quote = "可选，引用本次私聊中的消息 ID"
+	} else {
+		text += "。需逐字保留代码、路径或转义符时使用 send_raw_message"
+		batch += "，需逐字保留转义符时使用 send_raw_message"
+	}
+	tools := []agent.Tool{
 		{
-			Definition: agent.Function("send_image", "立即向当前群发送一张图片并可带一句话；成功的消息不可重复发送，message_id=0 时需修正后重试，成功后返回 message_id", map[string]any{
-				"url":  stringProperty("图片URL、本地绝对路径或 search_skill_files 返回的相对整个 skills 目录的文件 path；不要使用 Skill 入口路径"),
+			Definition: agent.Function("send_image", "立即向"+target+"发送一张图片并可带一句话；成功的消息不可重复发送，message_id=0 时需修正后重试，成功后返回 message_id", map[string]any{
+				"url":  stringProperty(imageURL),
 				"text": stringProperty("可选，发送的图片附带的文字"),
 			}, "url"),
 			Namespace:   "chat",
@@ -26,9 +44,9 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			Handler:     p.handleSendImage,
 		},
 		{
-			Definition: agent.Function("send_message", "向当前群发送一句消息，可选择引用消息；普通文字回复也必须通过本工具发送。参数 text 只能包含面向群友的内容，不能包含内部分析或决策过程。成功后返回 message_id。", map[string]any{
-				"text":             stringProperty("要发送的话；JSON 换行只转义一次，解码后应是真实换行。需逐字保留代码、路径或转义符时使用 send_raw_message"),
-				"reply_message_id": integerProperty("可选，引用的消息 ID"),
+			Definition: agent.Function("send_message", "向"+target+"发送一句消息，可选择引用消息；普通文字回复也必须通过本工具发送。参数 text 只能包含面向"+audience+"的内容，不能包含内部分析或决策过程。成功后返回 message_id。", map[string]any{
+				"text":             stringProperty(text),
+				"reply_message_id": integerProperty(quote),
 			}, "text"),
 			Namespace:   "chat",
 			Risk:        agent.ToolRiskMedium,
@@ -37,10 +55,10 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			Handler:     p.handleSendMessage,
 		},
 		{
-			Definition: agent.Function("send_messages", "立即把回复拆成2到5条独立消息依次发送；成功的消息不可重复发送，message_id=0 时需修正后重试，仅在拆分明显更符合群聊节奏时使用", map[string]any{
+			Definition: agent.Function("send_messages", "立即把回复拆成2到5条独立消息依次发送；成功的消息不可重复发送，message_id=0 时需修正后重试，仅在拆分明显更符合"+rhythm+"时使用", map[string]any{
 				"messages": map[string]any{
 					"type": "array", "items": map[string]any{"type": "string"},
-					"minItems": 2, "maxItems": 5, "description": "按发送顺序排列的多句话；JSON 换行只转义一次，需逐字保留转义符时使用 send_raw_message",
+					"minItems": 2, "maxItems": 5, "description": batch,
 				},
 				"interval_ms": integerProperty("消息间隔毫秒，默认500，范围0到3000"),
 			}, "messages"),
@@ -50,7 +68,12 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			GroupAction: true,
 			Handler:     p.handleSendMessages,
 		},
-		{
+	}
+	if p.private != nil {
+		return tools
+	}
+	return append(tools,
+		agent.Tool{
 			Definition: agent.Function("at_user", "立即在当前群 @ 某人并发送文字；仅在必须明确提醒或指定对象时使用，成功后返回 message_id", map[string]any{
 				"user_id": integerProperty("用户 QQ 号"),
 				"text":    stringProperty("要说的话"),
@@ -61,7 +84,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			GroupAction: true,
 			Handler:     p.handleAtUser,
 		},
-		{
+		agent.Tool{
 			Definition:  agent.Function("poke_user", "立即在当前群戳一戳某人；这是娱乐性可见动作，只在语境自然且不会打扰对方时使用", map[string]any{"user_id": integerProperty("用户 QQ 号")}, "user_id"),
 			Namespace:   "chat",
 			Risk:        agent.ToolRiskMedium,
@@ -69,7 +92,7 @@ func (p *Persona) groupActionTools() []agent.Tool {
 			GroupAction: true,
 			Handler:     p.handlePokeUser,
 		},
-	}
+	)
 }
 
 func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (any, error) {
@@ -83,7 +106,7 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	if strings.TrimSpace(input.URL) == "" {
 		return nil, errors.New("message URL cannot be empty")
 	}
-	if err := validateMessageText(input.Text); err != nil {
+	if err := p.validateChatText(input.Text); err != nil {
 		return nil, err
 	}
 	source, err := p.resolveImageSource(input.URL)
@@ -94,12 +117,23 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 	if err != nil {
 		return nil, err
 	}
+	var upload string
+	if p.private != nil {
+		upload, err = fetchPrivateImage(rc.Context, source)
+		if err != nil {
+			return nil, err
+		}
+	}
 	segments := message.Message{}
 	segments = append(segments, message.Image(source))
 	if len(strings.TrimSpace(input.Text)) > 0 {
 		segments = append(segments, message.Text(input.Text))
 	}
-	id := ctx.SendGroupMessage(p.groupID, segments)
+	outgoing := segments
+	if upload != "" {
+		outgoing = append(message.Message{message.Image(upload)}, segments[1:]...)
+	}
+	id := p.sendMessage(ctx, outgoing)
 	if err := checkMessageID(id); err != nil {
 		return nil, err
 	}
@@ -109,6 +143,73 @@ func (p *Persona) handleSendImage(rc *agent.RunContext, raw json.RawMessage) (an
 		return nil, err
 	}
 	return map[string]any{"message_id": id}, nil
+}
+
+func fetchPrivateImage(ctx context.Context, source string) (string, error) {
+	const maxImageBytes = 5 << 20
+	source, err := normalizeImageURL(source)
+	if err != nil {
+		return "", err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+	if err != nil {
+		return "", err
+	}
+	if req.URL.User != nil {
+		return "", errors.New("image URL cannot include credentials")
+	}
+
+	// Connect to a checked address without letting OneBot refetch the URL.
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		dialer := &net.Dialer{}
+		for _, addr := range addresses {
+			if addr.IsGlobalUnicast() && !addr.IsPrivate() {
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+			}
+		}
+		return nil, errors.New("could not connect to a public image host")
+	}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch image: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("image URL returned HTTP %d", res.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxImageBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > maxImageBytes {
+		return "", errors.New("image exceeds 5 MiB")
+	}
+	switch http.DetectContentType(data) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return "base64://" + base64.StdEncoding.EncodeToString(data), nil
+	default:
+		return "", errors.New("expected a PNG, JPEG, GIF or WebP image")
+	}
 }
 
 func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (any, error) {
@@ -122,7 +223,7 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 	if strings.TrimSpace(input.Text) == "" {
 		return nil, errors.New("message text cannot be empty")
 	}
-	if err := validateMessageText(input.Text); err != nil {
+	if err := p.validateChatText(input.Text); err != nil {
 		return nil, err
 	}
 	ctx, err := zeroContext(rc)
@@ -130,7 +231,12 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 		return nil, err
 	}
 	segments := message.Message{}
-	if input.ReplyID > 0 {
+	if p.private != nil && input.ReplyID != 0 {
+		if _, err := p.privateMessageByID(input.ReplyID); err != nil {
+			return nil, fmt.Errorf("verify reply in current private conversation: %w", err)
+		}
+		segments = append(segments, message.Reply(input.ReplyID))
+	} else if input.ReplyID > 0 {
 		segments = append(segments, message.Reply(input.ReplyID))
 		if u := ctx.GetMessage(input.ReplyID).Sender; u != nil {
 			segments = append(segments, message.At(u.ID))
@@ -138,7 +244,7 @@ func (p *Persona) handleSendMessage(rc *agent.RunContext, raw json.RawMessage) (
 		}
 	}
 	segments = append(segments, message.Text(input.Text))
-	id := ctx.SendGroupMessage(p.groupID, segments)
+	id := p.sendMessage(ctx, segments)
 	if err := checkMessageID(id); err != nil {
 		return nil, err
 	}
@@ -162,7 +268,7 @@ func (p *Persona) handleSendMessages(rc *agent.RunContext, raw json.RawMessage) 
 		return nil, errors.New("messages must contain between 2 and 5 items")
 	}
 	for _, text := range input.Messages {
-		if err := validateMessageText(text); err != nil {
+		if err := p.validateChatText(text); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(text) == "" {
@@ -182,7 +288,7 @@ func (p *Persona) handleSendMessages(rc *agent.RunContext, raw json.RawMessage) 
 	ids := make([]int64, 0, len(input.Messages))
 	for i, text := range input.Messages {
 		segments := message.Message{message.Text(text)}
-		id := ctx.SendGroupMessage(p.groupID, segments)
+		id := p.sendMessage(ctx, segments)
 		if err := checkMessageID(id); err != nil {
 			return map[string]any{"message_ids": ids, "failed_index": i, "unsent_messages": input.Messages[i:]}, fmt.Errorf("batch stopped at index %d; %d messages already sent: %w", i, len(ids), err)
 		}

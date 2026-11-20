@@ -9,20 +9,31 @@ import (
 
 // registerBuiltinTools 汇总各领域的内建工具。工具定义和处理逻辑放在对应领域文件中。
 func (p *Persona) registerBuiltinTools() {
-	groups := [][]agent.Tool{
-		p.workTools(),
-		p.groupMemberTools(),
-		p.contextTools(),
-		p.imageTools(),
-		p.memoryTools(),
-		p.structuredMemoryTools(),
-		p.groupMemoryTools(),
-		p.skillTools(),
-		p.groupActionTools(),
-		p.mediaTools(),
-		p.rawMessageTools(),
-		p.scheduleTools(),
-		p.webTools(),
+	var groups [][]agent.Tool
+	if p.private != nil {
+		groups = [][]agent.Tool{
+			p.privateContextTools(),
+			p.privateProfileTools(),
+			p.imageTools(),
+			p.chatActionTools(),
+			p.webTools(),
+		}
+	} else {
+		groups = [][]agent.Tool{
+			p.workTools(),
+			p.groupMemberTools(),
+			p.contextTools(),
+			p.imageTools(),
+			p.memoryTools(),
+			p.structuredMemoryTools(),
+			p.groupMemoryTools(),
+			p.skillTools(),
+			p.chatActionTools(),
+			p.mediaTools(),
+			p.rawMessageTools(),
+			p.scheduleTools(),
+			p.webTools(),
+		}
 	}
 	for _, tools := range groups {
 		for _, tool := range tools {

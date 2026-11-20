@@ -93,6 +93,8 @@ type Persona struct {
 	conversationMu sync.Mutex
 	conversations  map[int64]conversationState
 	groupID        int64
+	private        *PrivateSession
+	privateRunMu   sync.Mutex
 	env            plugin.Env
 	db             *gorm.DB
 	opts           Options
@@ -112,6 +114,10 @@ type Persona struct {
 }
 
 func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Persona {
+	return newPersona(groupID, nil, env, db, opts)
+}
+
+func newPersona(groupID int64, private *PrivateSession, env plugin.Env, db *gorm.DB, opts Options) *Persona {
 	if opts.ContinuationWindow <= 0 {
 		opts.ContinuationWindow = time.Minute
 	}
@@ -147,7 +153,7 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 	if opts.WebSearchPrefer <= 0 {
 		opts.WebSearchPrefer = time.Hour
 	}
-	p := &Persona{groupID: groupID, env: env, db: db, opts: opts, tools: agent.NewRegistry()}
+	p := &Persona{groupID: groupID, private: private, env: env, db: db, opts: opts, tools: agent.NewRegistry()}
 	p.followUps = make(map[int64]*followUpWaiter)
 	p.followUpTimeout = 30 * time.Second
 	p.registerBuiltinTools()
@@ -155,7 +161,7 @@ func NewPersona(groupID int64, env plugin.Env, db *gorm.DB, opts Options) *Perso
 		_ = p.tools.Register(tool)
 	}
 
-	if db != nil && db.Migrator().HasTable(&agent.ToolPreference{}) {
+	if private == nil && db != nil && db.Migrator().HasTable(&agent.ToolPreference{}) {
 		var preferences []agent.ToolPreference
 		if err := db.Where("group_id = ?", groupID).Find(&preferences).Error; err != nil {
 			panic(fmt.Errorf("load tool preferences: %w", err))
@@ -173,6 +179,9 @@ func (p *Persona) ToolNames() []string { return p.tools.Names() }
 
 // UpdateContext 记录消息；明确触发直接运行，存留窗口内先判断是否值得续聊。
 func (p *Persona) UpdateContext(ctx *zero.Ctx) error {
+	if p.private != nil {
+		return p.updatePrivateContext(ctx)
+	}
 	msg := newMessage(ctx)
 	if msg.IsEmpty() {
 		return nil
@@ -243,10 +252,10 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	defer cancel()
 	runCtx := &agent.RunContext{Context: executionCtx, GroupID: p.groupID, UserID: msg.User.UserId, UserName: msg.User.Nickname, Values: map[string]any{"zero_ctx": ctx, "persona": p, "self_user_id": ctx.Event.SelfID}}
 	runCtx.ReportDeliveryFailure(deliveryErr)
-	if scheduledInstruction == "" && deliveryErr == nil && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
+	if p.private == nil && scheduledInstruction == "" && deliveryErr == nil && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
 		runCtx.Values[continuationTurnKey] = true
 	}
-	if (p.opts.ConversationMemory || p.opts.MemoryMaintainer.conversationMode()) && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
+	if p.private == nil && (p.opts.ConversationMemory || p.opts.MemoryMaintainer.conversationMode()) && scheduledInstruction == "" && msg.User.UserId > 0 && msg.User.UserId != ctx.Event.SelfID {
 		finish := p.opts.MemoryMaintainer.beginConversation(p.groupID, msg.User.UserId)
 		defer finish()
 		runCtx.Values[conversationTurnKey] = &conversationTurn{}
@@ -254,7 +263,11 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 		defer p.finishConversation(runCtx)
 	}
 	done := make(chan struct{})
-	go p.reportSlowDecision(ctx, runCtx, done)
+	progressDone := make(chan struct{})
+	go func() {
+		defer close(progressDone)
+		p.reportSlowDecision(ctx, runCtx, done)
+	}()
 
 	triggerContent := msg.Content
 	if scheduledInstruction != "" {
@@ -262,12 +275,15 @@ func (p *Persona) runWithDeliveryFailure(ctx *zero.Ctx, msg GroupMessage, schedu
 	}
 	answer, runErr := runner.Run(runCtx, prompt, triggerContent, imageURL, p.defaultAgentTools...)
 	close(done)
+	if p.private != nil {
+		<-progressDone
+	}
 	if runErr == nil && runCtx.Trace().Finalized && strings.TrimSpace(answer) != "" {
 		payload, _ := json.Marshal(map[string]string{"text": answer})
 		_, runErr = p.handleSendMessage(runCtx, payload)
 	}
 	if runner.RequireAction && !runCtx.ActionPerformed() {
-		logrus.Warnf("[Agent][group=%d user=%d][未发送] 本轮没有成功执行群聊动作，宿主不会直发模型文本；error=%v", p.groupID, msg.User.UserId, runErr)
+		logrus.Warnf("[Agent][group=%d user=%d][未发送] 本轮没有成功完成会话交付；error=%v", p.groupID, msg.User.UserId, runErr)
 		if runErr == nil {
 			runErr = agent.ErrGroupActionRequired
 		}
@@ -322,11 +338,17 @@ func (p *Persona) reportSlowDecision(ctx *zero.Ctx, runCtx *agent.RunContext, do
 			}
 			tip := p.opts.ProgressTips[tipIndex%len(p.opts.ProgressTips)]
 			tipIndex++
-			segments := message.Message{message.At(runCtx.UserID), message.Text(" " + tip)}
-			id := ctx.SendGroupMessage(p.groupID, segments)
+			segments := message.Message{message.Text(tip)}
+			if p.private == nil {
+				segments = message.Message{message.At(runCtx.UserID), message.Text(" " + tip)}
+			}
+			id := p.sendMessage(ctx, segments)
 			if err := checkMessageID(id); err != nil {
 				runCtx.ReportDeliveryFailure(fmt.Errorf("进度提示未发送，请继续完成原任务: %w", err))
 				return
+			}
+			if p.private != nil {
+				continue
 			}
 			if err := p.recordBotMessage(ctx, segments, id); err != nil {
 				logrus.Warnf("[Agent][group=%d user=%d][进度消息记录失败] %v", p.groupID, runCtx.UserID, err)

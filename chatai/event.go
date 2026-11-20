@@ -2,6 +2,11 @@ package chatai
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/kohmebot/chatai/chatai/agent"
 	"github.com/kohmebot/chatai/chatai/model"
 	"github.com/kohmebot/chatai/chatai/persona"
@@ -11,13 +16,12 @@ import (
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/extension"
 	"github.com/wdvxdr1123/ZeroBot/message"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
-	engine.OnMessage(c.env.Groups().Rule()).Handle(func(ctx *zero.Ctx) {
+	engine.OnMessage(c.env.Groups().Rule(), func(ctx *zero.Ctx) bool {
+		return !zero.OnlyPrivate(ctx)
+	}).Handle(func(ctx *zero.Ctx) {
 		group := ctx.Event.GroupID
 		p := c.personaMap[group]
 		if p == nil {
@@ -47,6 +51,29 @@ func (c *ChatPlugin) SetOnMessage(engine plugin.Engine) {
 		if err != nil {
 			c.env.Error(ctx, err)
 			return
+		}
+	})
+}
+
+func (c *ChatPlugin) setOnPrivateMessage(engine plugin.Engine, opts persona.Options) {
+	var mu sync.Mutex
+	sessions := make(map[persona.PrivateSession]*persona.Persona)
+	allowed := func(ctx *zero.Ctx) bool {
+		return c.conf.PrivateChat.allows(ctx.Event.SelfID, ctx.Event.UserID)
+	}
+	// 默认优先级的命令先处理，拦截的命令不会再触发私聊 Agent。
+	engine.OnMessage(zero.OnlyPrivate, allowed).SecondPriority().Handle(func(ctx *zero.Ctx) {
+		session := persona.PrivateSession{BotID: ctx.Event.SelfID, UserID: ctx.Event.UserID}
+		mu.Lock()
+		p := sessions[session]
+		if p == nil {
+			p = persona.NewPrivatePersona(session, c.env, c.db, opts)
+			sessions[session] = p
+		}
+		mu.Unlock()
+		if err := p.UpdateContext(ctx); err != nil {
+			logrus.Errorf("[ChatAI][私聊][bot=%d user=%d] %v", session.BotID, session.UserID, err)
+			ctx.SendPrivateMessage(session.UserID, message.Message{message.Text("这次处理失败了，请稍后再试。")})
 		}
 	})
 }
@@ -181,12 +208,19 @@ func (c *ChatPlugin) SetOnUsage(engine plugin.Engine) {
 }
 
 func (c *ChatPlugin) sendHostMessage(ctx *zero.Ctx, segments message.Message) error {
-	if p := c.personaMap[ctx.Event.GroupID]; p != nil {
+	isPrivate := zero.OnlyPrivate(ctx)
+	if p := c.personaMap[ctx.Event.GroupID]; !isPrivate && p != nil {
 		return p.SendHostMessage(ctx, segments)
 	}
-	// Private administrative replies have no group Agent to resume.
+	// Without a group Agent, retry the same administrative reply directly.
 	for attempt := 1; attempt <= agent.MaxDeliveryAttempts; attempt++ {
-		if ctx.Send(segments).ID() != 0 {
+		var messageID int64
+		if isPrivate {
+			messageID = ctx.SendPrivateMessage(ctx.Event.UserID, segments)
+		} else {
+			messageID = ctx.Send(segments).ID()
+		}
+		if messageID != 0 {
 			return nil
 		}
 		logrus.Warnf("[发送失败] message_id=0 attempt=%d/%d", attempt, agent.MaxDeliveryAttempts)

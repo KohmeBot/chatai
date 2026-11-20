@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"strings"
 	"time"
 
 	"github.com/kohmebot/chatai/chatai/agent"
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 )
@@ -44,12 +44,22 @@ func zeroContext(rc *agent.RunContext) (*zero.Ctx, error) {
 	return ctx, nil
 }
 
-// SendHostMessage checks delivery for host-generated group messages as well.
+func (p *Persona) sendMessage(ctx *zero.Ctx, segments message.Message) int64 {
+	if p.private == nil {
+		return ctx.SendGroupMessage(p.groupID, segments)
+	}
+	if ctx.Event == nil || ctx.Event.SelfID != p.private.BotID || ctx.Event.UserID != p.private.UserID || !zero.OnlyPrivate(ctx) {
+		return 0
+	}
+	return ctx.SendPrivateMessage(p.private.UserID, segments)
+}
+
+// SendHostMessage checks delivery for host-generated messages as well.
 // A failed send enters the Agent with the original content and failure count.
 func (p *Persona) SendHostMessage(ctx *zero.Ctx, segments message.Message) error {
-	id := ctx.SendGroupMessage(p.groupID, segments)
+	id := p.sendMessage(ctx, segments)
 	if err := checkMessageID(id); err != nil {
-		instruction := "向当前群发送以下宿主生成的消息，保持事实和数字不变。此前发送失败，请修正格式后重试：" + encodeSegments(segments)
+		instruction := "向当前会话发送以下宿主生成的消息，保持事实和数字不变。此前发送失败，请修正格式后重试：" + encodeSegments(segments)
 		return p.runWithDeliveryFailure(ctx, GroupMessage{User: User{UserId: ctx.Event.UserID}}, instruction, fmt.Errorf("宿主消息发送失败: %w", err))
 	}
 	return p.recordBotMessage(ctx, segments, id)
@@ -68,6 +78,13 @@ func checkMessageID(id int64) error {
 	}
 	logrus.Warn("[Agent][发送失败] message_id=0")
 	return agent.ErrMessageDeliveryFailed
+}
+
+func (p *Persona) validateChatText(text string) error {
+	if p.private != nil {
+		return nil
+	}
+	return validateMessageText(text)
 }
 
 // Reject ambiguous escapes before delivery instead of corrupting paths or code.

@@ -63,6 +63,10 @@ func (r ChatMessageRecord) message() GroupMessage {
 }
 
 func (p *Persona) saveMessage(msg GroupMessage) error {
+	if p.private != nil {
+		_, err := p.savePrivateMessage(msg)
+		return err
+	}
 	record := messageRecord(p.groupID, msg)
 	return p.db.Create(&record).Error
 }

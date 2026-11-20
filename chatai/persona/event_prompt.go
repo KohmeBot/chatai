@@ -12,16 +12,17 @@ import (
 // model. User-controlled text remains data inside this envelope instead of
 // being mixed with natural-language harness instructions.
 type agentEventEnvelope struct {
-	GroupMemory   *GroupProfile      `json:"group_memory,omitempty"`
-	Kind          string             `json:"kind"`
-	CurrentTime   string             `json:"current_time"`
-	GroupID       int64              `json:"group_id"`
-	SelfUserID    int64              `json:"self_user_id"`
-	Actor         eventActor         `json:"actor"`
-	Message       *timeMessageResult `json:"message,omitempty"`
-	ScheduledTask *scheduledTask     `json:"scheduled_task,omitempty"`
-	Conversation  *conversationNote  `json:"conversation_memory,omitempty"`
-	UserMemory    *UserProfile       `json:"user_memory,omitempty"`
+	GroupMemory    *GroupProfile       `json:"group_memory,omitempty"`
+	Kind           string              `json:"kind"`
+	CurrentTime    string              `json:"current_time"`
+	GroupID        int64               `json:"group_id,omitempty"`
+	SelfUserID     int64               `json:"self_user_id"`
+	Actor          eventActor          `json:"actor"`
+	Message        *timeMessageResult  `json:"message,omitempty"`
+	RecentMessages []timeMessageResult `json:"recent_messages,omitempty"`
+	ScheduledTask  *scheduledTask      `json:"scheduled_task,omitempty"`
+	Conversation   *conversationNote   `json:"conversation_memory,omitempty"`
+	UserMemory     *UserProfile        `json:"user_memory,omitempty"`
 }
 
 type eventActor struct {
@@ -45,7 +46,20 @@ func (p *Persona) eventPrompt(msg GroupMessage, scheduled string, selfUserID int
 			IsSelf: selfUserID > 0 && msg.User.UserId == selfUserID,
 		},
 	}
-	if p.db != nil {
+	if p.private != nil {
+		envelope.Kind = "private_message"
+		messages, _, err := p.recentPrivateMessages(msg.SourceID, p.contextLimit(8), 0)
+		if err != nil {
+			logrus.Warnf("[Agent] 读取私聊上下文失败: %v", err)
+		}
+		envelope.RecentMessages = timeMessageResults(messages, selfUserID)
+		for i := range envelope.RecentMessages {
+			item := &envelope.RecentMessages[i]
+			item.Content = runeTail(item.Content, 1000)
+			item.QuotedContent = runeTail(item.QuotedContent, 1000)
+		}
+	}
+	if p.private == nil && p.db != nil {
 		profile, err := readGroupMemory(p.db, p.groupID)
 		if err != nil {
 			logrus.Warnf("[Memory] 读取群记忆失败: %v", err)

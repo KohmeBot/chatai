@@ -496,7 +496,7 @@ func maxFloat(a, b float64) float64 {
 
 func searchToolDefinition() model.Tool {
 	return Function("search_tools", "按当前任务搜索并加载少量相关工具或已验证 Skill，只搜索工具能力，当前未暴露不代表不存在", map[string]any{
-		"query": map[string]any{"type": "string", "description": "完整任务目标或所需能力，例如：总结最近群聊、联网搜索不确定的信息、发送回复"},
+		"query": map[string]any{"type": "string", "description": "完整任务目标或所需能力，例如：总结当前对话、联网搜索不确定的信息、发送回复"},
 		"limit": map[string]any{"type": "integer", "description": "最多加载几个工具，默认5，最大8"},
 	}, "query")
 }
@@ -533,7 +533,7 @@ type Runner struct {
 	StopAfterGroupAction bool
 }
 
-var ErrGroupActionRequired = errors.New("agent finished without a group action")
+var ErrGroupActionRequired = errors.New("agent finished without a visible chat action")
 var ErrToolBudgetExceeded = errors.New("agent exceeded the tool-call budget")
 
 // ErrMessageDeliveryFailed means OneBot returned message_id=0. Only failed
@@ -687,13 +687,13 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		if len(response.ToolCalls) == 0 {
 			if r.RequireAction && !ctx.ActionPerformed() {
 				if i+1 == steps {
-					logrus.Warnf("[Agent][run=%d][未完成] 已用完 %d 轮，但模型没有完成群聊动作", runID, steps)
+					logrus.Warnf("[Agent][run=%d][未完成] 已用完 %d 轮，但模型没有完成会话交付", runID, steps)
 					history = append(history, model.Message{Role: "assistant", Content: response.Answer})
 					return finalize(ErrGroupActionRequired)
 				}
 				history = append(history, model.Message{Role: "assistant", Content: response.Answer})
-				question = "你还没有完成群聊动作。不得把普通 assistant 文本作为最终回复。若尚未加载发送能力，先调用 search_tools 搜索“发送最终回复”；随后必须成功调用一个 group_action=true 的工具，把只面向群友的最终回复放进工具参数，不能静默结束。"
-				logrus.Warnf("[Agent][run=%d][继续决策] step=%d/%d 原因=模型未调用群聊动作 corrective_prompt=%s", runID, i+1, steps, question)
+				question = "你还没有完成会话交付。若尚未加载发送能力，先调用 search_tools 搜索“发送最终回复”；随后必须成功调用一个 group_action=true 的工具，把面向当前会话的最终回复放进工具参数。普通 assistant 文本不会自动发送。"
+				logrus.Warnf("[Agent][run=%d][继续决策] step=%d/%d 原因=模型尚未完成会话交付 corrective_prompt=%s", runID, i+1, steps, question)
 				continue
 			}
 			logrus.Infof("[Agent][run=%d][完成] step=%d/%d action_done=%t final_answer=%s", runID, i+1, steps, ctx.ActionPerformed(), logValue(response.Answer))
@@ -864,10 +864,10 @@ func (r *Runner) Run(ctx *RunContext, prompt, content, imageURL string, tools ..
 		}
 		if finalActionStep {
 			if !ctx.ActionPerformed() {
-				logrus.Warnf("[Agent][run=%d][未完成] 最后一步未执行群聊动作 answer=%s", runID, logValue(response.Answer))
+				logrus.Warnf("[Agent][run=%d][未完成] 最后一步未完成会话交付 answer=%s", runID, logValue(response.Answer))
 				return finalize(ErrGroupActionRequired)
 			}
-			logrus.Warnf("[Agent][run=%d][未完成] 最后一步已执行群聊动作，但模型尚未主动完成决策", runID)
+			logrus.Warnf("[Agent][run=%d][未完成] 最后一步已完成会话交付，但模型尚未主动完成决策", runID)
 		}
 	}
 	logrus.Warnf("[Agent][run=%d][未完成] exceeded maximum of %d steps action_done=%t", runID, steps, ctx.ActionPerformed())
@@ -938,7 +938,7 @@ func runContextError(ctx *RunContext) error {
 }
 
 func finalActionPrompt(question string) string {
-	const instruction = "决策步数只剩最后一步。禁止继续搜索、浏览、读取上下文或调用其他非发送工具；必须基于已经获得的信息立即形成最终判断，并成功调用当前提供的一个群聊动作工具完成回复。把只面向群友的最终回复放进工具参数，不要在其中夹带分析过程、决策说明或角色扮演提示。信息不足时应明确说明不确定性，但仍然必须回复。"
+	const instruction = "决策步数只剩最后一步。禁止继续搜索、浏览、读取上下文或调用其他非发送工具；必须基于已经获得的信息立即形成最终判断，并成功调用当前提供的一个会话动作工具完成回复。把面向当前会话的最终回复放进工具参数，不要在其中夹带分析过程、决策说明或角色扮演提示。信息不足时应明确说明不确定性，但仍然必须回复。"
 	if strings.TrimSpace(question) == "" {
 		return instruction
 	}

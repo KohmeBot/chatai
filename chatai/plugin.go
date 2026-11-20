@@ -101,6 +101,47 @@ func (c *ChatPlugin) routeModel(route ModelRouteConfig, system string, responseJ
 	return namedModel{LargeModel: factory.NewLargeModel(model.Config{Name: name, ApiKey: key, System: system, MaxTokens: maxTokens, Thinking: thinking, ResponseJson: responseJSON, DB: c.db}), name: name}
 }
 
+func (c *ChatPlugin) conversationOptions(rules string, searcher search.Searcher) persona.Options {
+	settings := c.conf.Agent
+	system := string(c.conf.System) + "\n" + rules
+	opts := persona.Options{
+		AgentModel:        c.routeModel(c.conf.Routes.Agent, system, false),
+		MaxSteps:          settings.MaxSteps,
+		MaxToolCalls:      settings.MaxToolCalls,
+		RunTimeout:        time.Duration(settings.RunTimeoutSeconds) * time.Second,
+		ContextLimit:      settings.ContextLimit,
+		ProgressAfter:     time.Duration(settings.ProgressAfterSeconds) * time.Second,
+		ProgressTips:      settings.ProgressTips,
+		WebSearchPrefer:   time.Duration(settings.WebSearchPreferSeconds) * time.Second,
+		WebBrowserEnable:  settings.WebBrowserEnable,
+		WebBrowserAddress: settings.WebBrowserAddress,
+		SearchAPI:         searcher,
+	}
+	if c.conf.Routes.Vision.Configured() {
+		// 带图事件使用和文本 Agent 一致的会话规则与工具说明。
+		opts.VisionModel = c.routeModel(c.conf.Routes.Vision, system, false)
+	}
+	return opts
+}
+
+func (c *ChatPlugin) newSearcher() search.Searcher {
+	if !c.conf.Agent.UseSearchAPI {
+		return nil
+	}
+	for _, provider := range c.conf.Agent.SearchProviders {
+		if provider.Name != c.conf.Agent.SearchProviderName {
+			continue
+		}
+		searcher, err := factory2.NewSearcher(provider.Name, string(provider.ApiKey))
+		if err != nil {
+			logrus.Errorf("Failed to create searcher: %v", err)
+			return nil
+		}
+		return searcher
+	}
+	return nil
+}
+
 func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.env = env
 	if err := env.GetConf(&c.conf); err != nil {
@@ -125,6 +166,10 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 		&UsageRecord{}, &favor.FavorRecord{}, &persona.UserImpression{}, &persona.GroupImpression{},
 		&persona.ChatMessageRecord{}, &model.TokenUsage{},
 		&persona.GroupMemory{}, &persona.UserMemory{}, &persona.MemoryCursor{}, &persona.MemoryAudit{}, &persona.PendingMemoryMessage{},
+	}
+	privateChatEnabled := c.conf.PrivateChat.Enable && len(c.conf.PrivateChat.AllowedUsers) > 0
+	if privateChatEnabled {
+		tables = append(tables, &persona.PrivateChatMessageRecord{})
 	}
 	tables = append(tables, skill.Models()...)
 	tables = append(tables, &agent.ToolPreference{})
@@ -268,6 +313,7 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 			return err
 		}
 	}
+	searcher := c.newSearcher()
 	for group := range env.Groups().RangeGroup() {
 		var workDir string
 		if workRoot != "" {
@@ -276,53 +322,25 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 				return fmt.Errorf("create work directory: %w", err)
 			}
 		}
-		var vision model.LargeModel
-		if c.conf.Routes.Vision.Configured() {
-			// 带图事件由视觉模型直接完成整轮 Agent 决策，因此它需要与文本
-			// Agent 相同的人设、上下文规则和工具调用说明。
-			vision = c.routeModel(c.conf.Routes.Vision, string(c.conf.System)+"\n"+persona.AgentRules(), false)
-		}
-		var searcher search.Searcher
-		if c.conf.Agent.UseSearchAPI {
-			for _, p := range c.conf.Agent.SearchProviders {
-				if p.Name == c.conf.Agent.SearchProviderName {
-					searcher, err = factory2.NewSearcher(p.Name, string(p.ApiKey))
-					if err != nil {
-						logrus.Errorf("Failed to create searcher: %v", err)
-						searcher = nil
-					}
-					break
-				}
-			}
-
-		}
-
-		c.personaMap[group] = persona.NewPersona(group, env, db, persona.Options{
-			Scheduler:     c.scheduler,
-			WorkDirectory: workDir, WorkCommandEnable: c.conf.Agent.Work.CommandEnable,
-			WorkRetentionDays:    c.conf.Agent.Work.RetentionDays,
-			ContinuationWindow:   time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second,
-			ContinuationModel:    c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true),
-			Observer:             observer,
-			ConversationMemory:   c.conf.Agent.ConversationMemory.Enable,
-			ConversationWindow:   time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second,
-			ConversationMaxChars: c.conf.Agent.ConversationMemory.MaxChars,
-			MemoryModel:          memoryModel,
-			MemoryMaintainer:     c.memory,
-			AgentModel:           c.routeModel(c.conf.Routes.Agent, string(c.conf.System)+"\n"+persona.AgentRules(), false),
-			VisionModel:          vision, MaxSteps: c.conf.Agent.MaxSteps,
-			MaxToolCalls:     c.conf.Agent.MaxToolCalls,
-			RunTimeout:       time.Duration(c.conf.Agent.RunTimeoutSeconds) * time.Second,
-			ContextLimit:     c.conf.Agent.ContextLimit,
-			WebBrowserEnable: c.conf.Agent.WebBrowserEnable, WebBrowserAddress: c.conf.Agent.WebBrowserAddress,
-			ProgressAfter: time.Duration(c.conf.Agent.ProgressAfterSeconds) * time.Second,
-			ProgressTips:  c.conf.Agent.ProgressTips, WebSearchPrefer: time.Duration(c.conf.Agent.WebSearchPreferSeconds) * time.Second,
-			RepeatEnable: c.conf.Repeat.Enable,
-			RepeatCount:  c.conf.Repeat.TriggerCount, ImpressionUpdateEnable: c.conf.Impression.Enable,
-			ExtraTools: append(append([]agent.Tool{}, c.extraTools...), mcpTools...),
-			Skills:     skillService,
-			SearchAPI:  searcher,
-		})
+		opts := c.conversationOptions(persona.AgentRules(), searcher)
+		opts.Scheduler = c.scheduler
+		opts.WorkDirectory = workDir
+		opts.WorkCommandEnable = c.conf.Agent.Work.CommandEnable
+		opts.WorkRetentionDays = c.conf.Agent.Work.RetentionDays
+		opts.ContinuationWindow = time.Duration(c.conf.Agent.ContinuationSeconds) * time.Second
+		opts.ContinuationModel = c.routeModel(c.conf.Routes.Agent, persona.ContinuationSystemPrompt(), true)
+		opts.Observer = observer
+		opts.ConversationMemory = c.conf.Agent.ConversationMemory.Enable
+		opts.ConversationWindow = time.Duration(c.conf.Agent.ConversationMemory.WindowSeconds) * time.Second
+		opts.ConversationMaxChars = c.conf.Agent.ConversationMemory.MaxChars
+		opts.MemoryModel = memoryModel
+		opts.MemoryMaintainer = c.memory
+		opts.RepeatEnable = c.conf.Repeat.Enable
+		opts.RepeatCount = c.conf.Repeat.TriggerCount
+		opts.ImpressionUpdateEnable = c.conf.Impression.Enable
+		opts.ExtraTools = append(append([]agent.Tool{}, c.extraTools...), mcpTools...)
+		opts.Skills = skillService
+		c.personaMap[group] = persona.NewPersona(group, env, db, opts)
 	}
 	c.joinGroupModel = c.routeModel(c.conf.Routes.Join, string(c.conf.System), false)
 	c.otherModel = c.routeModel(c.conf.Routes.Agent, string(c.conf.System), false)
@@ -332,6 +350,9 @@ func (c *ChatPlugin) OnInit(engine plugin.Engine, env plugin.Env) error {
 	c.SetOnMessage(engine)
 	c.SetOnJoinGroup(engine)
 	c.SetOnUsage(engine)
+	if privateChatEnabled {
+		c.setOnPrivateMessage(engine, c.conversationOptions(persona.PrivateAgentRules(), searcher))
+	}
 	if workRoot != "" {
 		c.startWorkCleanup(workRoot)
 	}
@@ -380,4 +401,4 @@ func (c *ChatPlugin) OnBoot() {
 }
 func (c *ChatPlugin) OnHelp(ctx *zero.Ctx) {}
 func (c *ChatPlugin) Name() string         { return "chatai" }
-func (c *ChatPlugin) Version() string      { return "v1.5.17" }
+func (c *ChatPlugin) Version() string      { return "v1.6.0" }
